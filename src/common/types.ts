@@ -14,6 +14,13 @@ export interface BaseSearchParams {
 	limit?: number;
 	include_domains?: string[];
 	exclude_domains?: string[];
+	output_schema?: Record<string, unknown>;
+	search_type?: string;
+	category?: string;
+	user_location?: string;
+	system_prompt?: string;
+	additional_queries?: string[];
+	contents?: Record<string, unknown>;
 }
 
 export interface ProcessingResult {
@@ -23,6 +30,7 @@ export interface ProcessingResult {
 		content: string;
 	}>;
 	metadata: {
+		[key: string]: any;
 		title?: string;
 		author?: string;
 		date?: string;
@@ -46,6 +54,7 @@ export interface ProcessingProvider {
 	process_content(
 		url: string | string[],
 		extract_depth?: 'basic' | 'advanced',
+		options?: Record<string, unknown>,
 	): Promise<ProcessingResult>;
 	name: string;
 	description: string;
@@ -57,6 +66,8 @@ export enum ErrorType {
 	RATE_LIMIT = 'RATE_LIMIT',
 	INVALID_INPUT = 'INVALID_INPUT',
 	PROVIDER_ERROR = 'PROVIDER_ERROR',
+	ENTITLEMENT_REQUIRED = 'ENTITLEMENT_REQUIRED',
+	ENDPOINT_NOT_FOUND = 'ENDPOINT_NOT_FOUND',
 }
 
 export class ProviderError extends Error {

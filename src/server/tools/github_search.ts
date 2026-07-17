@@ -6,6 +6,11 @@ import { handle_large_result } from '../../common/results.js';
 import { is_api_key_valid } from '../../common/validation.js';
 import { config } from '../../config/env.js';
 import { GitHubSearchProvider } from '../../providers/search/github/index.js';
+import {
+	mark_provider_error,
+	mark_provider_success,
+} from '../provider_health.js';
+import { tool_descriptions } from './descriptions.js';
 
 let provider: GitHubSearchProvider | undefined;
 
@@ -27,8 +32,7 @@ export const register_github_search = (
 	server.tool(
 		{
 			name: 'github_search',
-			description:
-				'Search GitHub for code, repositories, or users. Use when you need to find code examples, open source projects, or developers. Supports advanced syntax: filename:, path:, repo:, user:, language:, in:file.',
+			description: tool_descriptions.github_search,
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,
@@ -85,6 +89,7 @@ export const register_github_search = (
 					results,
 					'github_search',
 				);
+				mark_provider_success('search', 'github');
 				return {
 					content: [
 						{
@@ -94,6 +99,7 @@ export const register_github_search = (
 					],
 				};
 			} catch (error) {
+				mark_provider_error('search', 'github', error);
 				const error_response = create_error_response(error as Error);
 				return {
 					content: [

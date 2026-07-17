@@ -39,8 +39,20 @@ export const create_error_response = (
 	error: Error,
 ): { error: string } => {
 	if (error instanceof ProviderError) {
+		const detail_suffix =
+			error.details &&
+			typeof error.details === 'object' &&
+			typeof error.details.url === 'string'
+				? ` (endpoint: ${error.details.url})`
+				: '';
+		const guidance =
+			error.type === ErrorType.ENTITLEMENT_REQUIRED
+				? ' Verify API key plan/entitlement for this endpoint.'
+				: error.type === ErrorType.ENDPOINT_NOT_FOUND
+					? ' Verify endpoint configuration or set FIRECRAWL_AGENT_URL.'
+					: '';
 		return {
-			error: `${error.provider} error: ${error.message}`,
+			error: `${error.provider} error [${error.type}]: ${error.message}${detail_suffix}${guidance}`,
 		};
 	}
 	return {

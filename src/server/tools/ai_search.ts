@@ -10,16 +10,29 @@ import {
 } from '../../common/types.js';
 import { is_api_key_valid } from '../../common/validation.js';
 import { config } from '../../config/env.js';
+import {
+	mark_provider_error,
+	mark_provider_success,
+} from '../provider_health.js';
+import { tool_descriptions } from './descriptions.js';
 
 // Concrete provider imports
 import { ExaAnswerProvider } from '../../providers/ai_response/exa_answer/index.js';
+import { ExaDeepResearchProvider } from '../../providers/ai_response/exa_deep_research/index.js';
 import { KagiFastGPTProvider } from '../../providers/ai_response/kagi_fastgpt/index.js';
 import { LinkupProvider } from '../../providers/ai_response/linkup/index.js';
+import { BraveAnswersProvider } from '../../providers/ai_response/brave_answers/index.js';
+import { TavilyResearchProvider } from '../../providers/ai_response/tavily_research/index.js';
+import { YouResearchProvider } from '../../providers/ai_response/you_research/index.js';
 
 export type AISearchProviderName =
 	| 'kagi_fastgpt'
 	| 'exa_answer'
-	| 'linkup';
+	| 'exa_deep_research'
+	| 'linkup'
+	| 'brave_answers'
+	| 'tavily_research'
+	| 'you_research';
 
 const providers = new Map<string, SearchProvider>();
 
@@ -38,8 +51,36 @@ export const initialize_ai_search = (): boolean => {
 		)
 	)
 		providers.set('exa_answer', new ExaAnswerProvider());
+	if (
+		is_api_key_valid(
+			config.ai_response.exa_deep_research.api_key,
+			'exa_deep_research',
+		)
+	)
+		providers.set('exa_deep_research', new ExaDeepResearchProvider());
 	if (is_api_key_valid(config.ai_response.linkup.api_key, 'linkup'))
 		providers.set('linkup', new LinkupProvider());
+	if (
+		is_api_key_valid(
+			config.ai_response.brave_answers.api_key,
+			'brave_answers',
+		)
+	)
+		providers.set('brave_answers', new BraveAnswersProvider());
+	if (
+		is_api_key_valid(
+			config.ai_response.tavily_research.api_key,
+			'tavily_research',
+		)
+	)
+		providers.set('tavily_research', new TavilyResearchProvider());
+	if (
+		is_api_key_valid(
+			config.ai_response.you_research.api_key,
+			'you_research',
+		)
+	)
+		providers.set('you_research', new YouResearchProvider());
 
 	return providers.size > 0;
 };
@@ -59,8 +100,7 @@ export const register_ai_search = (
 	server.tool(
 		{
 			name: 'ai_search',
-			description:
-				'Get AI-powered answers with citations and reasoning. Use when you need synthesized answers rather than raw search results. Providers: kagi_fastgpt (fast ~900ms answers), exa_answer (semantic AI), linkup (deep agentic search with sources).',
+			description: tool_descriptions.ai_search,
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,
@@ -82,9 +122,49 @@ export const register_ai_search = (
 						v.description('Maximum number of results (default: 10)'),
 					),
 				),
+				you_research_effort: v.optional(
+					v.pipe(
+						v.picklist(['lite', 'standard', 'deep', 'exhaustive']),
+						v.description(
+							'You.com research effort level. Only used when provider is you_research.',
+						),
+					),
+				),
+				output_schema: v.optional(
+					v.pipe(
+						v.record(v.string(), v.any()),
+						v.description(
+							'JSON schema for structured output. Only used when provider is exa_deep_research.',
+						),
+					),
+				),
+				exa_deep_search_type: v.optional(
+					v.pipe(
+						v.picklist(['deep', 'deep-reasoning']),
+						v.description(
+							'Exa deep search mode. Only used when provider is exa_deep_research.',
+						),
+					),
+				),
+				system_prompt: v.optional(
+					v.pipe(
+						v.string(),
+						v.description(
+							'Exa system prompt. Only used when provider is exa_deep_research.',
+						),
+					),
+				),
 			}),
 		},
-		async ({ query, provider, limit }) => {
+		async ({
+			query,
+			provider,
+			limit,
+			you_research_effort,
+			output_schema,
+			exa_deep_search_type,
+			system_prompt,
+		}) => {
 			try {
 				const selected = providers.get(provider);
 				if (!selected) {
@@ -98,11 +178,16 @@ export const register_ai_search = (
 				const results = await selected.search({
 					query,
 					limit,
-				});
+					you_research_effort,
+					output_schema,
+					search_type: exa_deep_search_type,
+					system_prompt,
+				} as any);
 				const safe_results = handle_large_result(
 					results,
 					'ai_search',
 				);
+				mark_provider_success('ai_response', provider);
 				return {
 					content: [
 						{
@@ -112,6 +197,7 @@ export const register_ai_search = (
 					],
 				};
 			} catch (error) {
+				mark_provider_error('ai_response', provider, error);
 				const error_response = create_error_response(error as Error);
 				return {
 					content: [

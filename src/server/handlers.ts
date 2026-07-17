@@ -1,6 +1,10 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import { available_providers } from './tools/index.js';
+import {
+	get_provider_health_snapshot,
+	get_provider_health_summary,
+} from './provider_health.js';
 
 export const setup_handlers = (server: McpServer<GenericSchema>) => {
 	// Provider Status Resource
@@ -11,6 +15,7 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 			uri: 'omnisearch://providers/status',
 		},
 		async () => {
+			const health_summary = get_provider_health_summary();
 			return {
 				contents: [
 					{
@@ -18,7 +23,10 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 						mimeType: 'application/json',
 						text: JSON.stringify(
 							{
-								status: 'operational',
+								status:
+									health_summary.degraded > 0
+										? 'degraded'
+										: 'operational',
 								providers: {
 									search: Array.from(available_providers.search),
 									ai_response: Array.from(
@@ -28,6 +36,8 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 										available_providers.processing,
 									),
 								},
+								provider_health: get_provider_health_snapshot(),
+								health_summary,
 								available_count: {
 									search: available_providers.search.size,
 									ai_response: available_providers.ai_response.size,

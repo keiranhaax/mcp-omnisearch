@@ -20,13 +20,33 @@ import {
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
+type FirecrawlScrapeFormat = string | { type: string; [key: string]: unknown };
+
+export interface FirecrawlScrapeOptions {
+	formats?: FirecrawlScrapeFormat[];
+	question?: string;
+	highlights_query?: string;
+	lockdown?: boolean;
+	maxAge?: number;
+	minAge?: number;
+	storeInCache?: boolean;
+	zeroDataRetention?: boolean;
+	redactPII?: boolean;
+	onlyMainContent?: boolean;
+	onlyCleanContent?: boolean;
+	removeBase64Images?: boolean;
+}
+
 interface FirecrawlScrapeResponse {
 	success: boolean;
 	data?: {
 		markdown?: string;
+		summary?: string;
 		html?: string;
 		rawHtml?: string;
 		screenshot?: string;
+		answer?: string;
+		highlights?: string;
 		links?: string[];
 		metadata?: {
 			title?: string;
@@ -43,6 +63,88 @@ interface FirecrawlScrapeResponse {
 	error?: string;
 }
 
+const normalize_options = (
+	options?: Record<string, unknown>,
+): FirecrawlScrapeOptions => (options || {}) as FirecrawlScrapeOptions;
+
+const assert_valid_options = (
+	options: FirecrawlScrapeOptions,
+	provider_name: string,
+) => {
+	if (options.question && options.highlights_query) {
+		throw new ProviderError(
+			ErrorType.INVALID_INPUT,
+			'question and highlights_query cannot both be set',
+			provider_name,
+		);
+	}
+	if (options.zeroDataRetention && options.storeInCache === true) {
+		throw new ProviderError(
+			ErrorType.INVALID_INPUT,
+			'storeInCache cannot be true when zeroDataRetention is enabled',
+			provider_name,
+		);
+	}
+	if (options.zeroDataRetention && options.onlyCleanContent) {
+		throw new ProviderError(
+			ErrorType.INVALID_INPUT,
+			'onlyCleanContent is not supported with zeroDataRetention',
+			provider_name,
+		);
+	}
+};
+
+const build_scrape_body = (
+	url: string,
+	extract_depth: 'basic' | 'advanced',
+	options: FirecrawlScrapeOptions,
+): Record<string, unknown> => {
+	assert_valid_options(options, 'firecrawl_scrape');
+
+	const body: Record<string, unknown> = {
+		url,
+		formats: options.formats?.length ? options.formats : ['markdown'],
+		onlyMainContent: options.onlyMainContent ?? true,
+		waitFor: extract_depth === 'advanced' ? 5000 : 2000,
+	};
+
+	if (options.question) {
+		body.formats = [{ type: 'question', question: options.question }];
+	}
+	if (options.highlights_query) {
+		body.formats = [
+			{ type: 'highlights', query: options.highlights_query },
+		];
+	}
+
+	for (const key of [
+		'lockdown',
+		'maxAge',
+		'minAge',
+		'storeInCache',
+		'zeroDataRetention',
+		'redactPII',
+		'onlyCleanContent',
+		'removeBase64Images',
+	] as const) {
+		if (options[key] !== undefined) body[key] = options[key];
+	}
+
+	return body;
+};
+
+const extract_content = (data: FirecrawlScrapeResponse['data']) => {
+	if (!data) return '';
+	if (data.markdown) return data.markdown;
+	if (data.summary) return data.summary;
+	if (data.answer) return data.answer;
+	if (data.highlights) return data.highlights;
+	if (data.html) return data.html;
+	if (data.rawHtml) return data.rawHtml;
+	if (data.links?.length) return data.links.join('\n');
+	return '';
+};
+
 export class FirecrawlScrapeProvider implements ProcessingProvider {
 	name = 'firecrawl_scrape';
 	description =
@@ -51,8 +153,11 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 	async process_content(
 		url: string | string[],
 		extract_depth: 'basic' | 'advanced' = 'basic',
+		options?: Record<string, unknown>,
 	): Promise<ProcessingResult> {
 		const urls = validate_processing_urls(url, this.name);
+		const scrape_options = normalize_options(options);
+		assert_valid_options(scrape_options, this.name);
 
 		const scrape_request = async () => {
 			const api_key = validate_api_key(
@@ -61,7 +166,6 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 			);
 
 			try {
-				// Process each URL and collect results
 				const results: ProcessedUrlResult[] = await Promise.all(
 					urls.map(async (single_url) => {
 						try {
@@ -70,13 +174,11 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 									this.name,
 									config.processing.firecrawl_scrape.base_url,
 									api_key,
-									{
-										url: single_url,
-										formats: ['markdown'],
-										onlyMainContent: true,
-										waitFor:
-											extract_depth === 'advanced' ? 5000 : 2000,
-									},
+									build_scrape_body(
+										single_url,
+										extract_depth,
+										scrape_options,
+									),
 									config.processing.firecrawl_scrape.timeout,
 								);
 
@@ -86,7 +188,6 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 								'Error scraping URL',
 							);
 
-							// Check if we have data
 							if (!data.data) {
 								throw new ProviderError(
 									ErrorType.PROVIDER_ERROR,
@@ -95,12 +196,9 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 								);
 							}
 
-							// Check if content was successfully extracted
-							if (
-								!data.data.markdown &&
-								!data.data.html &&
-								!data.data.rawHtml
-							) {
+							const content = extract_content(data.data);
+
+							if (!content) {
 								throw new ProviderError(
 									ErrorType.PROVIDER_ERROR,
 									'No content extracted from URL',
@@ -108,21 +206,16 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 								);
 							}
 
-							// Prefer markdown, fallback to HTML, then rawHtml
-							const content =
-								data.data.markdown ||
-								data.data.html ||
-								data.data.rawHtml ||
-								'';
-
 							return {
 								url: single_url,
 								content,
-								metadata: data.data.metadata,
+								metadata: {
+									...data.data.metadata,
+									warning: data.data.warning,
+								},
 								success: true,
 							};
 						} catch (error) {
-							// Log the error but continue processing other URLs
 							console.error(`Error processing ${single_url}:`, error);
 							return {
 								url: single_url,
@@ -151,3 +244,7 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 		return retry_with_backoff(scrape_request);
 	}
 }
+
+export const __private__ = {
+	build_scrape_body,
+};

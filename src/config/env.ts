@@ -3,14 +3,20 @@
 // Search provider API keys
 export const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 export const BRAVE_API_KEY = process.env.BRAVE_API_KEY;
+export const BRAVE_AI_API_KEY = process.env.BRAVE_AI_API_KEY;
+export const BRAVE_ANSWERS_API_KEY =
+	process.env.BRAVE_ANSWERS_API_KEY;
 export const KAGI_API_KEY = process.env.KAGI_API_KEY;
 export const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 export const EXA_API_KEY = process.env.EXA_API_KEY;
 export const LINKUP_API_KEY = process.env.LINKUP_API_KEY;
+export const YOU_API_KEY = process.env.YOU_API_KEY;
+export const CONTEXT_DEV_API_KEY = process.env.CONTEXT_DEV_API_KEY;
 
 // Content processing API keys
 export const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 export const FIRECRAWL_BASE_URL = process.env.FIRECRAWL_BASE_URL;
+export const FIRECRAWL_AGENT_URL = process.env.FIRECRAWL_AGENT_URL;
 
 // Provider configuration
 export const config = {
@@ -40,6 +46,26 @@ export const config = {
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
 		},
+		you: {
+			api_key: YOU_API_KEY,
+			base_url: 'https://api.ydc-index.io',
+			timeout: 15000,
+		},
+		context_dev: {
+			api_key: CONTEXT_DEV_API_KEY,
+			base_url: 'https://api.context.dev/v1',
+			timeout: 60000,
+		},
+		brave_media: {
+			api_key: BRAVE_API_KEY,
+			base_url: 'https://api.search.brave.com/res/v1',
+			timeout: 15000,
+		},
+		brave_news: {
+			api_key: BRAVE_API_KEY,
+			base_url: 'https://api.search.brave.com/res/v1',
+			timeout: 15000,
+		},
 	},
 	ai_response: {
 		kagi_fastgpt: {
@@ -52,10 +78,31 @@ export const config = {
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
 		},
+		exa_deep_research: {
+			api_key: EXA_API_KEY,
+			base_url: 'https://api.exa.ai',
+			timeout: 70000, // Exa deep-reasoning can take up to ~60 seconds
+		},
 		linkup: {
 			api_key: LINKUP_API_KEY,
 			base_url: 'https://api.linkup.so/v1',
 			timeout: 30000, // 30 seconds
+		},
+		brave_answers: {
+			api_key: BRAVE_ANSWERS_API_KEY || BRAVE_API_KEY,
+			base_url:
+				'https://api.search.brave.com/res/v1/chat/completions',
+			timeout: 30000,
+		},
+		tavily_research: {
+			api_key: TAVILY_API_KEY,
+			base_url: 'https://api.tavily.com',
+			timeout: 120000, // 2 minutes for deep research
+		},
+		you_research: {
+			api_key: YOU_API_KEY,
+			base_url: 'https://api.ydc-index.io/v1/agents/research',
+			timeout: 120000,
 		},
 	},
 	processing: {
@@ -114,6 +161,26 @@ export const config = {
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
 		},
+		brave_llm_context: {
+			api_key: BRAVE_API_KEY,
+			base_url: 'https://api.search.brave.com/res/v1/llm/context',
+			timeout: 30000,
+		},
+		firecrawl_agent: {
+			api_key: FIRECRAWL_API_KEY,
+			override_url: FIRECRAWL_AGENT_URL,
+			base_url: FIRECRAWL_BASE_URL
+				? `${FIRECRAWL_BASE_URL}/v1/agent`
+				: 'https://api.firecrawl.dev/v1/agent',
+			timeout: 180000, // 3 minutes for agent tasks
+		},
+		firecrawl_search: {
+			api_key: FIRECRAWL_API_KEY,
+			base_url: FIRECRAWL_BASE_URL
+				? `${FIRECRAWL_BASE_URL}/v2/search`
+				: 'https://api.firecrawl.dev/v2/search',
+			timeout: 60000,
+		},
 	},
 	enhancement: {
 		kagi_enrichment: {
@@ -150,6 +217,12 @@ export const validate_config = () => {
 
 	if (!LINKUP_API_KEY) missing_keys.push('LINKUP_API_KEY');
 	else available_keys.push('LINKUP_API_KEY');
+
+	if (!YOU_API_KEY) missing_keys.push('YOU_API_KEY');
+	else available_keys.push('YOU_API_KEY');
+
+	if (!CONTEXT_DEV_API_KEY) missing_keys.push('CONTEXT_DEV_API_KEY');
+	else available_keys.push('CONTEXT_DEV_API_KEY');
 
 	// Log available keys
 	if (available_keys.length > 0) {
