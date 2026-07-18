@@ -7,7 +7,10 @@ import {
 	ProcessingResult,
 	ProviderError,
 } from '../../../common/types.js';
-import { validate_api_key } from '../../../common/validation.js';
+import {
+	validate_api_key,
+	validate_processing_urls,
+} from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
 interface ExaContentsRequest {
@@ -60,7 +63,7 @@ export class ExaContentsProvider implements ProcessingProvider {
 
 		const process_request = async () => {
 			try {
-				// Use 'urls' if inputs look like URLs, otherwise fall back to 'ids'
+				// Exa accepts either all public URLs or all result IDs, not a mix.
 				const looksLikeUrl = (value: string) => {
 					try {
 						new URL(value);
@@ -69,7 +72,16 @@ export class ExaContentsProvider implements ProcessingProvider {
 						return false;
 					}
 				};
-				const allAreUrls = items.every(looksLikeUrl);
+				const url_count = items.filter(looksLikeUrl).length;
+				if (url_count > 0 && url_count !== items.length) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'Do not mix Exa result IDs and URLs in one contents request',
+						this.name,
+					);
+				}
+				const allAreUrls = url_count === items.length;
+				if (allAreUrls) validate_processing_urls(items, this.name);
 
 				const request_body: ExaContentsRequest = {
 					...(allAreUrls ? { urls: items } : { ids: items }),
@@ -89,6 +101,9 @@ export class ExaContentsProvider implements ProcessingProvider {
 							'Content-Type': 'application/json',
 						},
 						body: JSON.stringify(request_body),
+						signal: AbortSignal.timeout(
+							config.processing.exa_contents.timeout,
+						),
 					},
 				);
 

@@ -169,6 +169,6 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 			}
 		};
 
-		return retry_with_backoff(extract_request);
+		return retry_with_backoff(extract_request, { max_retries: 0 });
 	}
 }

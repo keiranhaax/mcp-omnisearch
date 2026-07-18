@@ -287,6 +287,6 @@ export class FirecrawlAgentProvider {
 			}
 		};
 
-		return retry_with_backoff(agent_request);
+		return retry_with_backoff(agent_request, { max_retries: 0 });
 	}
 }

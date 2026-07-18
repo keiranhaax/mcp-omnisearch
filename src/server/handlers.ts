@@ -61,7 +61,7 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 	server.resource(
 		{
 			name: 'provider-info',
-			description: 'Information about a specific search provider',
+			description: 'Registration and runtime health for a provider',
 			uri: 'omnisearch://search/{provider}/info',
 		},
 		async (uri) => {
@@ -72,12 +72,15 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 			if (providerMatch) {
 				const providerName = providerMatch[1];
 
-				// Check if provider is available
-				const isAvailable =
-					available_providers.search.has(providerName) ||
-					available_providers.ai_response.has(providerName);
+				const category = available_providers.search.has(providerName)
+					? 'search'
+					: available_providers.ai_response.has(providerName)
+						? 'ai_response'
+						: available_providers.processing.has(providerName)
+							? 'processing'
+							: undefined;
 
-				if (!isAvailable) {
+				if (!category) {
 					throw new Error(
 						`Provider not available: ${providerName} (missing API key)`,
 					);
@@ -91,12 +94,12 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 							text: JSON.stringify(
 								{
 									name: providerName,
-									status: 'active',
-									capabilities: ['web_search', 'news_search'],
-									rate_limits: {
-										requests_per_minute: 60,
-										requests_per_day: 1000,
-									},
+									status: 'registered',
+									category,
+									runtime_health:
+										get_provider_health_snapshot()[category][
+											providerName
+										],
 								},
 								null,
 								2,

@@ -4,7 +4,10 @@ import {
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
-import { handle_provider_error, sanitize_query } from '../../../common/errors.js';
+import {
+	handle_provider_error,
+	sanitize_query,
+} from '../../../common/errors.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
@@ -20,7 +23,11 @@ interface YouResearchResponse {
 	};
 }
 
-export type YouResearchEffort = 'lite' | 'standard' | 'deep' | 'exhaustive';
+export type YouResearchEffort =
+	| 'lite'
+	| 'standard'
+	| 'deep'
+	| 'exhaustive';
 
 export class YouResearchProvider implements SearchProvider {
 	name = 'you_research';
@@ -77,20 +84,21 @@ export class YouResearchProvider implements SearchProvider {
 							type: 'research_report',
 							research_effort:
 								you_params.you_research_effort || 'standard',
-							sources_count:
-								data.output.sources?.length || 0,
+							sources_count: data.output.sources?.length || 0,
 						},
 					});
 				}
 
 				if (data.output?.sources?.length) {
-					for (const [index, source] of data.output.sources.entries()) {
+					for (const [
+						index,
+						source,
+					] of data.output.sources.entries()) {
 						results.push({
 							title: source.title || 'Source',
 							url: source.url,
 							snippet:
-								source.snippets?.join(' ') ||
-								'Source reference',
+								source.snippets?.join(' ') || 'Source reference',
 							score: 0.9 - index * 0.05,
 							source_provider: this.name,
 							metadata: { type: 'source' },
@@ -104,14 +112,10 @@ export class YouResearchProvider implements SearchProvider {
 
 				return results;
 			} catch (error) {
-				handle_provider_error(
-					error,
-					this.name,
-					'run research',
-				);
+				handle_provider_error(error, this.name, 'run research');
 			}
 		};
 
-		return retry_with_backoff(research_request);
+		return retry_with_backoff(research_request, { max_retries: 0 });
 	}
 }

@@ -49,6 +49,7 @@ import {
 	initialize_web_search,
 	register_web_search,
 } from './web_search.js';
+import { register_result_read } from './result_read.js';
 
 // Track available providers by category for the status resource
 export const available_providers = {
@@ -154,6 +155,7 @@ export const initialize_providers = () => {
 };
 
 export const register_tools = (server: McpServer<GenericSchema>) => {
+	register_result_read(server);
 	register_web_search(server);
 	register_github_search(server);
 	register_ai_search(server);

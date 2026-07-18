@@ -39,12 +39,17 @@ describe('FirecrawlScrapeProvider', () => {
 						metadata: { title: 'Example' },
 					},
 				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 
 		const provider = new FirecrawlScrapeProvider();
-		const result = await provider.process_content('https://example.com');
+		const result = await provider.process_content(
+			'https://example.com',
+		);
 
 		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
 		expect(body).toEqual({
@@ -68,18 +73,25 @@ describe('FirecrawlScrapeProvider', () => {
 					success: true,
 					data: { markdown: 'Cached markdown' },
 				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 
 		const provider = new FirecrawlScrapeProvider();
-		await provider.process_content('https://example.com', 'advanced', {
-			lockdown: true,
-			maxAge: 1000,
-			minAge: 1,
-			storeInCache: false,
-			removeBase64Images: true,
-		});
+		await provider.process_content(
+			'https://example.com',
+			'advanced',
+			{
+				lockdown: true,
+				maxAge: 1000,
+				minAge: 1,
+				storeInCache: false,
+				removeBase64Images: true,
+			},
+		);
 
 		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
 		expect(body).toMatchObject({
@@ -96,7 +108,10 @@ describe('FirecrawlScrapeProvider', () => {
 		fetch_mock.mockResolvedValue(
 			new Response(
 				JSON.stringify({ success: true, data: { answer: 'Answer' } }),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 
@@ -104,23 +119,31 @@ describe('FirecrawlScrapeProvider', () => {
 		await provider.process_content('https://example.com', 'basic', {
 			question: 'What does this page say?',
 		});
-		expect(JSON.parse(fetch_mock.mock.calls[0][1].body).formats).toEqual([
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body).formats,
+		).toEqual([
 			{ type: 'question', question: 'What does this page say?' },
 		]);
 
 		fetch_mock.mockClear();
 		fetch_mock.mockResolvedValue(
 			new Response(
-				JSON.stringify({ success: true, data: { highlights: 'Key sentence' } }),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				JSON.stringify({
+					success: true,
+					data: { highlights: 'Key sentence' },
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 		await provider.process_content('https://example.com', 'basic', {
 			highlights_query: 'pricing',
 		});
-		expect(JSON.parse(fetch_mock.mock.calls[0][1].body).formats).toEqual([
-			{ type: 'highlights', query: 'pricing' },
-		]);
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body).formats,
+		).toEqual([{ type: 'highlights', query: 'pricing' }]);
 	});
 
 	it('rejects conflicting scrape options before calling Firecrawl', async () => {
@@ -130,7 +153,9 @@ describe('FirecrawlScrapeProvider', () => {
 				question: 'Question?',
 				highlights_query: 'query',
 			}),
-		).rejects.toThrow('question and highlights_query cannot both be set');
+		).rejects.toThrow(
+			'question and highlights_query cannot both be set',
+		);
 		await expect(
 			provider.process_content('https://example.com', 'basic', {
 				zeroDataRetention: true,
@@ -148,5 +173,19 @@ describe('FirecrawlScrapeProvider', () => {
 			'onlyCleanContent is not supported with zeroDataRetention',
 		);
 		expect(fetch_mock).not.toHaveBeenCalled();
+	});
+
+	it('does not automatically repeat a paid scrape after provider failure', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		fetch_mock.mockResolvedValue(
+			new Response('temporary failure', { status: 503 }),
+		);
+
+		await expect(
+			new FirecrawlScrapeProvider().process_content(
+				'https://example.com',
+			),
+		).rejects.toThrow('Failed to extract content from all URLs');
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	});
 });

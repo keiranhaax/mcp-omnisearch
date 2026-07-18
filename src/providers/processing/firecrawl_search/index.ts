@@ -88,13 +88,17 @@ interface FirecrawlSearchResponse {
 
 const normalize_options = (
 	options?: Record<string, unknown>,
-): FirecrawlSearchOptions => (options || {}) as FirecrawlSearchOptions;
+): FirecrawlSearchOptions =>
+	(options || {}) as FirecrawlSearchOptions;
 
 const assert_domain_filters = (
 	options: FirecrawlSearchOptions,
 	provider_name: string,
 ) => {
-	if (options.includeDomains?.length && options.excludeDomains?.length) {
+	if (
+		options.includeDomains?.length &&
+		options.excludeDomains?.length
+	) {
 		throw new ProviderError(
 			ErrorType.INVALID_INPUT,
 			'includeDomains and excludeDomains cannot both be set',
@@ -118,7 +122,8 @@ const build_search_body = (
 		},
 	};
 
-	if (options.categories?.length) body.categories = options.categories;
+	if (options.categories?.length)
+		body.categories = options.categories;
 	if (options.includeDomains?.length)
 		body.includeDomains = options.includeDomains;
 	if (options.excludeDomains?.length)
@@ -154,7 +159,9 @@ const news_content = (result: FirecrawlNewsResult) =>
 
 const format_web_result = (result: FirecrawlWebResult) => {
 	const title = result.title ? `## ${result.title}\n` : '';
-	const category = result.category ? `Category: ${result.category}\n` : '';
+	const category = result.category
+		? `Category: ${result.category}\n`
+		: '';
 	return `${title}Source: ${result.url}\n${category}\n${web_content(result)}`;
 };
 
@@ -210,13 +217,14 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 					search_options,
 				);
 
-				const data = await make_firecrawl_request<FirecrawlSearchResponse>(
-					this.name,
-					config.processing.firecrawl_search.base_url,
-					api_key,
-					request_body,
-					config.processing.firecrawl_search.timeout,
-				);
+				const data =
+					await make_firecrawl_request<FirecrawlSearchResponse>(
+						this.name,
+						config.processing.firecrawl_search.base_url,
+						api_key,
+						request_body,
+						config.processing.firecrawl_search.timeout,
+					);
 
 				validate_firecrawl_response(data, this.name, 'Search failed');
 
@@ -231,7 +239,8 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 				const web = data.data?.web || [];
 				const images = data.data?.images || [];
 				const news = data.data?.news || [];
-				const total_results = web.length + images.length + news.length;
+				const total_results =
+					web.length + images.length + news.length;
 
 				if (total_results === 0) {
 					throw new ProviderError(
@@ -290,7 +299,7 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return retry_with_backoff(search_request, { max_retries: 0 });
 	}
 }
 

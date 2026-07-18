@@ -1,19 +1,26 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { read_result_chunk } from './result_store.js';
 import {
 	aggregate_url_results,
 	handle_large_result,
 } from './results.js';
 import { ErrorType } from './types.js';
 
-const created_files: string[] = [];
+let result_dir: string;
+
+beforeEach(() => {
+	result_dir = mkdtempSync(
+		join(tmpdir(), 'omnisearch-results-test-'),
+	);
+	process.env.OMNISEARCH_RESULT_DIR = result_dir;
+});
 
 afterEach(() => {
-	for (const file of created_files.splice(0)) {
-		if (existsSync(file)) {
-			rmSync(file);
-		}
-	}
+	delete process.env.OMNISEARCH_RESULT_DIR;
+	rmSync(result_dir, { recursive: true, force: true });
 });
 
 describe('handle_large_result', () => {
@@ -27,7 +34,7 @@ describe('handle_large_result', () => {
 		expect(handle_large_result(result, 'web_extract')).toBe(result);
 	});
 
-	it('writes oversized results to a temporary file with section hints', () => {
+	it('stores oversized results behind an opaque paginated result ID', () => {
 		const large_result = {
 			raw_contents: [
 				{
@@ -47,19 +54,21 @@ describe('handle_large_result', () => {
 			large_result,
 			'web_extract',
 		) as {
-			file_path: string;
+			result_id: string;
 			total_lines: number;
 			estimated_tokens: number;
+			expires_at: string;
 			sections: Array<{ title: string; line: number }>;
 			metadata: Record<string, unknown>;
 			read_hint: string;
 		};
 
-		created_files.push(result.file_path);
-
-		expect(result.file_path).toContain('mcp-web_extract-');
+		expect(result.result_id).toMatch(/^[0-9a-f-]{36}$/);
 		expect(result.total_lines).toBeGreaterThan(0);
 		expect(result.estimated_tokens).toBeGreaterThan(20000);
+		expect(new Date(result.expires_at).getTime()).toBeGreaterThan(
+			Date.now(),
+		);
 		expect(result.sections).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -69,14 +78,19 @@ describe('handle_large_result', () => {
 				expect.objectContaining({ title: 'METADATA' }),
 			]),
 		);
-		expect(result.read_hint).toContain(result.file_path);
+		expect(result.read_hint).toContain(result.result_id);
+		expect(result.read_hint).toContain('result_read');
 		expect(result.metadata).toEqual({
 			word_count: 6,
 			urls_processed: 1,
 			source_provider: 'tavily',
 		});
 
-		const written = readFileSync(result.file_path, 'utf8');
+		const written = read_result_chunk(
+			result.result_id,
+			1,
+			500,
+		).content;
 		expect(written).toContain('URL: https://example.com/article');
 		expect(written).toContain('# Heading');
 		expect(written).toContain('METADATA');

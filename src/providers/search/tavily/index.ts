@@ -99,6 +99,7 @@ export class TavilySearchProvider implements SearchProvider {
 						'Content-Type': 'application/json',
 					},
 					body: JSON.stringify(request_body),
+					signal: AbortSignal.timeout(config.search.tavily.timeout),
 				});
 
 				return (data.results || []).map((result) => ({

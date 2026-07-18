@@ -110,10 +110,10 @@ describe('setup_handlers', () => {
 		});
 	});
 
-	it('returns provider information for available providers', async () => {
+	it('returns accurate registration information without invented rate limits', async () => {
 		reset_available_providers();
-		available_providers.search.add('kagi');
-		register_provider('search', 'kagi');
+		available_providers.search.add('brave');
+		register_provider('search', 'brave');
 
 		const { resources, server } = create_mock_server();
 		setup_handlers(server as any);
@@ -122,18 +122,41 @@ describe('setup_handlers', () => {
 			(resource) => resource.definition.name === 'provider-info',
 		)!;
 		const response = await provider_info.handler(
-			'omnisearch://search/kagi/info',
+			'omnisearch://search/brave/info',
 		);
 		const body = JSON.parse(response.contents[0].text);
 
 		expect(body).toEqual({
-			name: 'kagi',
-			status: 'active',
-			capabilities: ['web_search', 'news_search'],
-			rate_limits: {
-				requests_per_minute: 60,
-				requests_per_day: 1000,
+			name: 'brave',
+			status: 'registered',
+			category: 'search',
+			runtime_health: {
+				category: 'search',
+				provider: 'brave',
+				registered: true,
+				last_runtime_status: 'unknown',
+				active_error: false,
 			},
+		});
+	});
+
+	it('returns registration information for processing providers', async () => {
+		reset_available_providers();
+		available_providers.processing.add('firecrawl');
+		register_provider('processing', 'firecrawl');
+		const { resources, server } = create_mock_server();
+		setup_handlers(server as any);
+		const provider_info = resources.find(
+			(resource) => resource.definition.name === 'provider-info',
+		)!;
+		const response = await provider_info.handler(
+			'omnisearch://search/firecrawl/info',
+		);
+		const body = JSON.parse(response.contents[0].text);
+		expect(body).toMatchObject({
+			name: 'firecrawl',
+			status: 'registered',
+			category: 'processing',
 		});
 	});
 

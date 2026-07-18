@@ -9,7 +9,10 @@ import {
 } from '../../common/context_dev.js';
 import { handle_large_result } from '../../common/results.js';
 import { ErrorType, ProviderError } from '../../common/types.js';
-import { is_api_key_valid } from '../../common/validation.js';
+import {
+	is_api_key_valid,
+	validate_processing_urls,
+} from '../../common/validation.js';
 import { config } from '../../config/env.js';
 import {
 	mark_provider_error,
@@ -67,6 +70,9 @@ const optional_query = (values: Record<string, unknown>) => {
 	}
 	return out;
 };
+
+const public_url = (url: string, tool_name: string) =>
+	validate_processing_urls(url, tool_name)[0];
 
 const register_context_web_extract = (
 	server: McpServer<GenericSchema>,
@@ -134,7 +140,11 @@ const register_context_web_extract = (
 						);
 					result = await context_dev_get(
 						'/web/scrape/markdown',
-						optional_query({ url, timeoutMS, maxAgeMs }),
+						optional_query({
+							url: public_url(url, 'context_web_extract'),
+							timeoutMS,
+							maxAgeMs,
+						}),
 					);
 				} else if (mode === 'html') {
 					if (!url)
@@ -145,7 +155,11 @@ const register_context_web_extract = (
 						);
 					result = await context_dev_get(
 						'/web/scrape/html',
-						optional_query({ url, timeoutMS, maxAgeMs }),
+						optional_query({
+							url: public_url(url, 'context_web_extract'),
+							timeoutMS,
+							maxAgeMs,
+						}),
 					);
 				} else if (mode === 'images') {
 					if (!url)
@@ -156,7 +170,11 @@ const register_context_web_extract = (
 						);
 					result = await context_dev_get(
 						'/web/scrape/images',
-						optional_query({ url, timeoutMS, maxAgeMs }),
+						optional_query({
+							url: public_url(url, 'context_web_extract'),
+							timeoutMS,
+							maxAgeMs,
+						}),
 					);
 				} else if (mode === 'crawl_markdown') {
 					if (!url)
@@ -168,7 +186,7 @@ const register_context_web_extract = (
 					result = await context_dev_post(
 						'/web/crawl',
 						optional_query({
-							url,
+							url: public_url(url, 'context_web_extract'),
 							timeoutMS,
 							maxAgeMs,
 							maxPages: limit,
@@ -191,7 +209,9 @@ const register_context_web_extract = (
 						'/web/screenshot',
 						optional_query({
 							domain,
-							directUrl: url,
+							directUrl: url
+								? public_url(url, 'context_web_extract')
+								: undefined,
 							timeoutMS,
 							maxAgeMs,
 						}),
@@ -317,7 +337,9 @@ const register_context_styleguide = (
 				require_one('context_styleguide', { domain, directUrl });
 				const params = optional_query({
 					domain,
-					directUrl,
+					directUrl: directUrl
+						? public_url(directUrl, 'context_styleguide')
+						: undefined,
 					timeoutMS,
 					maxAgeMs,
 				});

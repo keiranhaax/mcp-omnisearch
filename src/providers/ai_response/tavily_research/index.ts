@@ -6,7 +6,10 @@ import {
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
-import { handle_provider_error, sanitize_query } from '../../../common/errors.js';
+import {
+	handle_provider_error,
+	sanitize_query,
+} from '../../../common/errors.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
@@ -45,10 +48,8 @@ export class TavilyResearchProvider implements SearchProvider {
 
 		const research_request = async () => {
 			try {
-				const base_url =
-					config.ai_response.tavily_research.base_url;
-				const timeout =
-					config.ai_response.tavily_research.timeout;
+				const base_url = config.ai_response.tavily_research.base_url;
+				const timeout = config.ai_response.tavily_research.timeout;
 				const deadline = Date.now() + timeout;
 
 				const start_response =
@@ -65,9 +66,7 @@ export class TavilyResearchProvider implements SearchProvider {
 								input: sanitize_query(params.query),
 								model: 'auto',
 							}),
-							signal: AbortSignal.timeout(
-								Math.min(30000, timeout),
-							),
+							signal: AbortSignal.timeout(Math.min(30000, timeout)),
 						},
 					);
 
@@ -97,20 +96,19 @@ export class TavilyResearchProvider implements SearchProvider {
 
 					let poll_result: TavilyResearchPollResponse;
 					try {
-						poll_result =
-							await http_json<TavilyResearchPollResponse>(
-								this.name,
-								`${base_url}/research/${request_id}`,
-								{
-									method: 'GET',
-									headers: {
-										Authorization: `Bearer ${api_key}`,
-									},
-									signal: AbortSignal.timeout(
-										Math.min(15000, deadline - Date.now()),
-									),
+						poll_result = await http_json<TavilyResearchPollResponse>(
+							this.name,
+							`${base_url}/research/${request_id}`,
+							{
+								method: 'GET',
+								headers: {
+									Authorization: `Bearer ${api_key}`,
 								},
-							);
+								signal: AbortSignal.timeout(
+									Math.min(15000, deadline - Date.now()),
+								),
+							},
+						);
 					} catch (error) {
 						if (
 							error instanceof ProviderError &&
@@ -141,10 +139,8 @@ export class TavilyResearchProvider implements SearchProvider {
 								metadata: {
 									type: 'research_report',
 									request_id,
-									response_time:
-										poll_result.response_time,
-									sources_count:
-										poll_result.sources?.length || 0,
+									response_time: poll_result.response_time,
+									sources_count: poll_result.sources?.length || 0,
 								},
 							},
 						];
@@ -153,23 +149,21 @@ export class TavilyResearchProvider implements SearchProvider {
 							poll_result.sources &&
 							poll_result.sources.length > 0
 						) {
-							const source_results =
-								poll_result.sources.map(
-									(source, index) => ({
-										title:
-											source.title || 'Source',
-										url: source.url,
-										snippet:
-											source.content ||
-											source.raw_content ||
-											'Source reference',
-										score: 0.9 - index * 0.05,
-										source_provider: this.name,
-										metadata: {
-											type: 'source',
-										},
-									}),
-								);
+							const source_results = poll_result.sources.map(
+								(source, index) => ({
+									title: source.title || 'Source',
+									url: source.url,
+									snippet:
+										source.content ||
+										source.raw_content ||
+										'Source reference',
+									score: 0.9 - index * 0.05,
+									source_provider: this.name,
+									metadata: {
+										type: 'source',
+									},
+								}),
+							);
 							results.push(...source_results);
 						}
 
@@ -187,9 +181,7 @@ export class TavilyResearchProvider implements SearchProvider {
 						throw new ProviderError(
 							ErrorType.PROVIDER_ERROR,
 							`Research task failed${
-								poll_result.content
-									? `: ${poll_result.content}`
-									: ''
+								poll_result.content ? `: ${poll_result.content}` : ''
 							}`,
 							this.name,
 						);
@@ -202,14 +194,10 @@ export class TavilyResearchProvider implements SearchProvider {
 					this.name,
 				);
 			} catch (error) {
-				handle_provider_error(
-					error,
-					this.name,
-					'run deep research',
-				);
+				handle_provider_error(error, this.name, 'run deep research');
 			}
 		};
 
-		return retry_with_backoff(research_request);
+		return retry_with_backoff(research_request, { max_retries: 0 });
 	}
 }

@@ -69,9 +69,7 @@ export class ExaDeepResearchProvider implements SearchProvider {
 				const request_body: ExaDeepResearchRequest = {
 					query: sanitize_query(params.query),
 					type:
-						params.search_type === 'deep'
-							? 'deep'
-							: 'deep-reasoning',
+						params.search_type === 'deep' ? 'deep' : 'deep-reasoning',
 					numResults: params.limit ?? 10,
 					outputSchema: params.output_schema ?? default_output_schema,
 				};
@@ -140,6 +138,6 @@ export class ExaDeepResearchProvider implements SearchProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return retry_with_backoff(search_request, { max_retries: 0 });
 	}
 }

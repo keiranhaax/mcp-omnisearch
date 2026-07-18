@@ -16,7 +16,8 @@ const fetch_mock = vi.fn();
 const previous_key = config.search.context_dev.api_key;
 
 const create_server = () => {
-	const tools: Array<{ definition: { name: string }; handler: any }> = [];
+	const tools: Array<{ definition: { name: string }; handler: any }> =
+		[];
 	return {
 		tools,
 		server: {
@@ -68,15 +69,24 @@ describe('Context.dev tools', () => {
 	it('maps markdown web extraction to the documented scrape endpoint', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(
-				JSON.stringify({ success: true, markdown: 'Hello', url: 'https://example.com' }),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				JSON.stringify({
+					success: true,
+					markdown: 'Hello',
+					url: 'https://example.com',
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 		const { server, tools } = create_server();
 		initialize_context_dev();
 		register_context_dev_tools(server as any);
 
-		const tool = tools.find((item) => item.definition.name === 'context_web_extract')!;
+		const tool = tools.find(
+			(item) => item.definition.name === 'context_web_extract',
+		)!;
 		const result = await tool.handler({
 			mode: 'markdown',
 			url: 'https://example.com',
@@ -94,27 +104,37 @@ describe('Context.dev tools', () => {
 
 	it('maps brand lookup and transaction tools to documented brand endpoints', async () => {
 		fetch_mock.mockResolvedValue(
-			new Response(JSON.stringify({ status: 'ok', brand: { title: 'Example' } }), {
-				status: 200,
-				headers: { 'Content-Type': 'application/json' },
-			}),
+			new Response(
+				JSON.stringify({ status: 'ok', brand: { title: 'Example' } }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
 		);
 		const { server, tools } = create_server();
 		initialize_context_dev();
 		register_context_dev_tools(server as any);
 
-		await tools.find((item) => item.definition.name === 'context_brand_intel')!.handler({
-			lookup_type: 'stock_ticker',
-			value: 'AAPL',
-		});
+		await tools
+			.find((item) => item.definition.name === 'context_brand_intel')!
+			.handler({
+				lookup_type: 'stock_ticker',
+				value: 'AAPL',
+			});
 		expect(fetch_mock.mock.calls[0][0]).toBe(
 			'https://api.context.dev/v1/brand/retrieve-by-ticker?ticker=AAPL',
 		);
 
-		await tools.find((item) => item.definition.name === 'context_transaction_identify')!.handler({
-			transaction_info: 'SQ *COFFEE SHOP',
-			country_gl: 'us',
-		});
+		await tools
+			.find(
+				(item) =>
+					item.definition.name === 'context_transaction_identify',
+			)!
+			.handler({
+				transaction_info: 'SQ *COFFEE SHOP',
+				country_gl: 'us',
+			});
 		expect(fetch_mock.mock.calls[1][0]).toBe(
 			'https://api.context.dev/v1/brand/transaction_identifier?transaction_info=SQ+*COFFEE+SHOP&country_gl=us',
 		);
@@ -127,21 +147,67 @@ describe('Context.dev tools', () => {
 					status: 'ok',
 					brand: { industries: { eic: [{ code: 'software' }] } },
 				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 		const { server, tools } = create_server();
 		initialize_context_dev();
 		register_context_dev_tools(server as any);
 
-		const result = await tools.find((item) => item.definition.name === 'context_classify')!.handler({
-			taxonomy: 'eic',
-			domain: 'example.com',
-		});
+		const result = await tools
+			.find((item) => item.definition.name === 'context_classify')!
+			.handler({
+				taxonomy: 'eic',
+				domain: 'example.com',
+			});
 
 		expect(fetch_mock.mock.calls[0][0]).toBe(
 			'https://api.context.dev/v1/brand/retrieve?domain=example.com',
 		);
 		expect(result.content[0].text).toContain('software');
+	});
+
+	it('rejects private scrape targets before calling Context.dev', async () => {
+		const { server, tools } = create_server();
+		initialize_context_dev();
+		register_context_dev_tools(server as any);
+		const tool = tools.find(
+			(candidate) =>
+				candidate.definition.name === 'context_web_extract',
+		)!;
+
+		const response = await tool.handler({
+			mode: 'markdown',
+			url: 'http://127.0.0.1/admin',
+		});
+
+		expect(response.isError).toBe(true);
+		expect(response.content[0].text).toContain(
+			'Invalid URL provided',
+		);
+		expect(fetch_mock).not.toHaveBeenCalled();
+	});
+
+	it('rejects private direct styleguide URLs before calling Context.dev', async () => {
+		const { server, tools } = create_server();
+		initialize_context_dev();
+		register_context_dev_tools(server as any);
+		const tool = tools.find(
+			(candidate) =>
+				candidate.definition.name === 'context_styleguide',
+		)!;
+
+		const response = await tool.handler({
+			directUrl: 'http://10.0.0.4',
+		});
+
+		expect(response.isError).toBe(true);
+		expect(response.content[0].text).toContain(
+			'Invalid URL provided',
+		);
+		expect(fetch_mock).not.toHaveBeenCalled();
 	});
 });

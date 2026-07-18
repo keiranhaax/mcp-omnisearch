@@ -96,6 +96,9 @@ export class ExaSimilarProvider implements ProcessingProvider {
 							'Content-Type': 'application/json',
 						},
 						body: JSON.stringify(request_body),
+						signal: AbortSignal.timeout(
+							config.processing.exa_similar.timeout,
+						),
 					},
 				);
 

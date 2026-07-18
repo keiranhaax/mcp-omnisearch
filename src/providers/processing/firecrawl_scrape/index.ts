@@ -20,7 +20,9 @@ import {
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-type FirecrawlScrapeFormat = string | { type: string; [key: string]: unknown };
+type FirecrawlScrapeFormat =
+	| string
+	| { type: string; [key: string]: unknown };
 
 export interface FirecrawlScrapeOptions {
 	formats?: FirecrawlScrapeFormat[];
@@ -65,7 +67,8 @@ interface FirecrawlScrapeResponse {
 
 const normalize_options = (
 	options?: Record<string, unknown>,
-): FirecrawlScrapeOptions => (options || {}) as FirecrawlScrapeOptions;
+): FirecrawlScrapeOptions =>
+	(options || {}) as FirecrawlScrapeOptions;
 
 const assert_valid_options = (
 	options: FirecrawlScrapeOptions,
@@ -241,7 +244,7 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 			}
 		};
 
-		return retry_with_backoff(scrape_request);
+		return retry_with_backoff(scrape_request, { max_retries: 0 });
 	}
 }
 

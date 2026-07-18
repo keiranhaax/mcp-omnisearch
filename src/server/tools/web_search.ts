@@ -82,7 +82,12 @@ export const register_web_search = (
 				openWorldHint: true,
 			},
 			schema: v.object({
-				query: v.pipe(v.string(), v.description('Search query')),
+				query: v.pipe(
+					v.string(),
+					v.minLength(1),
+					v.maxLength(5000),
+					v.description('Search query'),
+				),
 				provider: v.pipe(
 					v.picklist(provider_names),
 					v.description('Search provider to use'),
@@ -90,18 +95,23 @@ export const register_web_search = (
 				limit: v.optional(
 					v.pipe(
 						v.number(),
+						v.integer(),
+						v.minValue(1),
+						v.maxValue(100),
 						v.description('Maximum number of results (default: 10)'),
 					),
 				),
 				include_domains: v.optional(
 					v.pipe(
-						v.array(v.string()),
+						v.array(v.pipe(v.string(), v.maxLength(253))),
+						v.maxLength(50),
 						v.description('Only return results from these domains'),
 					),
 				),
 				exclude_domains: v.optional(
 					v.pipe(
-						v.array(v.string()),
+						v.array(v.pipe(v.string(), v.maxLength(253))),
+						v.maxLength(50),
 						v.description('Exclude results from these domains'),
 					),
 				),
@@ -162,6 +172,7 @@ export const register_web_search = (
 				system_prompt: v.optional(
 					v.pipe(
 						v.string(),
+						v.maxLength(10000),
 						v.description(
 							'Exa system prompt for synthesized output.',
 						),
@@ -169,9 +180,10 @@ export const register_web_search = (
 				),
 				additional_queries: v.optional(
 					v.pipe(
-						v.array(v.string()),
+						v.array(v.pipe(v.string(), v.maxLength(2000))),
+						v.maxLength(10),
 						v.description(
-							'Additional Exa queries for contents.additionalQueries.',
+							'Additional top-level Exa search queries for multi-query retrieval.',
 						),
 					),
 				),

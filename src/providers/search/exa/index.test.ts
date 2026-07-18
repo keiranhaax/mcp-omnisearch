@@ -39,12 +39,17 @@ describe('ExaSearchProvider', () => {
 						},
 					],
 				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 
 		const provider = new ExaSearchProvider();
-		const results = await provider.search({ query: '  latest docs  ' });
+		const results = await provider.search({
+			query: '  latest docs  ',
+		});
 
 		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
 		expect(body).toEqual({
@@ -94,10 +99,8 @@ describe('ExaSearchProvider', () => {
 			type: 'deep-reasoning',
 			numResults: 5,
 			includeDomains: ['example.com'],
-			contents: {
-				summary: true,
-				additionalQueries: ['funding', 'headquarters'],
-			},
+			contents: { summary: true },
+			additionalQueries: ['funding', 'headquarters'],
 			category: 'company',
 			userLocation: 'US',
 			outputSchema: output_schema,
@@ -117,12 +120,17 @@ describe('ExaSearchProvider', () => {
 						},
 					],
 				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 
 		const provider = new ExaSearchProvider();
-		const [result] = await provider.search({ query: 'missing fields' });
+		const [result] = await provider.search({
+			query: 'missing fields',
+		});
 
 		expect(result.score).toBeUndefined();
 		expect(result.metadata?.resolvedSearchType).toBeUndefined();

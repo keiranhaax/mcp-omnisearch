@@ -113,6 +113,6 @@ export class FirecrawlMapProvider implements ProcessingProvider {
 			}
 		};
 
-		return retry_with_backoff(map_request);
+		return retry_with_backoff(map_request, { max_retries: 0 });
 	}
 }

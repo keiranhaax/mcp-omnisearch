@@ -104,12 +104,14 @@ export const register_ai_search = (
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,
-				idempotentHint: true,
+				idempotentHint: false,
 				openWorldHint: true,
 			},
 			schema: v.object({
 				query: v.pipe(
 					v.string(),
+					v.minLength(1),
+					v.maxLength(10000),
 					v.description('Question or search query'),
 				),
 				provider: v.pipe(
@@ -119,6 +121,9 @@ export const register_ai_search = (
 				limit: v.optional(
 					v.pipe(
 						v.number(),
+						v.integer(),
+						v.minValue(1),
+						v.maxValue(50),
 						v.description('Maximum number of results (default: 10)'),
 					),
 				),
@@ -149,6 +154,7 @@ export const register_ai_search = (
 				system_prompt: v.optional(
 					v.pipe(
 						v.string(),
+						v.maxLength(10000),
 						v.description(
 							'Exa system prompt. Only used when provider is exa_deep_research.',
 						),

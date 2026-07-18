@@ -19,6 +19,7 @@ interface ExaSearchRequest {
 	includeDomains?: string[];
 	excludeDomains?: string[];
 	contents?: Record<string, unknown>;
+	additionalQueries?: string[];
 	category?: string;
 	userLocation?: string;
 	outputSchema?: Record<string, unknown>;
@@ -47,18 +48,14 @@ interface ExaSearchResponse {
 }
 
 const build_contents = (params: BaseSearchParams) => {
-	const contents: Record<string, unknown> = params.contents
+	return params.contents
 		? { ...params.contents }
 		: { text: { maxCharacters: 3000 } };
-
-	if (params.additional_queries?.length) {
-		contents.additionalQueries = params.additional_queries;
-	}
-
-	return contents;
 };
 
-const build_search_body = (params: BaseSearchParams): ExaSearchRequest => {
+const build_search_body = (
+	params: BaseSearchParams,
+): ExaSearchRequest => {
 	const request_body: ExaSearchRequest = {
 		query: sanitize_query(params.query),
 		type: params.search_type ?? 'auto',
@@ -70,10 +67,15 @@ const build_search_body = (params: BaseSearchParams): ExaSearchRequest => {
 		request_body.includeDomains = params.include_domains;
 	if (params.exclude_domains?.length)
 		request_body.excludeDomains = params.exclude_domains;
+	if (params.additional_queries?.length)
+		request_body.additionalQueries = params.additional_queries;
 	if (params.category) request_body.category = params.category;
-	if (params.user_location) request_body.userLocation = params.user_location;
-	if (params.output_schema) request_body.outputSchema = params.output_schema;
-	if (params.system_prompt) request_body.systemPrompt = params.system_prompt;
+	if (params.user_location)
+		request_body.userLocation = params.user_location;
+	if (params.output_schema)
+		request_body.outputSchema = params.output_schema;
+	if (params.system_prompt)
+		request_body.systemPrompt = params.system_prompt;
 
 	return request_body;
 };

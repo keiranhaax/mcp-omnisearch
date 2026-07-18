@@ -1,7 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { store_result } from './result_store.js';
 import { ErrorType, ProviderError } from './types.js';
 
 const CHARS_PER_TOKEN = 4;
@@ -14,9 +11,10 @@ export interface Section {
 }
 
 export interface LargeResultResponse {
-	file_path: string;
+	result_id: string;
 	total_lines: number;
 	estimated_tokens: number;
+	expires_at: string;
 	sections: Section[];
 	read_hint: string;
 	metadata?: Record<string, unknown>;
@@ -103,7 +101,7 @@ const format_as_text = (
 
 export const handle_large_result = <T>(
 	result: T,
-	provider_name: string,
+	_provider_name: string,
 ): T | LargeResultResponse => {
 	const json = JSON.stringify(result, null, 2);
 	const char_count = json.length;
@@ -112,15 +110,10 @@ export const handle_large_result = <T>(
 		return result;
 	}
 
-	const file_id = randomUUID();
-	const file_path = join(
-		tmpdir(),
-		`mcp-${provider_name}-${file_id}.txt`,
-	);
 	const { text, sections, total_lines } = format_as_text(
 		result as Record<string, unknown>,
 	);
-	writeFileSync(file_path, text, 'utf-8');
+	const stored = store_result(text);
 
 	const result_obj = result as Record<string, unknown>;
 	const metadata = result_obj.metadata as
@@ -130,11 +123,12 @@ export const handle_large_result = <T>(
 	const urls_processed = metadata?.urls_processed ?? 'unknown';
 
 	return {
-		file_path,
+		result_id: stored.result_id,
 		total_lines,
 		estimated_tokens: Math.round(char_count / CHARS_PER_TOKEN),
+		expires_at: stored.expires_at,
 		sections,
-		read_hint: `Use Read tool with file_path="${file_path}" and offset=LINE_NUMBER limit=50 to read a section`,
+		read_hint: `Call result_read with result_id="${stored.result_id}", offset=LINE_NUMBER, and limit=50 to read a section`,
 		metadata: {
 			word_count,
 			urls_processed,
