@@ -87,7 +87,9 @@ export class BraveMediaSearchProvider {
 	description =
 		'Search for images and videos via Brave Search. Images: up to 200 results from billions of indexed images with confidence scoring. Videos: up to 50 results with thumbnails and metadata. Supports SafeSearch filtering and country/language targeting.';
 
-	async search(options: BraveMediaSearchOptions): Promise<SearchResult[]> {
+	async search(
+		options: BraveMediaSearchOptions,
+	): Promise<SearchResult[]> {
 		if (options.type === 'images') {
 			return this.search_images(options);
 		}
@@ -124,7 +126,8 @@ export class BraveMediaSearchProvider {
 				}
 
 				if (options.safesearch) {
-					const safe = options.safesearch === 'off' ? 'off' : 'strict';
+					const safe =
+						options.safesearch === 'off' ? 'off' : 'strict';
 					params.set('safesearch', safe);
 				}
 

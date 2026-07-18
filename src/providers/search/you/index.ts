@@ -4,7 +4,10 @@ import {
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
-import { handle_provider_error, sanitize_query } from '../../../common/errors.js';
+import {
+	handle_provider_error,
+	sanitize_query,
+} from '../../../common/errors.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
@@ -66,10 +69,16 @@ export class YouSearchProvider implements SearchProvider {
 				});
 
 				if (params.limit) {
-					query_params.set('count', Math.min(params.limit, 100).toString());
+					query_params.set(
+						'count',
+						Math.min(params.limit, 100).toString(),
+					);
 				}
 				if (you_params.you_offset !== undefined) {
-					query_params.set('offset', Math.min(you_params.you_offset, 9).toString());
+					query_params.set(
+						'offset',
+						Math.min(you_params.you_offset, 9).toString(),
+					);
 				}
 				if (you_params.you_freshness) {
 					query_params.set('freshness', you_params.you_freshness);
@@ -78,10 +87,16 @@ export class YouSearchProvider implements SearchProvider {
 					query_params.set('country', you_params.you_country);
 				}
 				if (params.include_domains?.length) {
-					query_params.set('include_domains', params.include_domains.join(','));
+					query_params.set(
+						'include_domains',
+						params.include_domains.join(','),
+					);
 				}
 				if (params.exclude_domains?.length) {
-					query_params.set('exclude_domains', params.exclude_domains.join(','));
+					query_params.set(
+						'exclude_domains',
+						params.exclude_domains.join(','),
+					);
 				}
 
 				const data = await http_json<YouSearchResponse>(
@@ -104,9 +119,7 @@ export class YouSearchProvider implements SearchProvider {
 						results.push({
 							title: item.title,
 							url: item.url,
-							snippet:
-								item.snippets?.join(' ') ||
-								item.description,
+							snippet: item.snippets?.join(' ') || item.description,
 							source_provider: this.name,
 							metadata: {
 								type: 'web',
@@ -123,9 +136,7 @@ export class YouSearchProvider implements SearchProvider {
 						results.push({
 							title: item.title,
 							url: item.url,
-							snippet:
-								item.snippets?.join(' ') ||
-								item.description,
+							snippet: item.snippets?.join(' ') || item.description,
 							source_provider: this.name,
 							metadata: {
 								type: 'news',

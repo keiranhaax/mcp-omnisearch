@@ -46,12 +46,17 @@ describe('FirecrawlSearchProvider', () => {
 						],
 					},
 				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 
 		const provider = new FirecrawlSearchProvider();
-		const result = await provider.process_content('current search APIs');
+		const result = await provider.process_content(
+			'current search APIs',
+		);
 
 		const [url, options] = fetch_mock.mock.calls[0];
 		const body = JSON.parse(options.body);
@@ -101,22 +106,29 @@ describe('FirecrawlSearchProvider', () => {
 						],
 					},
 				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } },
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
 
 		const provider = new FirecrawlSearchProvider();
-		const result = await provider.process_content('agent search', 'advanced', {
-			limit: 7,
-			sources: ['web', 'images', 'news'],
-			categories: ['github', 'research'],
-			country: 'US',
-			location: 'San Francisco,California,United States',
-			tbs: 'qdr:w',
-			includeDomains: ['example.com'],
-			ignoreInvalidURLs: true,
-			scrapeOptions: { redactPII: true },
-		});
+		const result = await provider.process_content(
+			'agent search',
+			'advanced',
+			{
+				limit: 7,
+				sources: ['web', 'images', 'news'],
+				categories: ['github', 'research'],
+				country: 'US',
+				location: 'San Francisco,California,United States',
+				tbs: 'qdr:w',
+				includeDomains: ['example.com'],
+				ignoreInvalidURLs: true,
+				scrapeOptions: { redactPII: true },
+			},
+		);
 
 		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
 		expect(body).toMatchObject({
@@ -150,7 +162,9 @@ describe('FirecrawlSearchProvider', () => {
 				includeDomains: ['example.com'],
 				excludeDomains: ['example.org'],
 			}),
-		).rejects.toThrow('includeDomains and excludeDomains cannot both be set');
+		).rejects.toThrow(
+			'includeDomains and excludeDomains cannot both be set',
+		);
 		expect(fetch_mock).not.toHaveBeenCalled();
 	});
 });

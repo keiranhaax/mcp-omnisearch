@@ -5,13 +5,24 @@ import { config } from '../config/env.js';
 
 export type ContextDevParams = Record<string, unknown>;
 
-const append_param = (params: URLSearchParams, key: string, value: unknown) => {
+const append_param = (
+	params: URLSearchParams,
+	key: string,
+	value: unknown,
+) => {
 	if (value === undefined || value === null) return;
 	if (Array.isArray(value)) {
 		for (const item of value) append_param(params, key, item);
 		return;
 	}
-	params.append(key, String(value));
+	const encoded =
+		typeof value === 'string' ||
+		typeof value === 'number' ||
+		typeof value === 'boolean' ||
+		typeof value === 'bigint'
+			? String(value)
+			: JSON.stringify(value);
+	if (encoded !== undefined) params.append(key, encoded);
 };
 
 const context_api_key = () =>
@@ -64,7 +75,9 @@ export const require_one = (
 	fields: Record<string, unknown>,
 ) => {
 	const present = Object.entries(fields).filter(([, value]) => {
-		return typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
+		return typeof value === 'string'
+			? value.trim().length > 0
+			: Boolean(value);
 	});
 	if (present.length !== 1) {
 		throw new ProviderError(

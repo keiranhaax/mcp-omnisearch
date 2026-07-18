@@ -56,7 +56,9 @@ export class BraveNewsSearchProvider {
 	description =
 		'Real-time news search from thousands of sources worldwide. Returns articles with titles, descriptions, publication dates, and thumbnails. Supports freshness filtering (pd=24h, pw=7d, pm=31d, py=365d), pagination (offset 0-9), and up to 50 results per request.';
 
-	async search(options: BraveNewsSearchOptions): Promise<SearchResult[]> {
+	async search(
+		options: BraveNewsSearchOptions,
+	): Promise<SearchResult[]> {
 		const news_request = async () => {
 			const api_key = validate_api_key(
 				config.search.brave_news.api_key,
