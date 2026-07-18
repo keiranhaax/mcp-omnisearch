@@ -34,7 +34,10 @@ RUN printf '%s\n' \
     '        "CONTEXT_DEV_API_KEY": "${CONTEXT_DEV_API_KEY}",' \
     '        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",' \
     '        "FIRECRAWL_BASE_URL": "${FIRECRAWL_BASE_URL}",' \
-    '        "FIRECRAWL_AGENT_URL": "${FIRECRAWL_AGENT_URL}"' \
+    '        "FIRECRAWL_AGENT_URL": "${FIRECRAWL_AGENT_URL}",' \
+    '        "OMNISEARCH_RESULT_TTL_MS": "${OMNISEARCH_RESULT_TTL_MS}",' \
+    '        "OMNISEARCH_RESULT_MAX_BYTES": "${OMNISEARCH_RESULT_MAX_BYTES}",' \
+    '        "OMNISEARCH_RESULT_STORE_MAX_BYTES": "${OMNISEARCH_RESULT_STORE_MAX_BYTES}"' \
     '      }' \
     '    }' \
     '  }' \

@@ -237,6 +237,12 @@ API keys will be activated:
   extract, actions, search, and agent tools
 - `FIRECRAWL_BASE_URL`: Optional self-hosted Firecrawl base URL
 - `FIRECRAWL_AGENT_URL`: Optional Firecrawl agent endpoint override
+- `OMNISEARCH_RESULT_TTL_MS`: Oversized-result retention in
+  milliseconds (default: 24 hours, maximum: 7 days)
+- `OMNISEARCH_RESULT_MAX_BYTES`: Maximum bytes for one stored result
+  (default: 25 MiB)
+- `OMNISEARCH_RESULT_STORE_MAX_BYTES`: Total result-store quota
+  (default: 256 MiB; oldest results are evicted first)
 
 You can start with just one or two API keys and add more later as
 needed. The server will log which providers are available on startup.

@@ -15,12 +15,22 @@ import { ErrorType, ProviderError } from './types.js';
 
 const DEFAULT_RESULT_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RESULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_RESULT_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_STORE_BYTES = 256 * 1024 * 1024;
+const MAX_CONFIGURED_BYTES = 1024 * 1024 * 1024;
 const MAX_READ_LINES = 500;
 const RESULT_ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const result_error = (message: string) =>
 	new ProviderError(ErrorType.INVALID_INPUT, message, 'result_read');
+
+const storage_error = (message: string) =>
+	new ProviderError(
+		ErrorType.PROVIDER_ERROR,
+		message,
+		'result_store',
+	);
 
 const get_result_dir = () =>
 	process.env.OMNISEARCH_RESULT_DIR ||
@@ -33,6 +43,25 @@ const get_result_ttl_ms = () => {
 	}
 	return Math.min(Math.floor(configured), MAX_RESULT_TTL_MS);
 };
+
+const get_byte_limit = (name: string, fallback: number) => {
+	const configured = Number(process.env[name]);
+	if (!Number.isFinite(configured) || configured <= 0)
+		return fallback;
+	return Math.min(Math.floor(configured), MAX_CONFIGURED_BYTES);
+};
+
+const get_max_result_bytes = () =>
+	get_byte_limit(
+		'OMNISEARCH_RESULT_MAX_BYTES',
+		DEFAULT_MAX_RESULT_BYTES,
+	);
+
+const get_max_store_bytes = () =>
+	get_byte_limit(
+		'OMNISEARCH_RESULT_STORE_MAX_BYTES',
+		DEFAULT_MAX_STORE_BYTES,
+	);
 
 const ensure_result_dir = () => {
 	const result_dir = get_result_dir();
@@ -87,9 +116,51 @@ export const cleanup_expired_results = (now = Date.now()): number => {
 	return removed;
 };
 
+const prune_to_fit = (result_dir: string, required_bytes: number) => {
+	const max_store_bytes = get_max_store_bytes();
+	if (required_bytes > max_store_bytes) {
+		throw storage_error(
+			`Result exceeds the configured ${max_store_bytes}-byte total storage quota`,
+		);
+	}
+
+	const files = readdirSync(result_dir, { withFileTypes: true })
+		.filter((entry) => {
+			if (!entry.isFile() || !entry.name.endsWith('.txt'))
+				return false;
+			return RESULT_ID_PATTERN.test(entry.name.slice(0, -4));
+		})
+		.map((entry) => {
+			const path = join(result_dir, entry.name);
+			const stats = statSync(path);
+			return { path, size: stats.size, mtime_ms: stats.mtimeMs };
+		})
+		.sort((left, right) => left.mtime_ms - right.mtime_ms);
+
+	let total_bytes = files.reduce((sum, file) => sum + file.size, 0);
+	for (const file of files) {
+		if (total_bytes + required_bytes <= max_store_bytes) break;
+		try {
+			unlinkSync(file.path);
+			total_bytes -= file.size;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+				throw error;
+		}
+	}
+};
+
 export const store_result = (content: string): StoredResult => {
 	cleanup_expired_results();
 	const result_dir = ensure_result_dir();
+	const content_bytes = Buffer.byteLength(content, 'utf8');
+	const max_result_bytes = get_max_result_bytes();
+	if (content_bytes > max_result_bytes) {
+		throw storage_error(
+			`Result exceeds the configured ${max_result_bytes}-byte storage limit`,
+		);
+	}
+	prune_to_fit(result_dir, content_bytes);
 	const result_id = randomUUID();
 	const path = join(result_dir, `${result_id}.txt`);
 	writeFileSync(path, content, {

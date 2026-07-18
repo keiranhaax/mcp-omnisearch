@@ -21,11 +21,15 @@ beforeEach(() => {
 	result_dir = mkdtempSync(join(tmpdir(), 'omnisearch-result-test-'));
 	process.env.OMNISEARCH_RESULT_DIR = result_dir;
 	process.env.OMNISEARCH_RESULT_TTL_MS = '86400000';
+	delete process.env.OMNISEARCH_RESULT_MAX_BYTES;
+	delete process.env.OMNISEARCH_RESULT_STORE_MAX_BYTES;
 });
 
 afterEach(() => {
 	delete process.env.OMNISEARCH_RESULT_DIR;
 	delete process.env.OMNISEARCH_RESULT_TTL_MS;
+	delete process.env.OMNISEARCH_RESULT_MAX_BYTES;
+	delete process.env.OMNISEARCH_RESULT_STORE_MAX_BYTES;
 	rmSync(result_dir, { recursive: true, force: true });
 });
 
@@ -73,6 +77,28 @@ describe('remote result store', () => {
 		expect(() => read_result_chunk(stored.result_id, 1, 10)).toThrow(
 			'Result not found or expired',
 		);
+	});
+
+	it('enforces a per-result size cap', () => {
+		process.env.OMNISEARCH_RESULT_MAX_BYTES = '10';
+		expect(() => store_result('12345678901')).toThrow(
+			'Result exceeds the configured 10-byte storage limit',
+		);
+	});
+
+	it('evicts the oldest result before exceeding the total store quota', () => {
+		process.env.OMNISEARCH_RESULT_MAX_BYTES = '20';
+		process.env.OMNISEARCH_RESULT_STORE_MAX_BYTES = '20';
+		const first = store_result('123456789012');
+		const first_path = join(result_dir, `${first.result_id}.txt`);
+		const old = new Date(Date.now() - 5000);
+		utimesSync(first_path, old, old);
+
+		const second = store_result('abcdefghijkl');
+		const second_path = join(result_dir, `${second.result_id}.txt`);
+
+		expect(existsSync(first_path)).toBe(false);
+		expect(existsSync(second_path)).toBe(true);
 	});
 
 	it('repairs overly broad directory permissions before storing data', () => {
