@@ -8,7 +8,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ErrorType, ProviderError } from './types.js';
@@ -24,7 +24,7 @@ const result_error = (message: string) =>
 
 const get_result_dir = () =>
 	process.env.OMNISEARCH_RESULT_DIR ||
-	join(tmpdir(), 'mcp-omnisearch-results');
+	join(homedir(), '.cache', 'mcp-omnisearch', 'results');
 
 const get_result_ttl_ms = () => {
 	const configured = Number(process.env.OMNISEARCH_RESULT_TTL_MS);
