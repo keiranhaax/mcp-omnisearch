@@ -2,7 +2,8 @@
 set -euo pipefail
 umask 077
 
-cd /opt/mcp-omnisearch
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "${script_dir}"
 
 # Read only GitHub credentials from the shared copilot-api environment. Do not
 # inherit unrelated secrets into the Omnisearch process.
