@@ -63,10 +63,10 @@ describe('http_json', () => {
 		);
 
 		await expect(
-			http_json('kagi', 'https://api.example.com'),
+			http_json('test_provider', 'https://api.example.com'),
 		).rejects.toMatchObject({
 			type: ErrorType.API_ERROR,
-			provider: 'kagi',
+			provider: 'test_provider',
 			message: 'Invalid API key',
 		});
 	});
@@ -77,10 +77,10 @@ describe('http_json', () => {
 		);
 
 		await expect(
-			http_json('kagi', 'https://api.example.com'),
+			http_json('test_provider', 'https://api.example.com'),
 		).rejects.toMatchObject({
 			type: ErrorType.ENTITLEMENT_REQUIRED,
-			provider: 'kagi',
+			provider: 'test_provider',
 			message: 'API key does not have access to this endpoint',
 		});
 	});

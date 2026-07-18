@@ -19,14 +19,12 @@ import { tool_descriptions } from './descriptions.js';
 // Concrete provider imports
 import { ExaAnswerProvider } from '../../providers/ai_response/exa_answer/index.js';
 import { ExaDeepResearchProvider } from '../../providers/ai_response/exa_deep_research/index.js';
-import { KagiFastGPTProvider } from '../../providers/ai_response/kagi_fastgpt/index.js';
 import { LinkupProvider } from '../../providers/ai_response/linkup/index.js';
 import { BraveAnswersProvider } from '../../providers/ai_response/brave_answers/index.js';
 import { TavilyResearchProvider } from '../../providers/ai_response/tavily_research/index.js';
 import { YouResearchProvider } from '../../providers/ai_response/you_research/index.js';
 
 export type AISearchProviderName =
-	| 'kagi_fastgpt'
 	| 'exa_answer'
 	| 'exa_deep_research'
 	| 'linkup'
@@ -37,13 +35,7 @@ export type AISearchProviderName =
 const providers = new Map<string, SearchProvider>();
 
 export const initialize_ai_search = (): boolean => {
-	if (
-		is_api_key_valid(
-			config.ai_response.kagi_fastgpt.api_key,
-			'kagi_fastgpt',
-		)
-	)
-		providers.set('kagi_fastgpt', new KagiFastGPTProvider());
+	providers.clear();
 	if (
 		is_api_key_valid(
 			config.ai_response.exa_answer.api_key,

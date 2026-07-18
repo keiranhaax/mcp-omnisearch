@@ -27,7 +27,7 @@ export const register_result_read = (
 				result_id: v.pipe(
 					v.string(),
 					v.regex(
-						/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+						/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89aAbB][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$/,
 						'Invalid result ID',
 					),
 					v.description(

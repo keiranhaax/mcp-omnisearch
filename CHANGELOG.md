@@ -1,5 +1,15 @@
 # mcp-omnisearch
 
+## Unreleased
+
+### Changes
+
+- Remove all Kagi integrations and configuration.
+- Replace URL summarization with Firecrawl v2 `summary` format.
+- Add authenticated remote pagination for oversized results.
+- Harden retries, URL validation, provider timeouts, schemas, runtime
+  startup, and remote proxy deployment.
+
 ## 0.0.24
 
 ### Patch Changes

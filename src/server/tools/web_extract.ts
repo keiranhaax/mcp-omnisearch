@@ -24,15 +24,10 @@ import { FirecrawlCrawlProvider } from '../../providers/processing/firecrawl_cra
 import { FirecrawlExtractProvider } from '../../providers/processing/firecrawl_extract/index.js';
 import { FirecrawlMapProvider } from '../../providers/processing/firecrawl_map/index.js';
 import { FirecrawlScrapeProvider } from '../../providers/processing/firecrawl_scrape/index.js';
-import { KagiSummarizerProvider } from '../../providers/processing/kagi_summarizer/index.js';
 import { TavilyExtractProvider } from '../../providers/processing/tavily_extract/index.js';
 import { FirecrawlSearchProvider } from '../../providers/processing/firecrawl_search/index.js';
 
-export type WebExtractProvider =
-	| 'tavily'
-	| 'kagi'
-	| 'firecrawl'
-	| 'exa';
+export type WebExtractProvider = 'tavily' | 'firecrawl' | 'exa';
 
 export type WebExtractMode =
 	| 'extract'
@@ -54,6 +49,8 @@ const make_key = (provider: string, mode: string): ProviderKey =>
 	`${provider}:${mode}`;
 
 export const initialize_web_extract = (): boolean => {
+	providers.clear();
+
 	// Tavily
 	if (
 		is_api_key_valid(
@@ -66,18 +63,6 @@ export const initialize_web_extract = (): boolean => {
 			new TavilyExtractProvider(),
 		);
 
-	// Kagi
-	if (
-		is_api_key_valid(
-			config.processing.kagi_summarizer.api_key,
-			'kagi_summarizer',
-		)
-	)
-		providers.set(
-			make_key('kagi', 'summarize'),
-			new KagiSummarizerProvider(),
-		);
-
 	// Firecrawl
 	if (
 		is_api_key_valid(
@@ -87,6 +72,10 @@ export const initialize_web_extract = (): boolean => {
 	) {
 		providers.set(
 			make_key('firecrawl', 'scrape'),
+			new FirecrawlScrapeProvider(),
+		);
+		providers.set(
+			make_key('firecrawl', 'summarize'),
 			new FirecrawlScrapeProvider(),
 		);
 		providers.set(
@@ -139,7 +128,6 @@ export const get_available_providers = () => {
 // Default modes per provider
 const default_modes: Record<WebExtractProvider, WebExtractMode> = {
 	tavily: 'extract',
-	kagi: 'summarize',
 	firecrawl: 'scrape',
 	exa: 'contents',
 };
@@ -147,9 +135,9 @@ const default_modes: Record<WebExtractProvider, WebExtractMode> = {
 // Valid modes per provider
 const valid_modes: Record<WebExtractProvider, WebExtractMode[]> = {
 	tavily: ['extract'],
-	kagi: ['summarize'],
 	firecrawl: [
 		'scrape',
+		'summarize',
 		'crawl',
 		'map',
 		'extract',
@@ -160,7 +148,7 @@ const valid_modes: Record<WebExtractProvider, WebExtractMode[]> = {
 };
 
 const firecrawl_format_schema = v.union([
-	v.string(),
+	v.pipe(v.string(), v.maxLength(50)),
 	v.record(v.string(), v.any()),
 ]);
 
@@ -168,6 +156,7 @@ const firecrawl_options_schema = v.object({
 	formats: v.optional(
 		v.pipe(
 			v.array(firecrawl_format_schema),
+			v.maxLength(10),
 			v.description(
 				'Firecrawl scrape response formats. Defaults to markdown.',
 			),
@@ -176,6 +165,7 @@ const firecrawl_options_schema = v.object({
 	question: v.optional(
 		v.pipe(
 			v.string(),
+			v.maxLength(10000),
 			v.description(
 				'Ask a focused extraction question during scrape.',
 			),
@@ -184,6 +174,7 @@ const firecrawl_options_schema = v.object({
 	highlights_query: v.optional(
 		v.pipe(
 			v.string(),
+			v.maxLength(10000),
 			v.description(
 				'Return relevant page highlights for this query.',
 			),
@@ -200,12 +191,16 @@ const firecrawl_options_schema = v.object({
 	maxAge: v.optional(
 		v.pipe(
 			v.number(),
+			v.integer(),
+			v.minValue(0),
 			v.description('Maximum cache age in milliseconds.'),
 		),
 	),
 	minAge: v.optional(
 		v.pipe(
 			v.number(),
+			v.integer(),
+			v.minValue(0),
 			v.description('Minimum cache age in milliseconds.'),
 		),
 	),
@@ -253,18 +248,23 @@ const firecrawl_search_options_schema = v.object({
 	limit: v.optional(
 		v.pipe(
 			v.number(),
+			v.integer(),
+			v.minValue(1),
+			v.maxValue(100),
 			v.description('Maximum Firecrawl search results.'),
 		),
 	),
 	sources: v.optional(
 		v.pipe(
 			v.array(v.picklist(['web', 'images', 'news'])),
+			v.maxLength(3),
 			v.description('Firecrawl search verticals. Defaults to web.'),
 		),
 	),
 	categories: v.optional(
 		v.pipe(
 			v.array(v.picklist(['github', 'research', 'pdf'])),
+			v.maxLength(3),
 			v.description(
 				'Firecrawl search categories for narrowed retrieval.',
 			),
@@ -272,27 +272,38 @@ const firecrawl_search_options_schema = v.object({
 	),
 	includeDomains: v.optional(
 		v.pipe(
-			v.array(v.string()),
+			v.array(v.pipe(v.string(), v.maxLength(253))),
+			v.maxLength(50),
 			v.description('Only search these domains.'),
 		),
 	),
 	excludeDomains: v.optional(
 		v.pipe(
-			v.array(v.string()),
+			v.array(v.pipe(v.string(), v.maxLength(253))),
+			v.maxLength(50),
 			v.description('Exclude these domains from results.'),
 		),
 	),
 	tbs: v.optional(
 		v.pipe(
 			v.string(),
+			v.maxLength(200),
 			v.description('Firecrawl time filter string.'),
 		),
 	),
 	location: v.optional(
-		v.pipe(v.string(), v.description('Search location hint.')),
+		v.pipe(
+			v.string(),
+			v.maxLength(500),
+			v.description('Search location hint.'),
+		),
 	),
 	country: v.optional(
-		v.pipe(v.string(), v.description('Search country code.')),
+		v.pipe(
+			v.string(),
+			v.maxLength(2),
+			v.description('Search country code.'),
+		),
 	),
 	ignoreInvalidURLs: v.optional(
 		v.pipe(
@@ -306,6 +317,7 @@ const firecrawl_search_options_schema = v.object({
 				formats: v.optional(
 					v.pipe(
 						v.array(firecrawl_format_schema),
+						v.maxLength(10),
 						v.description(
 							'Formats to scrape for each Firecrawl search hit.',
 						),
@@ -345,32 +357,40 @@ export const register_web_extract = (
 			name: 'web_extract',
 			description: tool_descriptions.web_extract,
 			annotations: {
-				readOnlyHint: true,
+				readOnlyHint: false,
 				destructiveHint: false,
-				idempotentHint: true,
+				idempotentHint: false,
 				openWorldHint: true,
 			},
 			schema: v.object({
 				url: v.optional(
 					v.pipe(
-						v.union([v.string(), v.array(v.string())]),
+						v.union([
+							v.pipe(v.string(), v.maxLength(4096)),
+							v.pipe(
+								v.array(v.pipe(v.string(), v.maxLength(4096))),
+								v.maxLength(20),
+							),
+						]),
 						v.description(
-							'URL or array of URLs to process. Required for all modes except firecrawl search.',
+							'URL, Exa result ID, or array of up to 20 values. Required for all modes except Firecrawl search.',
 						),
 					),
 				),
 				query: v.optional(
 					v.pipe(
 						v.string(),
+						v.minLength(1),
+						v.maxLength(10000),
 						v.description(
-							'Search query (required when mode=search with firecrawl). Also used by tavily extract for chunk reranking.',
+							'Search query (required when mode=search with Firecrawl). Also used by Tavily extract for chunk reranking.',
 						),
 					),
 				),
 				provider: v.pipe(
 					v.picklist(available),
 					v.description(
-						'Provider to use: Firecrawl for scrape/crawl/search/actions, Exa for contents/similar, Tavily for extraction, Kagi for summarize.',
+						'Provider to use: Firecrawl for scrape/summarize/crawl/map/extract/actions/search, Exa for contents/similar, Tavily for extraction.',
 					),
 				),
 				mode: v.optional(
@@ -387,7 +407,7 @@ export const register_web_extract = (
 							'similar',
 						]),
 						v.description(
-							'Provider mode. firecrawl supports scrape/crawl/map/extract/actions/search; exa supports contents/similar; tavily supports extract; kagi supports summarize. Defaults to provider default.',
+							'Provider mode. firecrawl supports scrape/summarize/crawl/map/extract/actions/search; exa supports contents/similar; tavily supports extract. Defaults to provider default.',
 						),
 					),
 				),
@@ -488,9 +508,12 @@ export const register_web_extract = (
 				const provider_options =
 					provider === 'firecrawl' && resolved_mode === 'scrape'
 						? firecrawl_options
-						: provider === 'firecrawl' && resolved_mode === 'search'
-							? firecrawl_search_options
-							: undefined;
+						: provider === 'firecrawl' &&
+							  resolved_mode === 'summarize'
+							? { formats: ['summary'] }
+							: provider === 'firecrawl' && resolved_mode === 'search'
+								? firecrawl_search_options
+								: undefined;
 
 				const result = await selected.process_content(
 					input,

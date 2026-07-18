@@ -5,9 +5,9 @@
 
 A Model Context Protocol (MCP) server that provides unified access to
 multiple search providers and AI tools. This server combines the
-capabilities of Tavily, Brave, Kagi, Exa AI, GitHub, Linkup, and
-Firecrawl to offer comprehensive search, AI responses, and content
-processing through four consolidated tools.
+capabilities of Tavily, Brave, Exa AI, GitHub, Linkup, You.com,
+Firecrawl, and Context.dev through consolidated search/extraction
+tools plus focused provider-specific tools.
 
 <a href="https://glama.ai/mcp/servers/gz5wgmptd8">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/gz5wgmptd8/badge" alt="Glama badge" />
@@ -18,14 +18,13 @@ processing through four consolidated tools.
 ### 🔍 `web_search` — Web Search
 
 Search the web for information. Providers: tavily (factual/citations),
-brave (privacy/operators), kagi (quality/operators), exa
-(AI-semantic), kagi_enrichment (specialized indexes).
+brave (privacy/operators), exa (AI-semantic), you (LLM-ready
+snippets).
 
 Parameters:
 
 - `query` (string, required): Search query
-- `provider` (string, required): `tavily`, `brave`, `kagi`, `exa`, or
-  `kagi_enrichment`
+- `provider` (string, required): `tavily`, `brave`, `exa`, or `you`
 - `limit` (number, optional): Maximum number of results (default: 10)
 - `include_domains` (array, optional): Only return results from these
   domains
@@ -35,14 +34,15 @@ Parameters:
 ### 🤖 `ai_search` — AI-Powered Answers
 
 Get AI-powered answers with citations and reasoning. Providers:
-kagi_fastgpt (fast ~900ms answers), exa_answer (semantic AI), linkup
-(deep agentic search with sources).
+exa_answer (semantic AI), exa_deep_research (deep research),
+brave_answers, tavily_research, you_research, and linkup (deep agentic
+search with sources).
 
 Parameters:
 
 - `query` (string, required): Question or search query
-- `provider` (string, required): `kagi_fastgpt`, `exa_answer`, or
-  `linkup`
+- `provider` (string, required): `exa_answer`, `exa_deep_research`,
+  `brave_answers`, `tavily_research`, `you_research`, or `linkup`
 - `limit` (number, optional): Maximum number of results (default: 10)
 
 ### 🔎 `github_search` — GitHub Search
@@ -63,21 +63,30 @@ Parameters:
 ### 📄 `web_extract` — Content Extraction and Processing
 
 Extract, process, or summarize web content from URLs. Providers:
-tavily (content extraction), kagi (summarization of
-pages/videos/podcasts), firecrawl
-(scraping/crawling/mapping/structured extraction/interactive), exa
-(content retrieval/similar pages).
+tavily (content extraction), firecrawl
+(scrape/summarize/crawl/map/extract/actions/search), exa (content
+retrieval/similar pages).
 
 Parameters:
 
 - `url` (string or array, required): URL or array of URLs to process
-- `provider` (string, required): `tavily`, `kagi`, `firecrawl`, or
-  `exa`
+- `provider` (string, required): `tavily`, `firecrawl`, or `exa`
 - `mode` (string, optional): Processing mode. Firecrawl:
-  scrape/crawl/map/extract/actions. Exa: contents/similar. Tavily:
-  extract. Kagi: summarize. Defaults to provider default.
+  scrape/summarize/crawl/map/extract/actions/search. Exa:
+  contents/similar. Tavily: extract. Defaults to provider default.
 - `extract_depth` (string, optional): `basic` or `advanced` (default:
   basic)
+
+### `result_read` — Remote Result Pagination
+
+Large results are stored privately on the server for up to 24 hours.
+Use the opaque `result_id` returned by another tool to read the result
+in bounded line ranges. This works for remote MCP clients that cannot
+access the VPS filesystem.
+
+Additional focused tools provide Brave LLM context, Brave news/media
+search, Firecrawl agent workflows, and Context.dev web, brand,
+styleguide, classification, and transaction intelligence.
 
 ### 🎯 Search Operators
 
@@ -86,7 +95,7 @@ and parameters:
 
 #### Search Operator Reference
 
-**Brave & Kagi Operators** (use in query string):
+**Brave Operators** (use in query string):
 
 - **Domain**: `site:example.com`, `-site:example.com`
 - **File type**: `filetype:pdf` or `ext:pdf`
@@ -105,13 +114,13 @@ and parameters:
 #### Example Usage
 
 ```typescript
-// Brave/Kagi: Advanced operators in query
+// Brave: Advanced operators in query
 {
   "query": "filetype:pdf lang:en site:microsoft.com +typescript -javascript",
   "provider": "brave"
 }
 
-// Brave/Kagi: Search gists
+// Brave: Search gists
 {
   "query": "site:gist.github.com claude code settings",
   "provider": "brave"
@@ -128,7 +137,6 @@ and parameters:
 #### Provider Capabilities
 
 - **Brave Search**: Full native operator support in query string
-- **Kagi Search**: Complete operator support in query string
 - **Tavily Search**: Domain filtering through API parameters
 - **Exa Search**: Domain filtering through API parameters, semantic
   search with neural understanding
@@ -151,8 +159,8 @@ For example:
 
 - If you only have a Tavily and Brave API key, only those providers
   will be available
-- If you don't have a Kagi API key, Kagi-based services won't be
-  available, but all other providers will work normally
+- Missing provider keys simply disable those providers; the rest keep
+  working normally
 - The server will log which providers are available based on the API
   keys you've configured
 
@@ -176,7 +184,6 @@ Add this to your Cline MCP settings:
 			"args": ["/path/to/mcp-omnisearch/dist/index.js"],
 			"env": {
 				"TAVILY_API_KEY": "your-tavily-key",
-				"KAGI_API_KEY": "your-kagi-key",
 				"BRAVE_API_KEY": "your-brave-key",
 				"GITHUB_API_KEY": "your-github-key",
 				"EXA_API_KEY": "your-exa-key",
@@ -203,7 +210,7 @@ For WSL environments, add this to your Claude Desktop configuration:
 			"args": [
 				"bash",
 				"-c",
-				"TAVILY_API_KEY=key1 KAGI_API_KEY=key2 BRAVE_API_KEY=key3 GITHUB_API_KEY=key4 EXA_API_KEY=key5 LINKUP_API_KEY=key6 FIRECRAWL_API_KEY=key7 FIRECRAWL_BASE_URL=http://localhost:3002 node /path/to/mcp-omnisearch/dist/index.js"
+				"TAVILY_API_KEY=key1 BRAVE_API_KEY=key2 GITHUB_API_KEY=key3 EXA_API_KEY=key4 LINKUP_API_KEY=key5 FIRECRAWL_API_KEY=key6 FIRECRAWL_BASE_URL=http://localhost:3002 node /path/to/mcp-omnisearch/dist/index.js"
 			]
 		}
 	}
@@ -216,19 +223,20 @@ The server uses API keys for each provider. **You don't need keys for
 all providers** - only the providers corresponding to your available
 API keys will be activated:
 
-- `TAVILY_API_KEY`: For Tavily Search and content extraction
-- `KAGI_API_KEY`: For Kagi services (Search, FastGPT, Summarizer,
-  Enrichment)
-- `BRAVE_API_KEY`: For Brave Search
-- `GITHUB_API_KEY`: For GitHub search services (Code, Repository, User
-  search)
-- `EXA_API_KEY`: For Exa AI services (Search, Answer, Contents,
-  Similar)
-- `LINKUP_API_KEY`: For Linkup AI search with sourced answers
-- `FIRECRAWL_API_KEY`: For Firecrawl services (Scrape, Crawl, Map,
-  Extract, Actions)
-- `FIRECRAWL_BASE_URL`: For self-hosted Firecrawl instances (optional,
-  defaults to Firecrawl cloud service)
+- `TAVILY_API_KEY`: Tavily search, extraction, and research
+- `BRAVE_API_KEY`: Brave web, news, media, and LLM context
+- `BRAVE_ANSWERS_API_KEY`: Optional separate Brave Answers credential
+- `GITHUB_API_KEY`: GitHub code, repository, and user search
+- `EXA_API_KEY`: Exa search, answers, deep research, contents, and
+  similar
+- `LINKUP_API_KEY`: Linkup sourced answers
+- `YOU_API_KEY`: You.com search and research
+- `CONTEXT_DEV_API_KEY`: Context.dev web, brand, styleguide,
+  classification, and transaction tools
+- `FIRECRAWL_API_KEY`: Firecrawl scrape, summarize, crawl, map,
+  extract, actions, search, and agent tools
+- `FIRECRAWL_BASE_URL`: Optional self-hosted Firecrawl base URL
+- `FIRECRAWL_AGENT_URL`: Optional Firecrawl agent endpoint override
 
 You can start with just one or two API keys and add more later as
 needed. The server will log which providers are available on startup.
@@ -293,8 +301,8 @@ FIRECRAWL_BASE_URL=https://your-firecrawl-domain.com
 
 - If `FIRECRAWL_BASE_URL` is not set, MCP Omnisearch will default to
   the Firecrawl cloud service
-- Self-hosted instances support the same API endpoints (`/v1/scrape`,
-  `/v1/crawl`, etc.)
+- Self-hosted instances should expose the Firecrawl v2 endpoints
+  (`/v2/scrape`, `/v2/crawl`, and related routes)
 - You'll still need a `FIRECRAWL_API_KEY` even for self-hosted
   instances
 - Self-hosted Firecrawl provides enhanced security and customization
@@ -339,14 +347,14 @@ Get AI-powered answers with citations.
 ```json
 {
 	"query": "Explain the differences between REST and GraphQL",
-	"provider": "kagi_fastgpt"
+	"provider": "exa_answer"
 }
 ```
 
 ```json
 {
 	"query": "How does machine learning work?",
-	"provider": "exa_answer"
+	"provider": "brave_answers"
 }
 ```
 
@@ -392,7 +400,7 @@ Extract, process, or summarize web content from URLs.
 ```json
 {
 	"url": "https://example.com/long-article",
-	"provider": "kagi",
+	"provider": "firecrawl",
 	"mode": "summarize"
 }
 ```
@@ -441,12 +449,12 @@ cd mcp-omnisearch
 
 # Create .env file with your API keys
 echo "TAVILY_API_KEY=your-tavily-key" > .env
-echo "KAGI_API_KEY=your-kagi-key" >> .env
 echo "BRAVE_API_KEY=your-brave-key" >> .env
 echo "EXA_API_KEY=your-exa-key" >> .env
 echo "GITHUB_API_KEY=your-github-key" >> .env
 # Add other API keys as needed
 echo "LINKUP_API_KEY=your-linkup-key" >> .env
+echo "FIRECRAWL_API_KEY=your-firecrawl-key" >> .env
 
 # Start the container
 docker-compose up -d
@@ -459,11 +467,11 @@ docker build -t mcp-omnisearch .
 docker run -d \
   -p 8000:8000 \
   -e TAVILY_API_KEY=your-tavily-key \
-  -e KAGI_API_KEY=your-kagi-key \
   -e BRAVE_API_KEY=your-brave-key \
   -e EXA_API_KEY=your-exa-key \
   -e GITHUB_API_KEY=your-github-key \
   -e LINKUP_API_KEY=your-linkup-key \
+  -e FIRECRAWL_API_KEY=your-firecrawl-key \
   --name mcp-omnisearch \
   mcp-omnisearch
 ```
@@ -472,15 +480,17 @@ docker run -d \
 
 Configure the container using environment variables for each provider:
 
-- `TAVILY_API_KEY`: For Tavily Search and content extraction
-- `KAGI_API_KEY`: For Kagi services (Search, FastGPT, Summarizer,
-  Enrichment)
-- `BRAVE_API_KEY`: For Brave Search
-- `GITHUB_API_KEY`: For GitHub search services
-- `EXA_API_KEY`: For Exa AI services
-- `LINKUP_API_KEY`: For Linkup AI search
-- `FIRECRAWL_API_KEY`: For Firecrawl services
-- `FIRECRAWL_BASE_URL`: For self-hosted Firecrawl instances (optional)
+- `TAVILY_API_KEY`: Tavily search, extraction, and research
+- `BRAVE_API_KEY`: Brave search, news, media, and context
+- `BRAVE_ANSWERS_API_KEY`: Optional separate Brave Answers credential
+- `GITHUB_API_KEY`: GitHub search
+- `EXA_API_KEY`: Exa search, answers, and content APIs
+- `LINKUP_API_KEY`: Linkup sourced answers
+- `YOU_API_KEY`: You.com search and research
+- `CONTEXT_DEV_API_KEY`: Context.dev tools
+- `FIRECRAWL_API_KEY`: Firecrawl processing and agent APIs
+- `FIRECRAWL_BASE_URL`: Optional self-hosted Firecrawl URL
+- `FIRECRAWL_AGENT_URL`: Optional agent endpoint override
 - `PORT`: Container port (defaults to 8000)
 
 ### OpenAPI Access
@@ -559,7 +569,6 @@ Each provider requires its own API key and may have different access
 requirements:
 
 - **Tavily**: Requires an API key from their developer portal
-- **Kagi**: Some features limited to Business (Team) plan users
 - **Brave**: API key from their developer portal
 - **GitHub**: Personal access token with **no scopes selected**
   (public access only)
@@ -594,7 +603,6 @@ Built on:
 
 - [Model Context Protocol](https://github.com/modelcontextprotocol)
 - [Tavily Search](https://tavily.com)
-- [Kagi Search](https://kagi.com)
 - [Brave Search](https://search.brave.com)
 - [Exa AI](https://exa.ai)
 - [Linkup](https://linkup.so)

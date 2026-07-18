@@ -17,44 +17,29 @@ import { tool_descriptions } from './descriptions.js';
 
 // Concrete provider imports
 import { config } from '../../config/env.js';
-import { KagiEnrichmentSearchProvider } from '../../providers/enhancement/kagi_enrichment/index.js';
 import { BraveSearchProvider } from '../../providers/search/brave/index.js';
 import { ExaSearchProvider } from '../../providers/search/exa/index.js';
-import { KagiSearchProvider } from '../../providers/search/kagi/index.js';
 import { TavilySearchProvider } from '../../providers/search/tavily/index.js';
 import { YouSearchProvider } from '../../providers/search/you/index.js';
 
 export type WebSearchProviderName =
 	| 'tavily'
 	| 'brave'
-	| 'kagi'
 	| 'exa'
-	| 'kagi_enrichment'
 	| 'you';
 
 const providers = new Map<string, SearchProvider>();
 
 export const initialize_web_search = (): boolean => {
+	providers.clear();
 	if (is_api_key_valid(config.search.tavily.api_key, 'tavily'))
 		providers.set('tavily', new TavilySearchProvider());
 	if (is_api_key_valid(config.search.brave.api_key, 'brave'))
 		providers.set('brave', new BraveSearchProvider());
-	if (is_api_key_valid(config.search.kagi.api_key, 'kagi'))
-		providers.set('kagi', new KagiSearchProvider());
 	if (is_api_key_valid(config.search.exa.api_key, 'exa'))
 		providers.set('exa', new ExaSearchProvider());
 	if (is_api_key_valid(config.search.you.api_key, 'you'))
 		providers.set('you', new YouSearchProvider());
-	if (
-		is_api_key_valid(
-			config.enhancement.kagi_enrichment.api_key,
-			'kagi_enrichment',
-		)
-	)
-		providers.set(
-			'kagi_enrichment',
-			new KagiEnrichmentSearchProvider(),
-		);
 
 	return providers.size > 0;
 };

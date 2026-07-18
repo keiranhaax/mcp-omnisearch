@@ -3,10 +3,8 @@
 // Search provider API keys
 export const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 export const BRAVE_API_KEY = process.env.BRAVE_API_KEY;
-export const BRAVE_AI_API_KEY = process.env.BRAVE_AI_API_KEY;
 export const BRAVE_ANSWERS_API_KEY =
 	process.env.BRAVE_ANSWERS_API_KEY;
-export const KAGI_API_KEY = process.env.KAGI_API_KEY;
 export const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 export const EXA_API_KEY = process.env.EXA_API_KEY;
 export const LINKUP_API_KEY = process.env.LINKUP_API_KEY;
@@ -30,11 +28,6 @@ export const config = {
 			api_key: BRAVE_API_KEY,
 			base_url: 'https://api.search.brave.com/res/v1',
 			timeout: 10000, // 10 seconds
-		},
-		kagi: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0',
-			timeout: 20000, // 20 seconds
 		},
 		github: {
 			api_key: GITHUB_API_KEY,
@@ -68,11 +61,6 @@ export const config = {
 		},
 	},
 	ai_response: {
-		kagi_fastgpt: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0/fastgpt',
-			timeout: 30000, // 30 seconds
-		},
 		exa_answer: {
 			api_key: EXA_API_KEY,
 			base_url: 'https://api.exa.ai',
@@ -106,11 +94,6 @@ export const config = {
 		},
 	},
 	processing: {
-		kagi_summarizer: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0/summarize',
-			timeout: 30000, // 30 seconds
-		},
 		tavily_extract: {
 			api_key: TAVILY_API_KEY,
 			base_url: 'https://api.tavily.com',
@@ -182,13 +165,6 @@ export const config = {
 			timeout: 60000,
 		},
 	},
-	enhancement: {
-		kagi_enrichment: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0/enrich',
-			timeout: 20000, // 20 seconds
-		},
-	},
 };
 
 // Validate required environment variables
@@ -202,9 +178,6 @@ export const validate_config = () => {
 
 	if (!BRAVE_API_KEY) missing_keys.push('BRAVE_API_KEY');
 	else available_keys.push('BRAVE_API_KEY');
-
-	if (!KAGI_API_KEY) missing_keys.push('KAGI_API_KEY');
-	else available_keys.push('KAGI_API_KEY');
 
 	if (!GITHUB_API_KEY) missing_keys.push('GITHUB_API_KEY');
 	else available_keys.push('GITHUB_API_KEY');

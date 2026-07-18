@@ -28,11 +28,11 @@ describe('handle_provider_error', () => {
 		const error = new ProviderError(
 			ErrorType.PROVIDER_ERROR,
 			'already wrapped',
-			'kagi',
+			'test_provider',
 		);
 
 		expect(() =>
-			handle_provider_error(error, 'kagi', 'fetch results'),
+			handle_provider_error(error, 'test_provider', 'fetch results'),
 		).toThrow(error);
 	});
 
