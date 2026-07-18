@@ -56,8 +56,41 @@ if [[ "${BIND_HOST}" != "0.0.0.0" && "${BIND_HOST}" != "::" ]]; then
 	fi
 fi
 
-export MCP_API_KEY
-exec mcp-proxy \
+clean_env=(
+  "HOME=${HOME}"
+  "PATH=${PATH}"
+  "USER=${USER:-ubuntu}"
+  "LANG=${LANG:-C.UTF-8}"
+  "NODE_ENV=production"
+)
+
+# Pass only credentials and runtime controls used by Omnisearch. This prevents
+# PM2 or an interactive deployment shell from leaking unrelated model secrets
+# into the MCP process.
+for variable in \
+  TAVILY_API_KEY \
+  BRAVE_API_KEY \
+  BRAVE_ANSWERS_API_KEY \
+  GITHUB_API_KEY \
+  EXA_API_KEY \
+  LINKUP_API_KEY \
+  YOU_API_KEY \
+  CONTEXT_DEV_API_KEY \
+  FIRECRAWL_API_KEY \
+  FIRECRAWL_BASE_URL \
+  FIRECRAWL_AGENT_URL \
+  OMNISEARCH_RESULT_DIR \
+  OMNISEARCH_RESULT_TTL_MS \
+  OMNISEARCH_RESULT_MAX_BYTES \
+  OMNISEARCH_RESULT_STORE_MAX_BYTES
+do
+  value="${!variable:-}"
+  if [[ -n "${value}" ]]; then
+    clean_env+=("${variable}=${value}")
+  fi
+done
+
+exec env -i "${clean_env[@]}" mcp-proxy \
   --host "${BIND_HOST}" \
   --port "${PORT}" \
   --apiKey "${MCP_API_KEY}" \
