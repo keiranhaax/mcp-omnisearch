@@ -1,5 +1,7 @@
+import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	apply_search_operators,
@@ -14,15 +16,19 @@ import {
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface BraveSearchResponse {
-	web: {
-		results: Array<{
-			title: string;
-			url: string;
-			description: string;
-		}>;
-	};
-}
+const brave_search_response_schema = v.object({
+	web: v.optional(
+		v.object({
+			results: v.array(
+				v.object({
+					title: v.optional(v.string()),
+					url: v.optional(v.string()),
+					description: v.optional(v.string()),
+				}),
+			),
+		}),
+	),
+});
 
 export class BraveSearchProvider implements SearchProvider {
 	name = 'brave';
@@ -53,9 +59,7 @@ export class BraveSearchProvider implements SearchProvider {
 					count: (params.limit ?? 10).toString(),
 				});
 
-				const data = await http_json<
-					BraveSearchResponse & { message?: string }
-				>(
+				const raw_data = await http_json(
 					this.name,
 					`${config.search.brave.base_url}/web/search?${query_params}`,
 					{
@@ -67,13 +71,29 @@ export class BraveSearchProvider implements SearchProvider {
 						signal: AbortSignal.timeout(config.search.brave.timeout),
 					},
 				);
+				const data = parse_provider_response(
+					this.name,
+					brave_search_response_schema,
+					raw_data,
+				);
 
-				return (data.web?.results || []).map((result) => ({
-					title: result.title,
-					url: result.url,
-					snippet: result.description,
-					source_provider: this.name,
-				}));
+				return (data.web?.results || [])
+					.filter(
+						(
+							result,
+						): result is typeof result & {
+							title: string;
+							url: string;
+						} =>
+							typeof result.title === 'string' &&
+							typeof result.url === 'string',
+					)
+					.map((result) => ({
+						title: result.title,
+						url: result.url,
+						snippet: result.description ?? '',
+						source_provider: this.name,
+					}));
 			} catch (error) {
 				handle_provider_error(
 					error,

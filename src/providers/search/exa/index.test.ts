@@ -136,4 +136,49 @@ describe('ExaSearchProvider', () => {
 		expect(result.metadata?.resolvedSearchType).toBeUndefined();
 		expect(result.snippet).toBe('Summary only');
 	});
+
+	it('maps the current searchType field without requiring its retired predecessor', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					searchType: 'auto',
+					results: [
+						{
+							title: 'Current response',
+							url: 'https://example.com/current',
+							text: 'Current content',
+						},
+					],
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		const [result] = await new ExaSearchProvider().search({
+			query: 'current field',
+		});
+
+		expect(result.metadata?.resolvedSearchType).toBe('auto');
+	});
+
+	it('rejects a malformed results envelope as a provider error', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: { unexpected: true } }),
+				{ status: 200 },
+			),
+		);
+
+		await expect(
+			new ExaSearchProvider().search({ query: 'malformed' }),
+		).rejects.toMatchObject({
+			type: 'PROVIDER_ERROR',
+			provider: 'exa',
+			message: 'Malformed exa response',
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
+	});
 });

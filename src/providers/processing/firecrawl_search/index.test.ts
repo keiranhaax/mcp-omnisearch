@@ -155,6 +155,63 @@ describe('FirecrawlSearchProvider', () => {
 		});
 	});
 
+	it('parses current highlight and plain-description web results', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					success: true,
+					data: {
+						web: [
+							{
+								title: 'Highlighted result',
+								url: 'https://example.com/highlights',
+								description:
+									'# Relevant heading\nRelevant highlighted passage.',
+							},
+							{
+								title: 'Plain result',
+								url: 'https://example.com/plain',
+								description: 'Plain search description.',
+								category: 'research',
+							},
+						],
+					},
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		const result =
+			await new FirecrawlSearchProvider().process_content(
+				'academic websites',
+				'basic',
+				{
+					categories: ['research'],
+					scrapeOptions: { formats: [], onlyMainContent: false },
+				},
+			);
+
+		expect(result.raw_contents).toEqual([
+			{
+				url: 'https://example.com/highlights',
+				content: '# Relevant heading\nRelevant highlighted passage.',
+			},
+			{
+				url: 'https://example.com/plain',
+				content: 'Plain search description.',
+			},
+		]);
+		expect(result.content).toContain('Category: research');
+		expect(result.metadata.source_counts).toEqual({
+			web: 2,
+			images: 0,
+			news: 0,
+		});
+	});
+
 	it('rejects mutually exclusive domain filters', async () => {
 		const provider = new FirecrawlSearchProvider();
 		await expect(

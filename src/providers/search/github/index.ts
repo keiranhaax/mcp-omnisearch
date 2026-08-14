@@ -1,4 +1,6 @@
 import { Octokit } from 'octokit';
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
@@ -10,39 +12,54 @@ import {
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-// Interface for individual code search result item from GitHub API
-interface GitHubCodeSearchResultItem {
-	name: string;
-	path: string;
-	sha: string;
-	url: string;
-	git_url: string;
-	html_url: string;
-	score: number;
-	repository: {
-		full_name: string;
-		html_url: string;
-	};
-	text_matches?: {
-		object_url?: string;
-		object_type?: string | null;
-		property?: string;
-		fragment?: string;
-	}[];
-}
+const github_code_search_response_schema = v.object({
+	items: v.array(
+		v.object({
+			name: v.string(),
+			path: v.string(),
+			html_url: v.string(),
+			score: v.number(),
+			repository: v.object({
+				full_name: v.string(),
+				html_url: v.string(),
+			}),
+			text_matches: v.optional(
+				v.array(
+					v.object({
+						fragment: v.optional(v.string()),
+					}),
+				),
+			),
+		}),
+	),
+});
 
-// Interface for individual repository search result item from GitHub API
-interface GitHubRepositorySearchResultItem {
-	full_name: string;
-	html_url: string;
-	description: string | null;
-	stargazers_count: number;
-	forks_count: number;
-	open_issues_count: number;
-	pushed_at: string;
-	language: string | null;
-	score: number;
-}
+const github_repository_search_response_schema = v.object({
+	items: v.array(
+		v.object({
+			full_name: v.string(),
+			html_url: v.string(),
+			description: v.nullable(v.string()),
+			stargazers_count: v.number(),
+			forks_count: v.number(),
+			pushed_at: v.string(),
+			language: v.nullable(v.string()),
+			score: v.number(),
+		}),
+	),
+});
+
+const github_user_search_response_schema = v.object({
+	items: v.array(
+		v.object({
+			login: v.string(),
+			html_url: v.string(),
+			bio: v.optional(v.nullable(v.string())),
+			type: v.string(),
+			score: v.number(),
+		}),
+	),
+});
 
 export class GitHubSearchProvider implements SearchProvider {
 	name = 'github';
@@ -76,37 +93,41 @@ export class GitHubSearchProvider implements SearchProvider {
 					},
 				});
 
-				return response.data.items.map(
-					(item: GitHubCodeSearchResultItem) => {
-						// Extract better snippet from text matches
-						let snippet = `No snippet available for ${item.path}`;
-						if (item.text_matches && item.text_matches.length > 0) {
-							// Combine multiple fragments for better context
-							const fragments = item.text_matches
-								.map((match) => match.fragment)
-								.filter(Boolean);
-							if (fragments.length > 0) {
-								snippet = fragments.slice(0, 2).join(' ... ');
-							}
-						}
-
-						return {
-							title: `${item.repository.full_name}/${item.path}`,
-							url: item.html_url,
-							snippet,
-							score: item.score,
-							source_provider: this.name,
-							// Add metadata for better context
-							metadata: {
-								repository: item.repository.full_name,
-								file_path: item.path,
-								file_name: item.name,
-								search_type: 'code',
-							},
-						};
-					},
+				const data = parse_provider_response(
+					this.name,
+					github_code_search_response_schema,
+					response.data,
 				);
-			} catch (error: any) {
+
+				return data.items.map((item) => {
+					// Extract better snippet from text matches
+					let snippet = `No snippet available for ${item.path}`;
+					if (item.text_matches && item.text_matches.length > 0) {
+						// Combine multiple fragments for better context
+						const fragments = item.text_matches
+							.map((match) => match.fragment)
+							.filter(Boolean);
+						if (fragments.length > 0) {
+							snippet = fragments.slice(0, 2).join(' ... ');
+						}
+					}
+
+					return {
+						title: `${item.repository.full_name}/${item.path}`,
+						url: item.html_url,
+						snippet,
+						score: item.score,
+						source_provider: this.name,
+						// Add metadata for better context
+						metadata: {
+							repository: item.repository.full_name,
+							file_path: item.path,
+							file_name: item.name,
+							search_type: 'code',
+						},
+					};
+				});
+			} catch (error) {
 				return this.handle_search_error(error);
 			}
 		};
@@ -134,34 +155,38 @@ export class GitHubSearchProvider implements SearchProvider {
 					sort: params.sort,
 				});
 
-				return response.data.items.map(
-					(item: GitHubRepositorySearchResultItem) => {
-						// Create richer description
-						let snippet =
-							item.description ?? 'No description available.';
-						if (item.language) {
-							snippet += ` • Language: ${item.language}`;
-						}
-						snippet += ` • ⭐ ${item.stargazers_count} • 🍴 ${item.forks_count}`;
-
-						return {
-							title: item.full_name,
-							url: item.html_url,
-							snippet,
-							score: item.score,
-							source_provider: this.name,
-							metadata: {
-								repository: item.full_name,
-								language: item.language,
-								stars: item.stargazers_count,
-								forks: item.forks_count,
-								last_push: item.pushed_at,
-								search_type: 'repository',
-							},
-						};
-					},
+				const data = parse_provider_response(
+					this.name,
+					github_repository_search_response_schema,
+					response.data,
 				);
-			} catch (error: any) {
+
+				return data.items.map((item) => {
+					// Create richer description
+					let snippet =
+						item.description ?? 'No description available.';
+					if (item.language) {
+						snippet += ` • Language: ${item.language}`;
+					}
+					snippet += ` • ⭐ ${item.stargazers_count} • 🍴 ${item.forks_count}`;
+
+					return {
+						title: item.full_name,
+						url: item.html_url,
+						snippet,
+						score: item.score,
+						source_provider: this.name,
+						metadata: {
+							repository: item.full_name,
+							language: item.language,
+							stars: item.stargazers_count,
+							forks: item.forks_count,
+							last_push: item.pushed_at,
+							search_type: 'repository',
+						},
+					};
+				});
+			} catch (error) {
 				return this.handle_search_error(error);
 			}
 		};
@@ -195,7 +220,13 @@ export class GitHubSearchProvider implements SearchProvider {
 					per_page: params.limit ?? 10,
 				});
 
-				return response.data.items.map((user: any) => ({
+				const data = parse_provider_response(
+					this.name,
+					github_user_search_response_schema,
+					response.data,
+				);
+
+				return data.items.map((user) => ({
 					title: user.login,
 					url: user.html_url,
 					snippet:
@@ -208,7 +239,7 @@ export class GitHubSearchProvider implements SearchProvider {
 						search_type: 'user',
 					},
 				}));
-			} catch (error: any) {
+			} catch (error) {
 				return this.handle_search_error(error);
 			}
 		};
@@ -217,9 +248,20 @@ export class GitHubSearchProvider implements SearchProvider {
 	}
 
 	// Centralized error handling
-	private handle_search_error(error: any): never {
-		const status = error.status || 500;
-		const message = error.message || 'An unexpected error occurred.';
+	private handle_search_error(error: unknown): never {
+		if (error instanceof ProviderError) throw error;
+
+		const status =
+			error &&
+			typeof error === 'object' &&
+			'status' in error &&
+			typeof error.status === 'number'
+				? error.status
+				: 500;
+		const message =
+			error instanceof Error
+				? error.message
+				: 'An unexpected error occurred.';
 
 		switch (status) {
 			case 401:

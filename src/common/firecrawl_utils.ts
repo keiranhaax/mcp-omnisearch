@@ -1,14 +1,38 @@
+import * as v from 'valibot';
 import { http_json } from './http.js';
+import { parse_provider_response } from './provider_response.js';
 import { ErrorType, ProviderError } from './types.js';
 
-export const make_firecrawl_request = async <T>(
+const firecrawl_response_schema = v.object({
+	success: v.optional(v.boolean()),
+	id: v.optional(v.string()),
+	url: v.optional(v.string()),
+	status: v.optional(v.string()),
+	total: v.optional(v.number()),
+	completed: v.optional(v.number()),
+	data: v.optional(v.unknown()),
+	links: v.optional(v.array(v.unknown())),
+	warning: v.optional(v.nullable(v.string())),
+	creditsUsed: v.optional(v.number()),
+	model: v.optional(v.string()),
+	expiresAt: v.optional(v.string()),
+	error: v.optional(v.string()),
+});
+
+export type FirecrawlProviderResponse = v.InferOutput<
+	typeof firecrawl_response_schema
+>;
+
+export const make_firecrawl_request = async <
+	T extends FirecrawlProviderResponse = FirecrawlProviderResponse,
+>(
 	provider_name: string,
 	base_url: string,
 	api_key: string,
 	body: Record<string, any>,
 	timeout: number,
 ): Promise<T> => {
-	return http_json<T>(provider_name, base_url, {
+	const data = await http_json(provider_name, base_url, {
 		method: 'POST',
 		headers: {
 			Authorization: `Bearer ${api_key}`,
@@ -17,17 +41,23 @@ export const make_firecrawl_request = async <T>(
 		body: JSON.stringify(body),
 		signal: AbortSignal.timeout(timeout),
 	});
+
+	return parse_provider_response(
+		provider_name,
+		firecrawl_response_schema,
+		data,
+	) as T;
 };
 
 export const validate_firecrawl_response = (
-	data: { success: boolean; error?: string },
+	response: { success?: boolean; error?: string },
 	provider_name: string,
-	error_message: string,
+	error_prefix: string,
 ): void => {
-	if (!data.success || data.error) {
+	if (response.success === false || response.error) {
 		throw new ProviderError(
 			ErrorType.PROVIDER_ERROR,
-			`${error_message}: ${data.error || 'Unknown error'}`,
+			`${error_prefix}: ${response.error || 'Unknown error'}`,
 			provider_name,
 		);
 	}
@@ -44,7 +74,7 @@ export interface PollingConfig {
 
 export const poll_firecrawl_job = async <
 	T extends {
-		success: boolean;
+		success?: boolean;
 		status: string;
 		error?: string;
 		data?: any;
@@ -55,45 +85,55 @@ export const poll_firecrawl_job = async <
 	let attempts = 0;
 
 	while (attempts < config.max_attempts) {
-		attempts++;
 		await new Promise((resolve) =>
 			setTimeout(resolve, config.poll_interval),
 		);
 
 		let status_result: T;
 		try {
-			status_result = await http_json<T>(
+			const raw_status_result = await http_json(
 				config.provider_name,
 				config.status_url,
 				{
 					method: 'GET',
 					headers: {
 						Authorization: `Bearer ${config.api_key}`,
+						'Content-Type': 'application/json',
 					},
 					signal: AbortSignal.timeout(config.timeout),
 				},
 			);
-		} catch {
+			status_result = parse_provider_response(
+				config.provider_name,
+				firecrawl_response_schema,
+				raw_status_result,
+			) as T;
+		} catch (error) {
+			if (
+				error instanceof ProviderError &&
+				error.details?.retryable === false
+			) {
+				throw error;
+			}
 			continue;
 		}
 
-		if (!status_result.success) {
+		if (
+			status_result.success === false ||
+			['error', 'failed', 'cancelled'].includes(status_result.status)
+		) {
 			throw new ProviderError(
 				ErrorType.PROVIDER_ERROR,
-				`Error checking job status: ${status_result.error || 'Unknown error'}`,
+				`Job failed: ${status_result.error || status_result.status}`,
 				config.provider_name,
 			);
 		}
 
-		if (status_result.status === 'completed' && status_result.data) {
+		if (status_result.status === 'completed') {
 			return status_result;
-		} else if (status_result.status === 'error') {
-			throw new ProviderError(
-				ErrorType.PROVIDER_ERROR,
-				`Job failed: ${status_result.error || 'Unknown error'}`,
-				config.provider_name,
-			);
 		}
+
+		attempts++;
 	}
 
 	throw new ProviderError(

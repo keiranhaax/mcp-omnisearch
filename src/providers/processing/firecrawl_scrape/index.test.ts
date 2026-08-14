@@ -146,6 +146,47 @@ describe('FirecrawlScrapeProvider', () => {
 		).toEqual([{ type: 'highlights', query: 'pricing' }]);
 	});
 
+	it('parses a document scrape returned as markdown with document metadata', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					success: true,
+					data: {
+						markdown: '# Annual report\n\nDocument body.',
+						metadata: {
+							title: 'Annual report',
+							sourceURL: 'https://example.com/report.pdf',
+							statusCode: 200,
+							contentType: 'application/pdf',
+						},
+					},
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		const result =
+			await new FirecrawlScrapeProvider().process_content(
+				'https://example.com/report.pdf',
+			);
+
+		expect(result.content).toBe('# Annual report\n\nDocument body.');
+		expect(result.metadata).toMatchObject({
+			title: 'Annual report',
+			urls_processed: 1,
+			successful_extractions: 1,
+		});
+		expect(result.raw_contents).toEqual([
+			{
+				url: 'https://example.com/report.pdf',
+				content: '# Annual report\n\nDocument body.',
+			},
+		]);
+	});
+
 	it('rejects conflicting scrape options before calling Firecrawl', async () => {
 		const provider = new FirecrawlScrapeProvider();
 		await expect(

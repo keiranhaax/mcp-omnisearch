@@ -14,6 +14,14 @@ export const is_retryable_error = (error: unknown): boolean => {
 	if (!(error instanceof ProviderError)) return true;
 
 	if (
+		error.details &&
+		typeof error.details === 'object' &&
+		(error.details as { retryable?: unknown }).retryable === false
+	) {
+		return false;
+	}
+
+	if (
 		error.type === ErrorType.RATE_LIMIT ||
 		error.type === ErrorType.PROVIDER_ERROR
 	) {

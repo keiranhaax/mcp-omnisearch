@@ -72,6 +72,21 @@ describe('retry_with_backoff', () => {
 		}
 	});
 
+	it('does not retry provider errors explicitly marked non-retryable', async () => {
+		const error = new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'malformed provider response',
+			'test',
+			{ retryable: false },
+		);
+		const fn = vi
+			.fn<() => Promise<string>>()
+			.mockRejectedValue(error);
+
+		await expect(retry_with_backoff(fn)).rejects.toBe(error);
+		expect(fn).toHaveBeenCalledTimes(1);
+	});
+
 	it('does not retry HTTP 4xx API errors', async () => {
 		const error = new ProviderError(
 			ErrorType.API_ERROR,

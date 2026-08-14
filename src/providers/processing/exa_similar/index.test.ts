@@ -43,4 +43,46 @@ describe('ExaSimilarProvider', () => {
 			AbortSignal,
 		);
 	});
+
+	it('accepts optional Exa metadata fields being absent', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: [
+						{
+							id: 'doc-1',
+							title: 'Similar result',
+							url: 'https://example.com/similar',
+						},
+					],
+				}),
+				{ status: 200 },
+			),
+		);
+
+		await expect(
+			new ExaSimilarProvider().process_content('https://example.com'),
+		).resolves.toMatchObject({
+			source_provider: 'exa_similar',
+			metadata: { requestId: undefined },
+		});
+	});
+
+	it('rejects a malformed results envelope as a provider error', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: { unexpected: true } }),
+				{ status: 200 },
+			),
+		);
+
+		await expect(
+			new ExaSimilarProvider().process_content('https://example.com'),
+		).rejects.toMatchObject({
+			type: 'PROVIDER_ERROR',
+			provider: 'exa_similar',
+			message: 'Malformed exa_similar response',
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
+	});
 });

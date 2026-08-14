@@ -1,8 +1,10 @@
+import * as v from 'valibot';
 import {
 	handle_provider_error,
 	sanitize_query,
 } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
@@ -26,26 +28,29 @@ interface ExaSearchRequest {
 	systemPrompt?: string;
 }
 
-interface ExaSearchResult {
-	id?: string;
-	title?: string;
-	url?: string;
-	publishedDate?: string;
-	author?: string;
-	text?: string;
-	score?: number;
-	highlights?: string[];
-	summary?: string;
-}
-
-interface ExaSearchResponse {
-	requestId?: string;
-	autopromptString?: string;
-	resolvedSearchType?: string;
-	results?: ExaSearchResult[];
-	output?: unknown;
-	costDollars?: unknown;
-}
+const exa_search_response_schema = v.object({
+	requestId: v.optional(v.string()),
+	autopromptString: v.optional(v.string()),
+	resolvedSearchType: v.optional(v.string()),
+	searchType: v.optional(v.string()),
+	results: v.optional(
+		v.array(
+			v.object({
+				id: v.optional(v.string()),
+				title: v.optional(v.string()),
+				url: v.optional(v.string()),
+				publishedDate: v.optional(v.string()),
+				author: v.optional(v.string()),
+				text: v.optional(v.string()),
+				score: v.optional(v.number()),
+				highlights: v.optional(v.array(v.string())),
+				summary: v.optional(v.string()),
+			}),
+		),
+	),
+	output: v.optional(v.unknown()),
+	costDollars: v.optional(v.unknown()),
+});
 
 const build_contents = (params: BaseSearchParams) => {
 	return params.contents
@@ -95,7 +100,7 @@ export class ExaSearchProvider implements SearchProvider {
 			try {
 				const request_body = build_search_body(params);
 
-				const data = await http_json<ExaSearchResponse>(
+				const raw_data = await http_json(
 					this.name,
 					`${config.search.exa.base_url}/search`,
 					{
@@ -109,8 +114,13 @@ export class ExaSearchProvider implements SearchProvider {
 						signal: AbortSignal.timeout(config.search.exa.timeout),
 					},
 				);
+				const data = parse_provider_response(
+					this.name,
+					exa_search_response_schema,
+					raw_data,
+				);
 
-				return (data.results || []).map((result) => ({
+				return (data.results ?? []).map((result) => ({
 					title: result.title || result.url || 'Untitled result',
 					url: result.url || '',
 					snippet:
@@ -126,8 +136,11 @@ export class ExaSearchProvider implements SearchProvider {
 						...(data.autopromptString
 							? { autopromptString: data.autopromptString }
 							: {}),
-						...(data.resolvedSearchType
-							? { resolvedSearchType: data.resolvedSearchType }
+						...((data.resolvedSearchType ?? data.searchType)
+							? {
+									resolvedSearchType:
+										data.resolvedSearchType ?? data.searchType,
+								}
 							: {}),
 						output: data.output,
 						costDollars: data.costDollars,

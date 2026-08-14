@@ -41,4 +41,59 @@ describe('TavilySearchProvider', () => {
 			AbortSignal,
 		);
 	});
+
+	it('normalizes date and country operators for Tavily API fields', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: [], response_time: '0.1' }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		await new TavilySearchProvider().search({
+			query:
+				'example after:2024-05 before:2024-05-10 loc:United-Kingdom',
+		});
+
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body),
+		).toMatchObject({
+			start_date: '2024-05-01',
+			end_date: '2024-05-10',
+			country: 'united kingdom',
+		});
+	});
+
+	it('accepts an omitted results array as an empty current response', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(JSON.stringify({ response_time: '0.1' }), {
+				status: 200,
+			}),
+		);
+
+		await expect(
+			new TavilySearchProvider().search({ query: 'no results' }),
+		).resolves.toEqual([]);
+	});
+
+	it('rejects a malformed results envelope as a provider error', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: { unexpected: true } }),
+				{ status: 200 },
+			),
+		);
+
+		await expect(
+			new TavilySearchProvider().search({ query: 'malformed' }),
+		).rejects.toMatchObject({
+			type: 'PROVIDER_ERROR',
+			provider: 'tavily',
+			message: 'Malformed tavily response',
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
+	});
 });

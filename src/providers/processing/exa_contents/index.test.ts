@@ -54,6 +54,31 @@ describe('ExaContentsProvider', () => {
 		);
 	});
 
+	it('accepts optional Exa response metadata being absent', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: [
+						{
+							id: 'doc-1',
+							title: 'Doc',
+							url: 'https://example.com',
+							text: 'content',
+						},
+					],
+				}),
+				{ status: 200 },
+			),
+		);
+
+		await expect(
+			new ExaContentsProvider().process_content('exa-result-id'),
+		).resolves.toMatchObject({
+			source_provider: 'exa_contents',
+			metadata: { requestId: undefined },
+		});
+	});
+
 	it('rejects private URLs and mixed URL/ID requests before fetching', async () => {
 		const provider = new ExaContentsProvider();
 		await expect(
@@ -71,5 +96,26 @@ describe('ExaContentsProvider', () => {
 				'Do not mix Exa result IDs and URLs in one contents request',
 		});
 		expect(fetch_mock).not.toHaveBeenCalled();
+	});
+
+	it('rejects a malformed results envelope as a provider error', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					requestId: 'req-1',
+					results: { unexpected: true },
+				}),
+				{ status: 200 },
+			),
+		);
+
+		await expect(
+			new ExaContentsProvider().process_content('exa-result-id'),
+		).rejects.toMatchObject({
+			type: 'PROVIDER_ERROR',
+			provider: 'exa_contents',
+			message: 'Malformed exa_contents response',
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	});
 });

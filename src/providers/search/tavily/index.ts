@@ -1,8 +1,10 @@
+import * as v from 'valibot';
 import {
 	handle_provider_error,
 	sanitize_query,
 } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	apply_search_operators,
@@ -16,15 +18,36 @@ import {
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface TavilySearchResponse {
-	results: {
-		title: string;
-		url: string;
-		content: string;
-		score: number;
-	}[];
-	response_time: string;
-}
+const tavily_search_response_schema = v.object({
+	results: v.optional(
+		v.array(
+			v.object({
+				title: v.string(),
+				url: v.string(),
+				content: v.string(),
+				score: v.number(),
+			}),
+		),
+	),
+	response_time: v.optional(v.string()),
+});
+
+const normalize_tavily_date = (date: string) => {
+	if (/^\d{4}$/.test(date)) return `${date}-01-01`;
+	if (/^\d{4}-\d{2}$/.test(date)) return `${date}-01`;
+	return date;
+};
+
+const tavily_country_aliases: Record<string, string> = {
+	uk: 'united kingdom',
+	us: 'united states',
+	usa: 'united states',
+};
+
+const normalize_tavily_country = (location: string) => {
+	const normalized = location.toLowerCase().replace(/-/g, ' ');
+	return tavily_country_aliases[normalized] ?? normalized;
+};
 
 export class TavilySearchProvider implements SearchProvider {
 	name = 'tavily';
@@ -65,10 +88,14 @@ export class TavilySearchProvider implements SearchProvider {
 
 				// Map date operators to Tavily's start_date/end_date
 				if (search_params.date_after) {
-					request_body.start_date = search_params.date_after;
+					request_body.start_date = normalize_tavily_date(
+						search_params.date_after,
+					);
 				}
 				if (search_params.date_before) {
-					request_body.end_date = search_params.date_before;
+					request_body.end_date = normalize_tavily_date(
+						search_params.date_before,
+					);
 				}
 
 				// Map exact phrases to Tavily's exact_match
@@ -87,22 +114,31 @@ export class TavilySearchProvider implements SearchProvider {
 
 				// Map location operator to Tavily's country param
 				if (search_params.location) {
-					request_body.country = search_params.location.toLowerCase();
+					request_body.country = normalize_tavily_country(
+						search_params.location,
+					);
 				}
 
-				const data = await http_json<
-					TavilySearchResponse & { message?: string }
-				>(this.name, `${config.search.tavily.base_url}/search`, {
-					method: 'POST',
-					headers: {
-						Authorization: `Bearer ${api_key}`,
-						'Content-Type': 'application/json',
+				const raw_data = await http_json(
+					this.name,
+					`${config.search.tavily.base_url}/search`,
+					{
+						method: 'POST',
+						headers: {
+							Authorization: `Bearer ${api_key}`,
+							'Content-Type': 'application/json',
+						},
+						body: JSON.stringify(request_body),
+						signal: AbortSignal.timeout(config.search.tavily.timeout),
 					},
-					body: JSON.stringify(request_body),
-					signal: AbortSignal.timeout(config.search.tavily.timeout),
-				});
+				);
+				const data = parse_provider_response(
+					this.name,
+					tavily_search_response_schema,
+					raw_data,
+				);
 
-				return (data.results || []).map((result) => ({
+				return (data.results ?? []).map((result) => ({
 					title: result.title,
 					url: result.url,
 					snippet: result.content,

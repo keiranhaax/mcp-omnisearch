@@ -120,7 +120,7 @@ export const register_web_search = (
 						v.picklist([
 							'company',
 							'people',
-							'research paper',
+							'publication',
 							'news',
 							'personal site',
 							'financial report',

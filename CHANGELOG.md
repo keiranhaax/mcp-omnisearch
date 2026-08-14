@@ -9,6 +9,17 @@
 - Add authenticated remote pagination for oversized results.
 - Harden retries, URL validation, provider timeouts, schemas, runtime
   startup, and remote proxy deployment.
+- Refresh provider contracts: advertise Exa `publication`, tolerate
+  Brave no-result and mixed-row response shapes, normalize Tavily date
+  and country filters, and support current Exa and Firecrawl response
+  shapes, crawl parameters, and terminal statuses.
+- Runtime-validate retained upstream search, AI/GitHub, processing,
+  and shared Firecrawl response envelopes with secret-safe
+  malformed-response errors; deterministic schema failures are not
+  retried.
+- Record upstream provider classifications, runtime-validation
+  coverage, and excluded provider surfaces in
+  `docs/provider-synchronization.md`.
 
 ## 0.0.24
 
