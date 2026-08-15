@@ -20,6 +20,17 @@
 - Record upstream provider classifications, runtime-validation
   coverage, and excluded provider surfaces in
   `docs/provider-synchronization.md`.
+- Serve MCP `2026-07-28` through project-local pinned
+  `mcp-proxy@6.7.3` while keeping stateless legacy `2025-11-25`
+  compatibility; retire the legacy `/sse` endpoint in favor of `/mcp`.
+- Add a narrow HTTP security guard (`src/server/http_guard.ts`) that
+  owns the public socket: Host and Origin allowlists with clean
+  userinfo rejection, route limiting to `POST /mcp` and `GET /ping`, a
+  4 MB pre-dispatch body bound, and rejection of modern envelopes
+  missing the `MCP-Protocol-Version` header (SDK issue `#2589`).
+- Record the Path A architecture decision and staging evidence in
+  `docs/architecture-decision-mcp-2026-07-28.md` and the operations
+  runbook in `docs/deployment.md`.
 
 ## 0.0.24
 

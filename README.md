@@ -444,6 +444,18 @@ MCP Omnisearch supports containerized deployment using Docker with
 MCPO (Model Context Protocol Over HTTP) integration, enabling cloud
 deployment and OpenAPI access.
 
+### Hardened HTTP deployment (this fork)
+
+This fork serves MCP protocol revisions `2026-07-28` (modern) and
+`2025-11-25` (stateless legacy) over HTTP through a project-local
+pinned `mcp-proxy` fronted by a narrow security guard that enforces
+Host/Origin allowlists, route limiting, a 4 MB body bound, and the
+`MCP-Protocol-Version` header rule. See
+[docs/deployment.md](docs/deployment.md) for the topology,
+configuration, verification commands, and rollback procedure, and
+[docs/architecture-decision-mcp-2026-07-28.md](docs/architecture-decision-mcp-2026-07-28.md)
+for the decision record and staging evidence.
+
 ### Quick Start with Docker
 
 1. **Using Docker Compose (Recommended)**:
