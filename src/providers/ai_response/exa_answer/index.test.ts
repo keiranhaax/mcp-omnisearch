@@ -43,6 +43,30 @@ describe('ExaAnswerProvider response validation', () => {
 		]);
 	});
 
+	it('tolerates citations missing id and title', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					answer: 'Answer',
+					requestId: 'req-2',
+					citations: [{ url: 'https://example.com/citation' }],
+				}),
+				{ status: 200 },
+			),
+		);
+
+		const results = await new ExaAnswerProvider().search({
+			query: 'question',
+		});
+
+		expect(results[1]).toMatchObject({
+			title: 'https://example.com/citation',
+			url: 'https://example.com/citation',
+			snippet: 'Source reference',
+			source_provider: 'exa_answer',
+		});
+	});
+
 	it('rejects a malformed answer envelope as a provider error', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(

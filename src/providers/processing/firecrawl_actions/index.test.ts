@@ -64,9 +64,17 @@ describe('FirecrawlActionsProvider', () => {
 			metadata: { screenshot: 'shot.png', extract_depth: 'advanced' },
 			source_provider: 'firecrawl_actions',
 		});
-		expect(
-			JSON.parse(fetch_mock.mock.calls[0][1].body).actions,
-		).toHaveLength(7);
+		const sent_actions = JSON.parse(fetch_mock.mock.calls[0][1].body)
+			.actions as Array<{ type: string }>;
+		expect(sent_actions.map((action) => action.type)).toEqual([
+			'wait',
+			'scroll',
+			'wait',
+			'scroll',
+			'wait',
+			'click',
+			'wait',
+		]);
 	});
 
 	it('rejects malformed action data as non-retryable', async () => {

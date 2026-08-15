@@ -100,6 +100,63 @@ describe('GitHubSearchProvider response validation', () => {
 		).resolves.toHaveLength(1);
 	});
 
+	it('defaults score to 0 when omitted or null', async () => {
+		code_mock.mockResolvedValue({
+			data: {
+				items: [
+					{
+						name: 'index.ts',
+						path: 'src/index.ts',
+						html_url:
+							'https://github.com/acme/repo/blob/main/src/index.ts',
+						repository: {
+							full_name: 'acme/repo',
+							html_url: 'https://github.com/acme/repo',
+						},
+					},
+				],
+			},
+		});
+		repos_mock.mockResolvedValue({
+			data: {
+				items: [
+					{
+						full_name: 'acme/repo',
+						html_url: 'https://github.com/acme/repo',
+						description: null,
+						stargazers_count: 10,
+						forks_count: 2,
+						pushed_at: '2026-01-01T00:00:00Z',
+						language: null,
+						score: null,
+					},
+				],
+			},
+		});
+		users_mock.mockResolvedValue({
+			data: {
+				items: [
+					{
+						login: 'octocat',
+						html_url: 'https://github.com/octocat',
+						type: 'User',
+					},
+				],
+			},
+		});
+
+		const provider = new GitHubSearchProvider();
+		await expect(
+			provider.search_code({ query: 'code' }),
+		).resolves.toMatchObject([{ score: 0 }]);
+		await expect(
+			provider.search_repositories({ query: 'repo' }),
+		).resolves.toMatchObject([{ score: 0 }]);
+		await expect(
+			provider.search_users({ query: 'user' }),
+		).resolves.toMatchObject([{ score: 0 }]);
+	});
+
 	it.each([
 		[
 			'code',

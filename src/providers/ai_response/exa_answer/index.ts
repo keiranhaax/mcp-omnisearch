@@ -19,8 +19,8 @@ const exa_answer_response_schema = v.object({
 	citations: v.optional(
 		v.array(
 			v.object({
-				id: v.string(),
-				title: v.string(),
+				id: v.optional(v.string()),
+				title: v.optional(v.string()),
 				url: v.string(),
 				publishedDate: v.optional(v.string()),
 				text: v.optional(v.string()),
@@ -89,7 +89,7 @@ export class ExaAnswerProvider implements SearchProvider {
 					const citation_results = data.citations
 						.slice(0, limit)
 						.map((citation, index) => ({
-							title: citation.title,
+							title: citation.title ?? citation.url,
 							url: citation.url,
 							snippet: citation.text || 'Source reference',
 							score: 0.9 - index * 0.01,

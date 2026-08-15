@@ -94,4 +94,56 @@ describe('FirecrawlCrawlProvider', () => {
 			'https://example.com/failed',
 		]);
 	});
+
+	it('reports failed pages without a URL as unknown instead of the crawl root', async () => {
+		fetch_mock
+			.mockResolvedValueOnce(
+				json_response({ success: true, id: 'crawl-2' }),
+			)
+			.mockResolvedValueOnce(
+				json_response({
+					status: 'completed',
+					data: [
+						{
+							markdown: '# First page',
+							metadata: {
+								sourceURL: 'https://example.com/first',
+							},
+						},
+						{ error: 'blocked' },
+					],
+				}),
+			);
+
+		const promise = new FirecrawlCrawlProvider().process_content(
+			'https://example.com',
+		);
+		await vi.advanceTimersByTimeAsync(5000);
+		const result = await promise;
+
+		expect(result.metadata.failed_urls).toEqual(['(unknown url)']);
+	});
+
+	it('times out when the crawl never completes', async () => {
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({ success: true, id: 'crawl-3' }),
+		);
+		fetch_mock.mockImplementation(async () =>
+			json_response({ status: 'scraping' }),
+		);
+
+		const promise = new FirecrawlCrawlProvider().process_content(
+			'https://example.com',
+		);
+		const rejection = expect(promise).rejects.toMatchObject({
+			provider: 'firecrawl_crawl',
+			message:
+				'Job timed out - try again later or with a smaller scope',
+		});
+
+		await vi.advanceTimersByTimeAsync(20 * 5000);
+		await rejection;
+		// One start request plus 20 poll attempts.
+		expect(fetch_mock).toHaveBeenCalledTimes(21);
+	});
 });

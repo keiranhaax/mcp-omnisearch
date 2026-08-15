@@ -29,7 +29,9 @@ const tavily_search_response_schema = v.object({
 			}),
 		),
 	),
-	response_time: v.optional(v.string()),
+	// Tavily's docs declare number<float> but real responses have been
+	// observed returning a string (e.g. "1.67"); accept both.
+	response_time: v.optional(v.union([v.string(), v.number()])),
 });
 
 const normalize_tavily_date = (date: string) => {

@@ -8,7 +8,10 @@ import {
 	aggregate_url_results,
 	type ProcessedUrlResult,
 } from '../../../common/results.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import {
+	is_non_retryable_provider_error,
+	retry_with_backoff,
+} from '../../../common/retry.js';
 import {
 	ErrorType,
 	ProcessingProvider,
@@ -218,10 +221,7 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 								success: true,
 							};
 						} catch (error) {
-							if (
-								error instanceof ProviderError &&
-								error.details?.retryable === false
-							) {
+							if (is_non_retryable_provider_error(error)) {
 								throw error;
 							}
 							console.error(`Error processing ${single_url}:`, error);

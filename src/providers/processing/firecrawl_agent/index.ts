@@ -220,7 +220,7 @@ export class FirecrawlAgentProvider {
 				const job_id = start_response.id;
 				const status_url = `${start_url}/${job_id}`;
 
-				const completed = await poll_firecrawl_job(
+				const poll_result = await poll_firecrawl_job(
 					{
 						provider_name: this.name,
 						status_url,
@@ -228,20 +228,21 @@ export class FirecrawlAgentProvider {
 						max_attempts: 60,
 						poll_interval: 3000,
 						timeout: 30000,
+						return_on_exhaustion: true,
 					},
 					firecrawl_agent_status_schema,
 				);
 
-				if (completed.status !== 'completed') {
+				if (poll_result.status !== 'completed') {
 					const content = JSON.stringify(
 						{
 							message:
 								'Firecrawl agent job is still processing. Retry the same request later for final output.',
 							job_id,
-							status: completed.status,
-							model: completed.model,
-							credits_used: completed.creditsUsed,
-							expires_at: completed.expiresAt,
+							status: poll_result.status,
+							model: poll_result.model,
+							credits_used: poll_result.creditsUsed,
+							expires_at: poll_result.expiresAt,
 							status_url,
 						},
 						null,
@@ -261,7 +262,7 @@ export class FirecrawlAgentProvider {
 					};
 				}
 
-				if (!completed.data) {
+				if (!poll_result.data) {
 					throw new ProviderError(
 						ErrorType.PROVIDER_ERROR,
 						'Agent completed but returned no data',
@@ -270,9 +271,9 @@ export class FirecrawlAgentProvider {
 				}
 
 				const content =
-					typeof completed.data === 'string'
-						? completed.data
-						: JSON.stringify(completed.data, null, 2);
+					typeof poll_result.data === 'string'
+						? poll_result.data
+						: JSON.stringify(poll_result.data, null, 2);
 
 				const word_count = content
 					.split(/\s+/)

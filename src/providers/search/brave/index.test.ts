@@ -54,6 +54,10 @@ describe('BraveSearchProvider', () => {
 							title: 'No description',
 							url: 'https://example.com/no-description',
 						},
+						{
+							url: 'https://example.com/no-title',
+							description: 'Untitled snippet',
+						},
 					],
 				},
 			}),
@@ -72,6 +76,12 @@ describe('BraveSearchProvider', () => {
 				title: 'No description',
 				url: 'https://example.com/no-description',
 				snippet: '',
+				source_provider: 'brave',
+			},
+			{
+				title: 'https://example.com/no-title',
+				url: 'https://example.com/no-title',
+				snippet: 'Untitled snippet',
 				source_provider: 'brave',
 			},
 		]);

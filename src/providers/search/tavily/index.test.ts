@@ -67,6 +67,32 @@ describe('TavilySearchProvider', () => {
 		});
 	});
 
+	it.each(['1.67', 1.67])(
+		'accepts response_time as %o',
+		async (response_time) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						results: [
+							{
+								title: 'Result',
+								url: 'https://example.com',
+								content: 'Snippet',
+								score: 0.5,
+							},
+						],
+						response_time,
+					}),
+					{ status: 200 },
+				),
+			);
+
+			await expect(
+				new TavilySearchProvider().search({ query: 'timing' }),
+			).resolves.toHaveLength(1);
+		},
+	);
+
 	it('accepts an omitted results array as an empty current response', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(JSON.stringify({ response_time: '0.1' }), {

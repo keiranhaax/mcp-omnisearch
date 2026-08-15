@@ -18,7 +18,7 @@ const github_code_search_response_schema = v.object({
 			name: v.string(),
 			path: v.string(),
 			html_url: v.string(),
-			score: v.number(),
+			score: v.optional(v.nullable(v.number())),
 			repository: v.object({
 				full_name: v.string(),
 				html_url: v.string(),
@@ -44,7 +44,7 @@ const github_repository_search_response_schema = v.object({
 			forks_count: v.number(),
 			pushed_at: v.string(),
 			language: v.nullable(v.string()),
-			score: v.number(),
+			score: v.optional(v.nullable(v.number())),
 		}),
 	),
 });
@@ -56,7 +56,7 @@ const github_user_search_response_schema = v.object({
 			html_url: v.string(),
 			bio: v.optional(v.nullable(v.string())),
 			type: v.string(),
-			score: v.number(),
+			score: v.optional(v.nullable(v.number())),
 		}),
 	),
 });
@@ -116,7 +116,7 @@ export class GitHubSearchProvider implements SearchProvider {
 						title: `${item.repository.full_name}/${item.path}`,
 						url: item.html_url,
 						snippet,
-						score: item.score,
+						score: item.score ?? 0,
 						source_provider: this.name,
 						// Add metadata for better context
 						metadata: {
@@ -174,7 +174,7 @@ export class GitHubSearchProvider implements SearchProvider {
 						title: item.full_name,
 						url: item.html_url,
 						snippet,
-						score: item.score,
+						score: item.score ?? 0,
 						source_provider: this.name,
 						metadata: {
 							repository: item.full_name,
@@ -231,7 +231,7 @@ export class GitHubSearchProvider implements SearchProvider {
 					url: user.html_url,
 					snippet:
 						user.bio ?? `GitHub user: ${user.login} • ${user.type}`,
-					score: user.score,
+					score: user.score ?? 0,
 					source_provider: this.name,
 					metadata: {
 						username: user.login,

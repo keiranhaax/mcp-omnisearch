@@ -27,9 +27,9 @@ const linkup_sourced_answer_response_schema = v.object({
 	answer: v.string(),
 	sources: v.array(
 		v.object({
-			favicon: v.string(),
-			name: v.string(),
-			snippet: v.string(),
+			favicon: v.optional(v.string()),
+			name: v.optional(v.string()),
+			snippet: v.optional(v.string()),
 			url: v.string(),
 		}),
 	),
@@ -109,7 +109,7 @@ export class LinkupProvider implements SearchProvider {
 				if (data.sources && data.sources.length > 0) {
 					const source_results = data.sources.map(
 						(source, index) => ({
-							title: source.name,
+							title: source.name ?? source.url,
 							url: source.url,
 							snippet: source.snippet || 'Source reference',
 							score: 0.9 - index * 0.01,

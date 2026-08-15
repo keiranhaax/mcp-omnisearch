@@ -40,6 +40,29 @@ describe('LinkupProvider response validation', () => {
 		]);
 	});
 
+	it('tolerates sources missing favicon, name, and snippet', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					answer: 'Answer',
+					sources: [{ url: 'https://example.com/source' }],
+				}),
+				{ status: 200 },
+			),
+		);
+
+		const results = await new LinkupProvider().search({
+			query: 'question',
+		});
+
+		expect(results[1]).toMatchObject({
+			title: 'https://example.com/source',
+			url: 'https://example.com/source',
+			snippet: 'Source reference',
+			source_provider: 'linkup',
+		});
+	});
+
 	it('rejects a malformed sources envelope as a provider error', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(

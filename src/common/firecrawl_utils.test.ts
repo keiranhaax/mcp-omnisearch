@@ -329,6 +329,94 @@ describe('poll_firecrawl_job', () => {
 		},
 	);
 
+	it('includes the polling status when the caller schema omits it', async () => {
+		http_json_mock.mockResolvedValue({
+			status: 'completed',
+			data: { pages: 1 },
+		});
+
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 1,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			v.object({ data: v.optional(v.unknown()) }),
+		);
+		const resolution = expect(promise).resolves.toEqual({
+			status: 'completed',
+			data: { pages: 1 },
+		});
+
+		await vi.advanceTimersByTimeAsync(10);
+		await resolution;
+	});
+
+	it('returns the last pending status on exhaustion when return_on_exhaustion is set', async () => {
+		http_json_mock
+			.mockResolvedValueOnce({
+				success: true,
+				status: 'scraping',
+			})
+			.mockResolvedValueOnce({
+				success: true,
+				status: 'processing',
+			});
+
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 2,
+				poll_interval: 10,
+				timeout: 5000,
+				return_on_exhaustion: true,
+			},
+			firecrawl_job_schema,
+		);
+		const resolution = expect(promise).resolves.toMatchObject({
+			success: true,
+			status: 'processing',
+		});
+
+		await vi.advanceTimersByTimeAsync(20);
+		await resolution;
+		expect(http_json_mock).toHaveBeenCalledTimes(2);
+	});
+
+	it('still times out with return_on_exhaustion when every poll fails transiently', async () => {
+		http_json_mock.mockRejectedValue(
+			new Error('temporary network issue'),
+		);
+
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 3,
+				poll_interval: 10,
+				timeout: 5000,
+				return_on_exhaustion: true,
+			},
+			firecrawl_job_schema,
+		);
+		const rejection = expect(promise).rejects.toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			provider: 'firecrawl',
+			message:
+				'Job timed out - try again later or with a smaller scope',
+		});
+
+		await vi.advanceTimersByTimeAsync(30);
+		await rejection;
+		expect(http_json_mock).toHaveBeenCalledTimes(3);
+	});
+
 	it('times out when every poll fails transiently', async () => {
 		http_json_mock.mockRejectedValue(
 			new Error('temporary network issue'),

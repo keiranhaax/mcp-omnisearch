@@ -82,14 +82,11 @@ export class BraveSearchProvider implements SearchProvider {
 						(
 							result,
 						): result is typeof result & {
-							title: string;
 							url: string;
-						} =>
-							typeof result.title === 'string' &&
-							typeof result.url === 'string',
+						} => typeof result.url === 'string',
 					)
 					.map((result) => ({
-						title: result.title,
+						title: result.title ?? result.url,
 						url: result.url,
 						snippet: result.description ?? '',
 						source_provider: this.name,

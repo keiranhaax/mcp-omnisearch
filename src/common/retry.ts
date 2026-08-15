@@ -10,14 +10,21 @@ export interface RetryOptions {
 	retry_if?: (error: unknown) => boolean;
 }
 
+export const is_non_retryable_provider_error = (
+	error: unknown,
+): boolean => {
+	if (!(error instanceof ProviderError)) return false;
+	return (
+		typeof error.details === 'object' &&
+		error.details !== null &&
+		(error.details as { retryable?: unknown }).retryable === false
+	);
+};
+
 export const is_retryable_error = (error: unknown): boolean => {
 	if (!(error instanceof ProviderError)) return true;
 
-	if (
-		error.details &&
-		typeof error.details === 'object' &&
-		(error.details as { retryable?: unknown }).retryable === false
-	) {
+	if (is_non_retryable_provider_error(error)) {
 		return false;
 	}
 

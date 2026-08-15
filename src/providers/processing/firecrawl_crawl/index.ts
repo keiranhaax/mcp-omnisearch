@@ -176,10 +176,13 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 				const title =
 					typeof title_value === 'string' ? title_value : undefined;
 
-				// Track failed URLs
+				// Track failed URLs; never fall back to the crawl root here,
+				// which would misreport the root itself as failed.
 				const failed_urls = status_data.data
 					.filter((page) => get_firecrawl_page_error(page))
-					.map((page) => get_firecrawl_page_url(page, crawl_url));
+					.map((page) =>
+						get_firecrawl_page_url(page, '(unknown url)'),
+					);
 
 				return {
 					content: combined_content,

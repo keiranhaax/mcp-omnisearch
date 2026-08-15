@@ -29,7 +29,9 @@ const tavily_extract_response_schema = v.object({
 			error: v.string(),
 		}),
 	),
-	response_time: v.number(),
+	// Tavily's docs declare number<float> but real responses have been
+	// observed returning a string (e.g. "1.67"); accept both.
+	response_time: v.optional(v.union([v.string(), v.number()])),
 });
 
 export class TavilyExtractProvider implements ProcessingProvider {
