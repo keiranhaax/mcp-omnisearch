@@ -15,6 +15,9 @@ rejected for this upgrade; see "Why not Path B" below.
 
 ## Candidate and integrity metadata
 
+- Runtime toolchain: Node.js v22.23.1, Corepack pnpm 11.9.0
+  (repository `packageManager`), Valibot `^1.4.2` (unchanged), tmcp
+  `^1.19.4` (unchanged, stdio registration layer retained)
 - Candidate: `mcp-proxy@6.7.3` (npm latest as of 2026-08-15)
 - Integrity:
   `sha512-kHv74OIgrLpm4gZMCQtDtpxKHIZEgi6itoC2E+WeGm9g6od5/4rd6Cmmp60whsU6Quyb8Yd5UgVNeMJpsba7Kg==`
@@ -87,6 +90,14 @@ staging wrote zero files and the production result directory was
 byte-identical (names, sizes, mtimes) before and after. Full
 pagination smoke remains scheduled in Task 16 against the release
 candidate.
+
+Endpoint compatibility note: the candidate serves streamable HTTP on
+`/mcp` only (`--server stream`); the legacy SSE endpoint `/sse`, which
+the global 6.4.4 still answers, returns 404 in the new topology. Every
+known client — Hermes (`~/.hermes/config.yaml`),
+`~/.factory/mcp.json`, and `~/.mcp.json` — already targets `/mcp`, so
+no client migration is needed. This retirement is intentional per plan
+Section 7.3.2 ("Route only: `GET /ping`, MCP requests on `/mcp`").
 
 ## Issue #2589 guard
 
