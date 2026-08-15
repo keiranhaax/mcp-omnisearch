@@ -1,0 +1,457 @@
+import {
+	createServer,
+	request as http_request,
+	type IncomingMessage,
+	type Server,
+	type ServerResponse,
+} from 'node:http';
+
+/**
+ * Narrow HTTP security boundary that sits in front of mcp-proxy.
+ *
+ * The pinned proxy (6.7.3) speaks the 2026-07-28 protocol but does not
+ * enforce the strict edge checks this deployment requires:
+ *   - SDK issue #2589: a modern envelope without the
+ *     MCP-Protocol-Version header is accepted instead of rejected.
+ *   - SDK issue #2489: Host/Origin values containing userinfo are not
+ *     rejected cleanly (observed HTTP 500).
+ *   - No Host allowlist, no Origin allowlist, and a wildcard CORS
+ *     preflight combined with Access-Control-Allow-Credentials.
+ *
+ * This guard fails closed on all of the above, limits routes to the
+ * MCP endpoint and health check, and bounds request bodies before
+ * anything reaches the proxy. Authentication stays with the proxy
+ * (constant-time API key comparison); the guard never sees the key.
+ */
+
+export const modern_protocol_version_key =
+	'io.modelcontextprotocol/protocolVersion';
+
+export interface GuardConfig {
+	upstream_host: string;
+	upstream_port: number;
+	/** Exact `host[:port]` values clients may send, compared lowercase. */
+	allowed_hosts: readonly string[];
+	max_body_bytes: number;
+	/** Deadline for receiving the full request body once it starts. */
+	body_read_timeout_ms: number;
+	mcp_path: string;
+	ping_path: string;
+}
+
+export const default_guard_config = (
+	overrides: Partial<GuardConfig> = {},
+): GuardConfig => ({
+	upstream_host: '127.0.0.1',
+	upstream_port: 8002,
+	allowed_hosts: [],
+	max_body_bytes: 4 * 1024 * 1024,
+	body_read_timeout_ms: 30_000,
+	mcp_path: '/mcp',
+	ping_path: '/ping',
+	...overrides,
+});
+
+export type HostCheck =
+	| { ok: true; host: string }
+	| {
+			ok: false;
+			reason: 'missing' | 'malformed' | 'userinfo' | 'not_allowed';
+	  };
+
+export const check_host = (
+	host_header: string | undefined,
+	allowed_hosts: readonly string[],
+): HostCheck => {
+	if (host_header === undefined)
+		return { ok: false, reason: 'missing' };
+	const trimmed = host_header.trim();
+	if (trimmed.length === 0 || trimmed.length > 255)
+		return { ok: false, reason: 'malformed' };
+	if (/[\s/?#\\]/.test(trimmed))
+		return { ok: false, reason: 'malformed' };
+	if (trimmed.includes('@')) return { ok: false, reason: 'userinfo' };
+	let url: URL;
+	try {
+		url = new URL(`http://${trimmed}`);
+	} catch {
+		return { ok: false, reason: 'malformed' };
+	}
+	if (url.username || url.password)
+		return { ok: false, reason: 'userinfo' };
+	if (url.pathname !== '/' || url.search || url.hash)
+		return { ok: false, reason: 'malformed' };
+	if (!allowed_hosts.includes(url.host))
+		return { ok: false, reason: 'not_allowed' };
+	return { ok: true, host: url.host };
+};
+
+export type OriginCheck =
+	| { ok: true }
+	| {
+			ok: false;
+			reason: 'malformed' | 'userinfo' | 'scheme' | 'not_allowed';
+	  };
+
+export const check_origin = (
+	origin_header: string | undefined,
+	allowed_hosts: readonly string[],
+): OriginCheck => {
+	// Non-browser MCP clients send no Origin; only validate when present.
+	if (origin_header === undefined) return { ok: true };
+	const trimmed = origin_header.trim();
+	if (
+		trimmed.length === 0 ||
+		trimmed.length > 255 ||
+		/\s/.test(trimmed)
+	)
+		return { ok: false, reason: 'malformed' };
+	if (trimmed.includes('@')) return { ok: false, reason: 'userinfo' };
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		return { ok: false, reason: 'malformed' };
+	}
+	if (url.username || url.password)
+		return { ok: false, reason: 'userinfo' };
+	if (url.protocol !== 'http:' && url.protocol !== 'https:')
+		return { ok: false, reason: 'scheme' };
+	if (url.pathname !== '/' || url.search || url.hash)
+		return { ok: false, reason: 'malformed' };
+	if (!allowed_hosts.includes(url.host))
+		return { ok: false, reason: 'not_allowed' };
+	return { ok: true };
+};
+
+export interface BodyClassification {
+	modern_envelope: boolean;
+	id: string | number | null;
+}
+
+/**
+ * Detects a 2026-07-28 style request envelope. Unparseable bodies and
+ * batches are classified as legacy and forwarded so the proxy keeps
+ * owning JSON-RPC level errors.
+ */
+export const classify_body = (body: Buffer): BodyClassification => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(body.toString('utf8'));
+	} catch {
+		return { modern_envelope: false, id: null };
+	}
+	if (
+		parsed === null ||
+		typeof parsed !== 'object' ||
+		Array.isArray(parsed)
+	)
+		return { modern_envelope: false, id: null };
+	const record = parsed as Record<string, unknown>;
+	const id =
+		typeof record.id === 'string' || typeof record.id === 'number'
+			? record.id
+			: null;
+	const params = record.params;
+	if (
+		params === null ||
+		typeof params !== 'object' ||
+		Array.isArray(params)
+	)
+		return { modern_envelope: false, id };
+	const meta = (params as Record<string, unknown>)._meta;
+	if (
+		meta === null ||
+		typeof meta !== 'object' ||
+		Array.isArray(meta)
+	)
+		return { modern_envelope: false, id };
+	return {
+		modern_envelope: Object.prototype.hasOwnProperty.call(
+			meta,
+			modern_protocol_version_key,
+		),
+		id,
+	};
+};
+
+export type BodyRead =
+	| { status: 'ok'; body: Buffer }
+	| { status: 'too_large' }
+	| { status: 'aborted' }
+	| { status: 'timeout' };
+
+export const read_bounded_body = (
+	req: IncomingMessage,
+	max_body_bytes: number,
+	timeout_ms: number,
+): Promise<BodyRead> => {
+	return new Promise((resolve) => {
+		const declared = Number(req.headers['content-length']);
+		if (Number.isFinite(declared) && declared > max_body_bytes) {
+			resolve({ status: 'too_large' });
+			return;
+		}
+		const chunks: Buffer[] = [];
+		let received = 0;
+		let settled = false;
+		const finish = (result: BodyRead) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(result);
+		};
+		const timer = setTimeout(() => {
+			finish({ status: 'timeout' });
+			req.destroy();
+		}, timeout_ms);
+		req.on('data', (chunk: Buffer) => {
+			if (settled) return;
+			received += chunk.length;
+			if (received > max_body_bytes) {
+				finish({ status: 'too_large' });
+				req.pause();
+				return;
+			}
+			chunks.push(chunk);
+		});
+		req.on('end', () =>
+			finish({ status: 'ok', body: Buffer.concat(chunks) }),
+		);
+		req.on('aborted', () => finish({ status: 'aborted' }));
+		req.on('error', () => finish({ status: 'aborted' }));
+	});
+};
+
+const json_rpc_error = (
+	id: string | number | null,
+	code: number,
+	message: string,
+	data?: unknown,
+) => ({
+	jsonrpc: '2.0' as const,
+	error: { code, message, ...(data !== undefined ? { data } : {}) },
+	id,
+});
+
+const send_json = (
+	res: ServerResponse,
+	status: number,
+	payload: unknown,
+): void => {
+	const body = JSON.stringify(payload);
+	res.writeHead(status, {
+		'content-type': 'application/json',
+		'content-length': Buffer.byteLength(body),
+		// Rejections can arrive while the client is still uploading;
+		// close after the response so unread data cannot keep the
+		// socket open.
+		connection: 'close',
+	});
+	res.end(body);
+};
+
+const reject = (
+	res: ServerResponse,
+	status: number,
+	message: string,
+): void => {
+	send_json(res, status, json_rpc_error(null, -32000, message));
+};
+
+const hop_by_hop_headers = [
+	'connection',
+	'keep-alive',
+	'proxy-authenticate',
+	'proxy-authorization',
+	'te',
+	'trailer',
+	'transfer-encoding',
+	'upgrade',
+	'expect',
+];
+
+const forward_to_upstream = (
+	config: GuardConfig,
+	req: IncomingMessage,
+	res: ServerResponse,
+	body: Buffer,
+): void => {
+	const headers: Record<string, string | string[] | undefined> = {
+		...req.headers,
+	};
+	for (const name of hop_by_hop_headers) delete headers[name];
+	headers['host'] = `${config.upstream_host}:${config.upstream_port}`;
+	headers['content-length'] = String(body.length);
+
+	const upstream = http_request(
+		{
+			host: config.upstream_host,
+			port: config.upstream_port,
+			path: req.url,
+			method: req.method,
+			headers,
+		},
+		(upstream_res) => {
+			res.writeHead(
+				upstream_res.statusCode ?? 502,
+				upstream_res.headers,
+			);
+			upstream_res.pipe(res);
+			upstream_res.on('error', () => {
+				upstream_res.destroy();
+				res.destroy();
+			});
+		},
+	);
+	upstream.on('error', () => {
+		if (res.headersSent) {
+			res.destroy();
+			return;
+		}
+		send_json(
+			res,
+			502,
+			json_rpc_error(
+				null,
+				-32000,
+				'Bad Gateway: upstream unavailable',
+			),
+		);
+	});
+	// Propagate client-close cancellation to the upstream request.
+	res.on('close', () => {
+		if (!res.writableEnded) upstream.destroy();
+	});
+	upstream.end(body);
+};
+
+const handle_request = async (
+	config: GuardConfig,
+	req: IncomingMessage,
+	res: ServerResponse,
+): Promise<void> => {
+	const host_check = check_host(
+		req.headers.host,
+		config.allowed_hosts,
+	);
+	if (!host_check.ok) {
+		reject(
+			res,
+			403,
+			`Forbidden: Host rejected (${host_check.reason})`,
+		);
+		return;
+	}
+
+	const origin_check = check_origin(
+		req.headers.origin,
+		config.allowed_hosts,
+	);
+	if (!origin_check.ok) {
+		reject(
+			res,
+			403,
+			`Forbidden: Origin rejected (${origin_check.reason})`,
+		);
+		return;
+	}
+
+	let pathname: string;
+	try {
+		pathname = new URL(req.url ?? '/', 'http://guard.local').pathname;
+	} catch {
+		reject(res, 400, 'Bad Request: unparseable target');
+		return;
+	}
+
+	if (pathname === config.ping_path) {
+		if (req.method !== 'GET') {
+			res.setHeader('allow', 'GET');
+			reject(res, 405, 'Method Not Allowed');
+			return;
+		}
+		forward_to_upstream(config, req, res, Buffer.alloc(0));
+		return;
+	}
+
+	if (pathname !== config.mcp_path) {
+		reject(res, 404, 'Not Found');
+		return;
+	}
+	if (req.method !== 'POST') {
+		res.setHeader('allow', 'POST');
+		reject(res, 405, 'Method Not Allowed');
+		return;
+	}
+
+	const read = await read_bounded_body(
+		req,
+		config.max_body_bytes,
+		config.body_read_timeout_ms,
+	);
+	if (read.status === 'too_large') {
+		reject(res, 413, 'Payload Too Large');
+		return;
+	}
+	if (read.status === 'timeout') {
+		reject(res, 408, 'Request Timeout: body not received in time');
+		return;
+	}
+	if (read.status === 'aborted') {
+		res.destroy();
+		return;
+	}
+
+	const classification = classify_body(read.body);
+	const has_version_header =
+		req.headers['mcp-protocol-version'] !== undefined;
+	if (classification.modern_envelope && !has_version_header) {
+		send_json(
+			res,
+			400,
+			json_rpc_error(
+				classification.id,
+				-32020,
+				'Bad Request: MCP-Protocol-Version header is required when the body carries a modern protocol envelope',
+				{ issue: 'missing_protocol_version_header' },
+			),
+		);
+		return;
+	}
+
+	forward_to_upstream(config, req, res, read.body);
+};
+
+export const create_guard_server = (config: GuardConfig): Server => {
+	if (config.allowed_hosts.length === 0) {
+		throw new Error(
+			'guard requires a non-empty allowed_hosts allowlist',
+		);
+	}
+	const normalized: GuardConfig = {
+		...config,
+		allowed_hosts: config.allowed_hosts.map((host) =>
+			host.toLowerCase(),
+		),
+	};
+	const server = createServer((req, res) => {
+		handle_request(normalized, req, res).catch(() => {
+			if (res.headersSent) {
+				res.destroy();
+				return;
+			}
+			reject(res, 500, 'Internal guard error');
+		});
+	});
+	// Tool calls can legitimately stream for minutes; the global
+	// request timeout is disabled and slow senders are bounded by
+	// body_read_timeout_ms instead.
+	server.requestTimeout = 0;
+	server.on('clientError', (_error, socket) => {
+		socket.end(
+			'HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n',
+		);
+	});
+	return server;
+};
