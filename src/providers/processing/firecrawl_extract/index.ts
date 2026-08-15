@@ -1,5 +1,7 @@
+import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import {
+	firecrawl_poll_status_schema,
 	make_firecrawl_request,
 	poll_firecrawl_job,
 	validate_firecrawl_response,
@@ -17,19 +19,19 @@ import {
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface FirecrawlExtractResponse {
-	success: boolean;
-	id: string;
-	error?: string;
-}
+const firecrawl_extract_start_schema = v.object({
+	success: v.boolean(),
+	id: v.string(),
+	error: v.optional(v.string()),
+});
 
-interface FirecrawlExtractStatusResponse {
-	success: boolean;
-	id: string;
-	status: string;
-	data?: any;
-	error?: string;
-}
+const firecrawl_extract_status_schema = v.object({
+	success: v.optional(v.boolean()),
+	id: v.optional(v.string()),
+	status: firecrawl_poll_status_schema,
+	data: v.optional(v.record(v.string(), v.unknown())),
+	error: v.optional(v.string()),
+});
 
 export class FirecrawlExtractProvider implements ProcessingProvider {
 	name = 'firecrawl_extract';
@@ -58,23 +60,23 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 						: 'Extract the main content, title, and author from this page. Summarize the key information.';
 
 				// Start the extraction
-				const extract_data =
-					await make_firecrawl_request<FirecrawlExtractResponse>(
-						this.name,
-						config.processing.firecrawl_extract.base_url,
-						api_key,
-						{
-							urls: [extract_url],
-							prompt: extraction_prompt,
-							showSources: true,
-							scrapeOptions: {
-								formats: ['markdown'],
-								onlyMainContent: true,
-								waitFor: extract_depth === 'advanced' ? 5000 : 2000,
-							},
+				const extract_data = await make_firecrawl_request(
+					this.name,
+					config.processing.firecrawl_extract.base_url,
+					api_key,
+					{
+						urls: [extract_url],
+						prompt: extraction_prompt,
+						showSources: true,
+						scrapeOptions: {
+							formats: ['markdown'],
+							onlyMainContent: true,
+							waitFor: extract_depth === 'advanced' ? 5000 : 2000,
 						},
-						config.processing.firecrawl_extract.timeout,
-					);
+					},
+					config.processing.firecrawl_extract.timeout,
+					firecrawl_extract_start_schema,
+				);
 
 				validate_firecrawl_response(
 					extract_data,
@@ -83,15 +85,17 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 				);
 
 				// Poll for extraction completion
-				const status_data =
-					await poll_firecrawl_job<FirecrawlExtractStatusResponse>({
+				const status_data = await poll_firecrawl_job(
+					{
 						provider_name: this.name,
 						status_url: `${config.processing.firecrawl_extract.base_url}/${extract_data.id}`,
 						api_key,
 						max_attempts: 15,
 						poll_interval: 3000,
 						timeout: 30000,
-					});
+					},
+					firecrawl_extract_status_schema,
+				);
 
 				// Verify we have data
 				if (!status_data.data) {
@@ -144,8 +148,9 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 
 				// Get title if available
 				const title =
-					status_data.data.title ||
-					`Extracted Data from ${extract_url}`;
+					typeof status_data.data.title === 'string'
+						? status_data.data.title
+						: `Extracted Data from ${extract_url}`;
 
 				// Count words in the formatted content
 				const word_count = formatted_content

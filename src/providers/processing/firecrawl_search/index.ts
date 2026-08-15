@@ -1,3 +1,4 @@
+import * as v from 'valibot';
 import {
 	make_firecrawl_request,
 	validate_firecrawl_response,
@@ -40,51 +41,65 @@ export interface FirecrawlSearchOptions {
 	};
 }
 
-interface FirecrawlWebResult {
-	url: string;
-	title?: string;
-	markdown?: string;
-	html?: string;
-	rawHtml?: string;
-	description?: string;
-	category?: string;
-	metadata?: Record<string, unknown>;
-}
+const firecrawl_web_result_schema = v.object({
+	url: v.string(),
+	title: v.optional(v.string()),
+	markdown: v.optional(v.string()),
+	html: v.optional(v.string()),
+	rawHtml: v.optional(v.string()),
+	description: v.optional(v.string()),
+	category: v.optional(v.string()),
+	metadata: v.optional(v.record(v.string(), v.unknown())),
+});
 
-interface FirecrawlImageResult {
-	url: string;
-	title?: string;
-	imageUrl?: string;
-	imageWidth?: number;
-	imageHeight?: number;
-	position?: number;
-}
+const firecrawl_image_result_schema = v.object({
+	url: v.string(),
+	title: v.optional(v.string()),
+	imageUrl: v.optional(v.string()),
+	imageWidth: v.optional(v.number()),
+	imageHeight: v.optional(v.number()),
+	position: v.optional(v.number()),
+});
 
-interface FirecrawlNewsResult {
-	url: string;
-	title?: string;
-	snippet?: string;
-	date?: string;
-	imageUrl?: string;
-	position?: number;
-	markdown?: string;
-	html?: string;
-	rawHtml?: string;
-	metadata?: Record<string, unknown>;
-}
+const firecrawl_news_result_schema = v.object({
+	url: v.string(),
+	title: v.optional(v.string()),
+	snippet: v.optional(v.string()),
+	date: v.optional(v.string()),
+	imageUrl: v.optional(v.string()),
+	position: v.optional(v.number()),
+	markdown: v.optional(v.string()),
+	html: v.optional(v.string()),
+	rawHtml: v.optional(v.string()),
+	metadata: v.optional(v.record(v.string(), v.unknown())),
+});
 
-interface FirecrawlSearchResponse {
-	success: boolean;
-	data?: {
-		web?: FirecrawlWebResult[];
-		images?: FirecrawlImageResult[];
-		news?: FirecrawlNewsResult[];
-	};
-	warning?: string | null;
-	id?: string;
-	creditsUsed?: number;
-	error?: string;
-}
+const firecrawl_search_data_schema = v.object({
+	web: v.optional(v.array(firecrawl_web_result_schema)),
+	images: v.optional(v.array(firecrawl_image_result_schema)),
+	news: v.optional(v.array(firecrawl_news_result_schema)),
+});
+
+const firecrawl_search_response_schema = v.object({
+	success: v.boolean(),
+	data: v.optional(
+		v.union([firecrawl_search_data_schema, v.array(v.unknown())]),
+	),
+	warning: v.optional(v.nullable(v.string())),
+	id: v.optional(v.string()),
+	creditsUsed: v.optional(v.number()),
+	error: v.optional(v.string()),
+});
+
+type FirecrawlWebResult = v.InferOutput<
+	typeof firecrawl_web_result_schema
+>;
+type FirecrawlImageResult = v.InferOutput<
+	typeof firecrawl_image_result_schema
+>;
+type FirecrawlNewsResult = v.InferOutput<
+	typeof firecrawl_news_result_schema
+>;
 
 const normalize_options = (
 	options?: Record<string, unknown>,
@@ -217,14 +232,14 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 					search_options,
 				);
 
-				const data =
-					await make_firecrawl_request<FirecrawlSearchResponse>(
-						this.name,
-						config.processing.firecrawl_search.base_url,
-						api_key,
-						request_body,
-						config.processing.firecrawl_search.timeout,
-					);
+				const data = await make_firecrawl_request(
+					this.name,
+					config.processing.firecrawl_search.base_url,
+					api_key,
+					request_body,
+					config.processing.firecrawl_search.timeout,
+					firecrawl_search_response_schema,
+				);
 
 				validate_firecrawl_response(data, this.name, 'Search failed');
 

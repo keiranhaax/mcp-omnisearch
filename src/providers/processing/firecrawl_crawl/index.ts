@@ -1,5 +1,7 @@
+import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import {
+	firecrawl_poll_status_schema,
 	make_firecrawl_request,
 	poll_firecrawl_job,
 	validate_firecrawl_response,
@@ -17,36 +19,32 @@ import {
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface FirecrawlCrawlResponse {
-	success: boolean;
-	id: string;
-	url: string;
-	error?: string;
-}
+const firecrawl_crawl_start_schema = v.object({
+	success: v.boolean(),
+	id: v.string(),
+	url: v.optional(v.string()),
+	error: v.optional(v.string()),
+});
 
-interface FirecrawlCrawlStatusResponse {
-	success?: boolean;
-	status: string;
-	total?: number;
-	completed?: number;
-	data?: Array<{
-		url?: string;
-		markdown?: string;
-		html?: string | null;
-		rawHtml?: string | null;
-		metadata?: {
-			title?: string;
-			description?: string;
-			language?: string;
-			sourceURL?: string;
-			statusCode?: number;
-			error?: string;
-			[key: string]: any;
-		};
-		error?: string | null;
-	}>;
-	error?: string;
-}
+const firecrawl_crawl_status_schema = v.object({
+	success: v.optional(v.boolean()),
+	status: firecrawl_poll_status_schema,
+	total: v.optional(v.number()),
+	completed: v.optional(v.number()),
+	data: v.optional(
+		v.array(
+			v.object({
+				url: v.optional(v.string()),
+				markdown: v.optional(v.nullable(v.string())),
+				html: v.optional(v.nullable(v.string())),
+				rawHtml: v.optional(v.nullable(v.string())),
+				metadata: v.optional(v.record(v.string(), v.unknown())),
+				error: v.optional(v.nullable(v.string())),
+			}),
+		),
+	),
+	error: v.optional(v.string()),
+});
 
 const get_firecrawl_page_url = (
 	page: {
@@ -94,22 +92,22 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 
 			try {
 				// Start the crawl
-				const crawl_data =
-					await make_firecrawl_request<FirecrawlCrawlResponse>(
-						this.name,
-						config.processing.firecrawl_crawl.base_url,
-						api_key,
-						{
-							url: crawl_url,
-							scrapeOptions: {
-								formats: ['markdown'],
-								onlyMainContent: true,
-							},
-							maxDiscoveryDepth: extract_depth === 'advanced' ? 3 : 1,
-							limit: extract_depth === 'advanced' ? 50 : 20,
+				const crawl_data = await make_firecrawl_request(
+					this.name,
+					config.processing.firecrawl_crawl.base_url,
+					api_key,
+					{
+						url: crawl_url,
+						scrapeOptions: {
+							formats: ['markdown'],
+							onlyMainContent: true,
 						},
-						config.processing.firecrawl_crawl.timeout,
-					);
+						maxDiscoveryDepth: extract_depth === 'advanced' ? 3 : 1,
+						limit: extract_depth === 'advanced' ? 50 : 20,
+					},
+					config.processing.firecrawl_crawl.timeout,
+					firecrawl_crawl_start_schema,
+				);
 
 				validate_firecrawl_response(
 					crawl_data,
@@ -118,15 +116,17 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 				);
 
 				// Poll for crawl completion
-				const status_data =
-					await poll_firecrawl_job<FirecrawlCrawlStatusResponse>({
+				const status_data = await poll_firecrawl_job(
+					{
 						provider_name: this.name,
 						status_url: `${config.processing.firecrawl_crawl.base_url}/${crawl_data.id}`,
 						api_key,
 						max_attempts: 20,
 						poll_interval: 5000,
 						timeout: 30000,
-					});
+					},
+					firecrawl_crawl_status_schema,
+				);
 
 				// Verify we have data
 				if (!status_data.data || status_data.data.length === 0) {
@@ -172,7 +172,9 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 					.filter(Boolean).length;
 
 				// Get title from first successful result if available
-				const title = successful_pages[0]?.metadata?.title;
+				const title_value = successful_pages[0]?.metadata?.title;
+				const title =
+					typeof title_value === 'string' ? title_value : undefined;
 
 				// Track failed URLs
 				const failed_urls = status_data.data

@@ -3,35 +3,39 @@ import { http_json } from './http.js';
 import { parse_provider_response } from './provider_response.js';
 import { ErrorType, ProviderError } from './types.js';
 
-const firecrawl_response_schema = v.object({
+export const firecrawl_poll_status_schema = v.picklist([
+	'scraping',
+	'processing',
+	'completed',
+	'failed',
+	'cancelled',
+	'error',
+]);
+
+const firecrawl_polling_response_schema = v.object({
 	success: v.optional(v.boolean()),
-	id: v.optional(v.string()),
-	url: v.optional(v.string()),
-	status: v.optional(v.string()),
-	total: v.optional(v.number()),
-	completed: v.optional(v.number()),
-	data: v.optional(v.unknown()),
-	links: v.optional(v.array(v.unknown())),
-	warning: v.optional(v.nullable(v.string())),
-	creditsUsed: v.optional(v.number()),
-	model: v.optional(v.string()),
-	expiresAt: v.optional(v.string()),
+	status: firecrawl_poll_status_schema,
 	error: v.optional(v.string()),
 });
 
-export type FirecrawlProviderResponse = v.InferOutput<
-	typeof firecrawl_response_schema
+type FirecrawlPollingResponse = v.InferOutput<
+	typeof firecrawl_polling_response_schema
 >;
 
 export const make_firecrawl_request = async <
-	T extends FirecrawlProviderResponse = FirecrawlProviderResponse,
+	const TSchema extends v.BaseSchema<
+		unknown,
+		unknown,
+		v.BaseIssue<unknown>
+	>,
 >(
 	provider_name: string,
 	base_url: string,
 	api_key: string,
-	body: Record<string, any>,
+	body: Record<string, unknown>,
 	timeout: number,
-): Promise<T> => {
+	schema: TSchema,
+): Promise<v.InferOutput<TSchema>> => {
 	const data = await http_json(provider_name, base_url, {
 		method: 'POST',
 		headers: {
@@ -42,18 +46,17 @@ export const make_firecrawl_request = async <
 		signal: AbortSignal.timeout(timeout),
 	});
 
-	return parse_provider_response(
-		provider_name,
-		firecrawl_response_schema,
-		data,
-	) as T;
+	return parse_provider_response(provider_name, schema, data);
 };
 
-export const validate_firecrawl_response = (
+export function validate_firecrawl_response(
 	response: { success?: boolean; error?: string },
 	provider_name: string,
 	error_prefix: string,
-): void => {
+): asserts response is {
+	success?: true;
+	error?: undefined;
+} {
 	if (response.success === false || response.error) {
 		throw new ProviderError(
 			ErrorType.PROVIDER_ERROR,
@@ -61,7 +64,7 @@ export const validate_firecrawl_response = (
 			provider_name,
 		);
 	}
-};
+}
 
 export interface PollingConfig {
 	provider_name: string;
@@ -73,15 +76,15 @@ export interface PollingConfig {
 }
 
 export const poll_firecrawl_job = async <
-	T extends {
-		success?: boolean;
-		status: string;
-		error?: string;
-		data?: any;
-	},
+	const TSchema extends v.BaseSchema<
+		unknown,
+		unknown,
+		v.BaseIssue<unknown>
+	>,
 >(
 	config: PollingConfig,
-): Promise<T> => {
+	schema: TSchema,
+): Promise<v.InferOutput<TSchema> & FirecrawlPollingResponse> => {
 	let attempts = 0;
 
 	while (attempts < config.max_attempts) {
@@ -89,7 +92,8 @@ export const poll_firecrawl_job = async <
 			setTimeout(resolve, config.poll_interval),
 		);
 
-		let status_result: T;
+		let status_result: v.InferOutput<TSchema> &
+			FirecrawlPollingResponse;
 		try {
 			const raw_status_result = await http_json(
 				config.provider_name,
@@ -103,11 +107,16 @@ export const poll_firecrawl_job = async <
 					signal: AbortSignal.timeout(config.timeout),
 				},
 			);
+			parse_provider_response(
+				config.provider_name,
+				firecrawl_polling_response_schema,
+				raw_status_result,
+			);
 			status_result = parse_provider_response(
 				config.provider_name,
-				firecrawl_response_schema,
+				schema,
 				raw_status_result,
-			) as T;
+			) as v.InferOutput<TSchema> & FirecrawlPollingResponse;
 		} catch (error) {
 			if (
 				error instanceof ProviderError &&

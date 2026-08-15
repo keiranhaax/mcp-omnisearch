@@ -1,3 +1,4 @@
+import * as v from 'valibot';
 import {
 	afterEach,
 	beforeEach,
@@ -21,6 +22,23 @@ import { ErrorType } from './types.js';
 
 const http_json_mock = vi.mocked(http_json);
 
+const firecrawl_job_schema = v.object({
+	success: v.optional(v.boolean()),
+	status: v.optional(
+		v.picklist([
+			'scraping',
+			'processing',
+			'completed',
+			'failed',
+			'cancelled',
+			'error',
+		]),
+	),
+	id: v.optional(v.string()),
+	data: v.optional(v.unknown()),
+	error: v.optional(v.string()),
+});
+
 describe('make_firecrawl_request', () => {
 	beforeEach(() => {
 		http_json_mock.mockReset();
@@ -40,6 +58,7 @@ describe('make_firecrawl_request', () => {
 				'secret-key',
 				{ url: 'https://example.com' },
 				5000,
+				firecrawl_job_schema,
 			),
 		).resolves.toEqual({ success: true, id: 'job-1' });
 
@@ -72,6 +91,7 @@ describe('make_firecrawl_request', () => {
 				'secret-key',
 				{ url: 'https://example.com' },
 				5000,
+				firecrawl_job_schema,
 			);
 		} catch (error) {
 			thrown = error;
@@ -139,14 +159,17 @@ describe('poll_firecrawl_job', () => {
 				data: { pages: 3 },
 			});
 
-		const promise = poll_firecrawl_job({
-			provider_name: 'firecrawl',
-			status_url: 'https://api.firecrawl.dev/v2/jobs/123',
-			api_key: 'secret-key',
-			max_attempts: 3,
-			poll_interval: 10,
-			timeout: 5000,
-		});
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 3,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			firecrawl_job_schema,
+		);
 
 		await vi.advanceTimersByTimeAsync(30);
 
@@ -164,14 +187,17 @@ describe('poll_firecrawl_job', () => {
 			data: { pages: 1 },
 		});
 
-		const promise = poll_firecrawl_job({
-			provider_name: 'firecrawl',
-			status_url: 'https://api.firecrawl.dev/v2/jobs/123',
-			api_key: 'secret-key',
-			max_attempts: 1,
-			poll_interval: 10,
-			timeout: 5000,
-		});
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 1,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			firecrawl_job_schema,
+		);
 		const resolution = expect(promise).resolves.toMatchObject({
 			status: 'completed',
 			data: { pages: 1 },
@@ -188,14 +214,17 @@ describe('poll_firecrawl_job', () => {
 			error: 'crawl crashed',
 		});
 
-		const promise = poll_firecrawl_job({
-			provider_name: 'firecrawl',
-			status_url: 'https://api.firecrawl.dev/v2/jobs/123',
-			api_key: 'secret-key',
-			max_attempts: 1,
-			poll_interval: 10,
-			timeout: 5000,
-		});
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 1,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			firecrawl_job_schema,
+		);
 		const rejection = expect(promise).rejects.toMatchObject({
 			type: ErrorType.PROVIDER_ERROR,
 			provider: 'firecrawl',
@@ -214,14 +243,17 @@ describe('poll_firecrawl_job', () => {
 				error: `${status} job`,
 			});
 
-			const promise = poll_firecrawl_job({
-				provider_name: 'firecrawl',
-				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
-				api_key: 'secret-key',
-				max_attempts: 1,
-				poll_interval: 10,
-				timeout: 5000,
-			});
+			const promise = poll_firecrawl_job(
+				{
+					provider_name: 'firecrawl',
+					status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+					api_key: 'secret-key',
+					max_attempts: 1,
+					poll_interval: 10,
+					timeout: 5000,
+				},
+				firecrawl_job_schema,
+			);
 			const rejection = expect(promise).rejects.toMatchObject({
 				type: ErrorType.PROVIDER_ERROR,
 				message: `Job failed: ${status} job`,
@@ -233,29 +265,69 @@ describe('poll_firecrawl_job', () => {
 	);
 
 	it('rejects a malformed status envelope without polling again', async () => {
+		const sentinel = 'polling-payload-secret-must-not-leak';
 		http_json_mock.mockResolvedValue({
-			status: { unexpected: true },
+			status: { unexpected: sentinel },
 		});
 
-		const promise = poll_firecrawl_job({
-			provider_name: 'firecrawl',
-			status_url: 'https://api.firecrawl.dev/v2/jobs/123',
-			api_key: 'secret-key',
-			max_attempts: 3,
-			poll_interval: 10,
-			timeout: 5000,
-		});
-		const rejection = expect(promise).rejects.toMatchObject({
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 3,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			firecrawl_job_schema,
+		);
+		const rejection = promise.catch((error: unknown) => error);
+
+		await vi.advanceTimersByTimeAsync(10);
+		const thrown = await rejection;
+		expect(thrown).toMatchObject({
 			type: ErrorType.PROVIDER_ERROR,
 			provider: 'firecrawl',
 			message: 'Malformed firecrawl response',
 			details: { retryable: false },
 		});
-
-		await vi.advanceTimersByTimeAsync(10);
-		await rejection;
+		expect(JSON.stringify(thrown)).not.toContain(sentinel);
 		expect(http_json_mock).toHaveBeenCalledTimes(1);
 	});
+
+	it.each([
+		{ label: 'empty', response: {} },
+		{ label: 'success-only', response: { success: true } },
+	])(
+		'rejects a $label polling response with no status immediately',
+		async ({ response }) => {
+			http_json_mock.mockResolvedValue(response);
+
+			const promise = poll_firecrawl_job(
+				{
+					provider_name: 'firecrawl',
+					status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+					api_key: 'secret-key',
+					max_attempts: 3,
+					poll_interval: 10,
+					timeout: 5000,
+				},
+				firecrawl_job_schema,
+			);
+			const rejection = promise.catch((error: unknown) => error);
+
+			await vi.advanceTimersByTimeAsync(10);
+			const thrown = await rejection;
+
+			expect(thrown).toMatchObject({
+				type: ErrorType.PROVIDER_ERROR,
+				provider: 'firecrawl',
+				message: 'Malformed firecrawl response',
+				details: { retryable: false },
+			});
+			expect(http_json_mock).toHaveBeenCalledTimes(1);
+		},
+	);
 
 	it('times out after the configured number of attempts', async () => {
 		http_json_mock.mockResolvedValue({
@@ -263,14 +335,17 @@ describe('poll_firecrawl_job', () => {
 			status: 'processing',
 		});
 
-		const promise = poll_firecrawl_job({
-			provider_name: 'firecrawl',
-			status_url: 'https://api.firecrawl.dev/v2/jobs/123',
-			api_key: 'secret-key',
-			max_attempts: 2,
-			poll_interval: 10,
-			timeout: 5000,
-		});
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 2,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			firecrawl_job_schema,
+		);
 		const rejection = expect(promise).rejects.toMatchObject({
 			type: ErrorType.PROVIDER_ERROR,
 			provider: 'firecrawl',

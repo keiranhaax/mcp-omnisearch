@@ -1,3 +1,4 @@
+import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import {
 	make_firecrawl_request,
@@ -39,31 +40,29 @@ export interface FirecrawlScrapeOptions {
 	removeBase64Images?: boolean;
 }
 
-interface FirecrawlScrapeResponse {
-	success: boolean;
-	data?: {
-		markdown?: string;
-		summary?: string;
-		html?: string;
-		rawHtml?: string;
-		screenshot?: string;
-		answer?: string;
-		highlights?: string;
-		links?: string[];
-		metadata?: {
-			title?: string;
-			description?: string;
-			language?: string;
-			sourceURL?: string;
-			statusCode?: number;
-			error?: string;
-			[key: string]: any;
-		};
-		llm_extraction?: any;
-		warning?: string;
-	};
-	error?: string;
-}
+const firecrawl_scrape_response_schema = v.object({
+	success: v.boolean(),
+	data: v.optional(
+		v.object({
+			markdown: v.optional(v.string()),
+			summary: v.optional(v.string()),
+			html: v.optional(v.string()),
+			rawHtml: v.optional(v.string()),
+			screenshot: v.optional(v.string()),
+			answer: v.optional(v.string()),
+			highlights: v.optional(v.string()),
+			links: v.optional(v.array(v.string())),
+			metadata: v.optional(v.record(v.string(), v.unknown())),
+			llm_extraction: v.optional(v.unknown()),
+			warning: v.optional(v.nullable(v.string())),
+		}),
+	),
+	error: v.optional(v.string()),
+});
+
+type FirecrawlScrapeResponse = v.InferOutput<
+	typeof firecrawl_scrape_response_schema
+>;
 
 const normalize_options = (
 	options?: Record<string, unknown>,
@@ -172,18 +171,18 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 				const results: ProcessedUrlResult[] = await Promise.all(
 					urls.map(async (single_url) => {
 						try {
-							const data =
-								await make_firecrawl_request<FirecrawlScrapeResponse>(
-									this.name,
-									config.processing.firecrawl_scrape.base_url,
-									api_key,
-									build_scrape_body(
-										single_url,
-										extract_depth,
-										scrape_options,
-									),
-									config.processing.firecrawl_scrape.timeout,
-								);
+							const data = await make_firecrawl_request(
+								this.name,
+								config.processing.firecrawl_scrape.base_url,
+								api_key,
+								build_scrape_body(
+									single_url,
+									extract_depth,
+									scrape_options,
+								),
+								config.processing.firecrawl_scrape.timeout,
+								firecrawl_scrape_response_schema,
+							);
 
 							validate_firecrawl_response(
 								data,
@@ -219,6 +218,12 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 								success: true,
 							};
 						} catch (error) {
+							if (
+								error instanceof ProviderError &&
+								error.details?.retryable === false
+							) {
+								throw error;
+							}
 							console.error(`Error processing ${single_url}:`, error);
 							return {
 								url: single_url,

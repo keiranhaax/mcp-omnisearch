@@ -1,4 +1,6 @@
+import * as v from 'valibot';
 import {
+	firecrawl_poll_status_schema,
 	make_firecrawl_request,
 	poll_firecrawl_job,
 } from '../../../common/firecrawl_utils.js';
@@ -12,21 +14,25 @@ import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface FirecrawlAgentStartResponse {
-	success: boolean;
-	id?: string;
-	error?: string;
-}
+const firecrawl_agent_start_schema = v.object({
+	success: v.boolean(),
+	id: v.optional(v.string()),
+	error: v.optional(v.string()),
+});
 
-interface FirecrawlAgentStatusResponse {
-	success: boolean;
-	status: string;
-	data?: any;
-	model?: string;
-	creditsUsed?: number;
-	expiresAt?: string;
-	error?: string;
-}
+const firecrawl_agent_status_schema = v.object({
+	success: v.optional(v.boolean()),
+	status: firecrawl_poll_status_schema,
+	data: v.optional(v.unknown()),
+	model: v.optional(v.string()),
+	creditsUsed: v.optional(v.number()),
+	expiresAt: v.optional(v.string()),
+	error: v.optional(v.string()),
+});
+
+type FirecrawlAgentStartResponse = v.InferOutput<
+	typeof firecrawl_agent_start_schema
+>;
 
 interface ResolvedAgentStart {
 	start_url: string;
@@ -107,14 +113,14 @@ export class FirecrawlAgentProvider {
 
 		for (const candidate of candidates) {
 			try {
-				const start_response =
-					await make_firecrawl_request<FirecrawlAgentStartResponse>(
-						this.name,
-						candidate,
-						api_key,
-						request_body,
-						config.processing.firecrawl_agent.timeout,
-					);
+				const start_response = await make_firecrawl_request(
+					this.name,
+					candidate,
+					api_key,
+					request_body,
+					config.processing.firecrawl_agent.timeout,
+					firecrawl_agent_start_schema,
+				);
 
 				if (!start_response.success || !start_response.id) {
 					const reason = start_response.error || 'No job ID returned';
@@ -214,15 +220,17 @@ export class FirecrawlAgentProvider {
 				const job_id = start_response.id;
 				const status_url = `${start_url}/${job_id}`;
 
-				const completed =
-					await poll_firecrawl_job<FirecrawlAgentStatusResponse>({
+				const completed = await poll_firecrawl_job(
+					{
 						provider_name: this.name,
 						status_url,
 						api_key,
 						max_attempts: 60,
 						poll_interval: 3000,
 						timeout: 30000,
-					});
+					},
+					firecrawl_agent_status_schema,
+				);
 
 				if (completed.status !== 'completed') {
 					const content = JSON.stringify(

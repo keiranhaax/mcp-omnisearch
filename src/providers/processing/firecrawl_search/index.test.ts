@@ -6,6 +6,7 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { ErrorType } from '../../../common/types.js';
 import { config } from '../../../config/env.js';
 import { FirecrawlSearchProvider } from './index.js';
 
@@ -210,6 +211,38 @@ describe('FirecrawlSearchProvider', () => {
 			images: 0,
 			news: 0,
 		});
+	});
+
+	it('rejects malformed web collections without exposing payload values', async () => {
+		const sentinel = 'search-payload-secret-must-not-leak';
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					success: true,
+					data: { web: { sentinel } },
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		let thrown: unknown;
+		try {
+			await new FirecrawlSearchProvider().process_content('query');
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			provider: 'firecrawl_search',
+			message: 'Malformed firecrawl_search response',
+			details: { retryable: false },
+		});
+		expect(JSON.stringify(thrown)).not.toContain(sentinel);
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	});
 
 	it('rejects mutually exclusive domain filters', async () => {
