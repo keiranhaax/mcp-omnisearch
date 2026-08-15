@@ -63,12 +63,11 @@ describe('http_json', () => {
 		);
 
 		await expect(
-			http_json('kagi', 'https://api.example.com'),
+			http_json('test_provider', 'https://api.example.com'),
 		).rejects.toMatchObject({
-			type: ErrorType.AUTH_ERROR,
-			provider: 'kagi',
+			type: ErrorType.API_ERROR,
+			provider: 'test_provider',
 			message: 'Invalid API key',
-			details: { status: 401, retryable: false },
 		});
 	});
 
@@ -78,12 +77,38 @@ describe('http_json', () => {
 		);
 
 		await expect(
-			http_json('kagi', 'https://api.example.com'),
+			http_json('test_provider', 'https://api.example.com'),
 		).rejects.toMatchObject({
-			type: ErrorType.AUTH_ERROR,
-			provider: 'kagi',
+			type: ErrorType.ENTITLEMENT_REQUIRED,
+			provider: 'test_provider',
 			message: 'API key does not have access to this endpoint',
-			details: { status: 403, retryable: false },
+		});
+	});
+
+	it('classifies endpoint-missing responses when the body indicates a missing route', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response('<pre>Cannot POST /v1/agent</pre>', {
+				status: 404,
+			}),
+		);
+
+		await expect(
+			http_json(
+				'firecrawl_agent',
+				'https://api.firecrawl.dev/v1/agent',
+				{
+					method: 'POST',
+				},
+			),
+		).rejects.toMatchObject({
+			type: ErrorType.ENDPOINT_NOT_FOUND,
+			provider: 'firecrawl_agent',
+			message: 'Endpoint not found',
+			details: {
+				status: 404,
+				url: 'https://api.firecrawl.dev/v1/agent',
+				method: 'POST',
+			},
 		});
 	});
 
@@ -109,10 +134,9 @@ describe('http_json', () => {
 		await expect(
 			http_json('tavily', 'https://api.example.com'),
 		).rejects.toMatchObject({
-			type: ErrorType.TRANSIENT_PROVIDER_ERROR,
+			type: ErrorType.PROVIDER_ERROR,
 			provider: 'tavily',
 			message: 'tavily API internal error',
-			details: { status: 503, retryable: true },
 		});
 	});
 
@@ -127,10 +151,31 @@ describe('http_json', () => {
 		await expect(
 			http_json('exa', 'https://api.example.com'),
 		).rejects.toMatchObject({
-			type: ErrorType.INVALID_INPUT,
+			type: ErrorType.API_ERROR,
 			provider: 'exa',
-			message: 'Invalid request: bad request body',
-			details: { status: 400, retryable: false },
+			message: 'Unexpected error: bad request body',
+		});
+	});
+
+	it('classifies entitlement errors from provider response text', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					error: 'API key does not have access to this endpoint',
+				}),
+				{
+					status: 400,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		await expect(
+			http_json('test_provider', 'https://api.example.com'),
+		).rejects.toMatchObject({
+			type: ErrorType.ENTITLEMENT_REQUIRED,
+			provider: 'test_provider',
+			message: 'API key does not have access to this endpoint',
 		});
 	});
 });

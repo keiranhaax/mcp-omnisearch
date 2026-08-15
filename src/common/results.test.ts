@@ -1,35 +1,26 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { read_result_chunk } from './result_store.js';
 import {
 	aggregate_url_results,
 	handle_large_result,
-	omit_raw_contents,
 } from './results.js';
 import { ErrorType } from './types.js';
 
-const created_files: string[] = [];
-const original_large_result_mode =
-	process.env.OMNISEARCH_LARGE_RESULT_MODE;
+let result_dir: string;
 
-const restore_env = () => {
-	if (original_large_result_mode === undefined) {
-		delete process.env.OMNISEARCH_LARGE_RESULT_MODE;
-	} else {
-		process.env.OMNISEARCH_LARGE_RESULT_MODE =
-			original_large_result_mode;
-	}
-};
-
-beforeEach(restore_env);
+beforeEach(() => {
+	result_dir = mkdtempSync(
+		join(tmpdir(), 'omnisearch-results-test-'),
+	);
+	process.env.OMNISEARCH_RESULT_DIR = result_dir;
+});
 
 afterEach(() => {
-	for (const file of created_files.splice(0)) {
-		if (existsSync(file)) {
-			rmSync(file);
-		}
-	}
-
-	restore_env();
+	delete process.env.OMNISEARCH_RESULT_DIR;
+	rmSync(result_dir, { recursive: true, force: true });
 });
 
 describe('handle_large_result', () => {
@@ -43,7 +34,7 @@ describe('handle_large_result', () => {
 		expect(handle_large_result(result, 'web_extract')).toBe(result);
 	});
 
-	it('writes oversized results to a temporary file with section hints', () => {
+	it('stores oversized results behind an opaque paginated result ID', () => {
 		const large_result = {
 			raw_contents: [
 				{
@@ -63,19 +54,21 @@ describe('handle_large_result', () => {
 			large_result,
 			'web_extract',
 		) as {
-			file_path: string;
+			result_id: string;
 			total_lines: number;
 			estimated_tokens: number;
+			expires_at: string;
 			sections: Array<{ title: string; line: number }>;
 			metadata: Record<string, unknown>;
 			read_hint: string;
 		};
 
-		created_files.push(result.file_path);
-
-		expect(result.file_path).toContain('mcp-web_extract-');
+		expect(result.result_id).toMatch(/^[0-9a-f-]{36}$/);
 		expect(result.total_lines).toBeGreaterThan(0);
 		expect(result.estimated_tokens).toBeGreaterThan(20000);
+		expect(new Date(result.expires_at).getTime()).toBeGreaterThan(
+			Date.now(),
+		);
 		expect(result.sections).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -85,88 +78,22 @@ describe('handle_large_result', () => {
 				expect.objectContaining({ title: 'METADATA' }),
 			]),
 		);
-		expect(result.read_hint).toContain(result.file_path);
+		expect(result.read_hint).toContain(result.result_id);
+		expect(result.read_hint).toContain('result_read');
 		expect(result.metadata).toEqual({
 			word_count: 6,
 			urls_processed: 1,
 			source_provider: 'tavily',
 		});
 
-		const written = readFileSync(result.file_path, 'utf8');
+		const written = read_result_chunk(
+			result.result_id,
+			1,
+			500,
+		).content;
 		expect(written).toContain('URL: https://example.com/article');
 		expect(written).toContain('# Heading');
 		expect(written).toContain('METADATA');
-	});
-
-	it('returns oversized results inline when configured', () => {
-		process.env.OMNISEARCH_LARGE_RESULT_MODE = 'inline';
-		const result = {
-			content: 'x'.repeat(90000),
-			source_provider: 'tavily',
-		};
-
-		expect(handle_large_result(result, 'web_extract')).toBe(result);
-	});
-
-	it('writes oversized results to a temporary file when explicitly configured', () => {
-		process.env.OMNISEARCH_LARGE_RESULT_MODE = 'file';
-		const result = {
-			content: 'x'.repeat(90000),
-			source_provider: 'tavily',
-		};
-
-		const handled = handle_large_result(result, 'web_extract') as {
-			file_path: string;
-		};
-		created_files.push(handled.file_path);
-
-		expect(handled.file_path).toContain('mcp-web_extract-');
-	});
-
-	it('lets per-request inline mode override the file-mode environment default', () => {
-		process.env.OMNISEARCH_LARGE_RESULT_MODE = 'file';
-		const result = {
-			content: 'x'.repeat(90000),
-			source_provider: 'tavily',
-		};
-
-		expect(
-			handle_large_result(result, 'web_extract', { mode: 'inline' }),
-		).toBe(result);
-	});
-
-	it('lets per-request file mode override the inline-mode environment default', () => {
-		process.env.OMNISEARCH_LARGE_RESULT_MODE = 'inline';
-		const result = {
-			content: 'x'.repeat(90000),
-			source_provider: 'tavily',
-		};
-
-		const handled = handle_large_result(result, 'web_extract', {
-			mode: 'file',
-		}) as { file_path: string };
-		created_files.push(handled.file_path);
-
-		expect(handled.file_path).toContain('mcp-web_extract-');
-	});
-});
-
-describe('omit_raw_contents', () => {
-	it('removes raw_contents while preserving combined content and metadata', () => {
-		const result = {
-			content: 'hello world',
-			raw_contents: [
-				{ url: 'https://example.com', content: 'hello world' },
-			],
-			metadata: { word_count: 2 },
-			source_provider: 'tavily',
-		};
-
-		expect(omit_raw_contents(result)).toEqual({
-			content: 'hello world',
-			metadata: { word_count: 2 },
-			source_provider: 'tavily',
-		});
 	});
 });
 
@@ -234,7 +161,7 @@ describe('aggregate_url_results', () => {
 				['https://example.com/a'],
 				'basic',
 			),
-		).toThrow(
+		).toThrowError(
 			expect.objectContaining({
 				type: ErrorType.PROVIDER_ERROR,
 				provider: 'firecrawl',

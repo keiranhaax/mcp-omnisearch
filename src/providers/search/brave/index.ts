@@ -1,13 +1,13 @@
 import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider-response.js';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	apply_search_operators,
 	build_query_with_operators,
 	parse_search_operators,
-} from '../../../common/search-operators.js';
+} from '../../../common/search_operators.js';
 import {
 	BaseSearchParams,
 	SearchProvider,
@@ -21,8 +21,8 @@ const brave_search_response_schema = v.object({
 		v.object({
 			results: v.array(
 				v.object({
-					title: v.string(),
-					url: v.string(),
+					title: v.optional(v.string()),
+					url: v.optional(v.string()),
 					description: v.optional(v.string()),
 				}),
 			),
@@ -71,19 +71,26 @@ export class BraveSearchProvider implements SearchProvider {
 						signal: AbortSignal.timeout(config.search.brave.timeout),
 					},
 				);
-
 				const data = parse_provider_response(
 					this.name,
 					brave_search_response_schema,
 					raw_data,
 				);
 
-				return (data.web?.results ?? []).map((result) => ({
-					title: result.title,
-					url: result.url,
-					snippet: result.description ?? '',
-					source_provider: this.name,
-				}));
+				return (data.web?.results || [])
+					.filter(
+						(
+							result,
+						): result is typeof result & {
+							url: string;
+						} => typeof result.url === 'string',
+					)
+					.map((result) => ({
+						title: result.title ?? result.url,
+						url: result.url,
+						snippet: result.description ?? '',
+						source_provider: this.name,
+					}));
 			} catch (error) {
 				handle_provider_error(
 					error,

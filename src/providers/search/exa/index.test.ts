@@ -6,66 +6,179 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { config } from '../../../config/env.js';
+import { ExaSearchProvider } from './index.js';
 
-const json_response = (body: unknown) =>
-	new Response(JSON.stringify(body), { status: 200 });
+const fetch_mock = vi.fn();
+const previous_api_key = config.search.exa.api_key;
 
 describe('ExaSearchProvider', () => {
 	beforeEach(() => {
-		vi.resetModules();
-		vi.stubEnv('EXA_API_KEY', 'test-exa-key');
+		fetch_mock.mockReset();
+		vi.stubGlobal('fetch', fetch_mock);
+		config.search.exa.api_key = 'exa-test-key';
 	});
 
 	afterEach(() => {
-		vi.unstubAllEnvs();
+		config.search.exa.api_key = previous_api_key;
+		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
 	});
 
-	it('posts search options and maps results with metadata', async () => {
-		const fetch = vi.fn(
-			async (_input: RequestInfo | URL, _init?: RequestInit) =>
-				json_response({
+	it('uses auto search and text contents by default', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
 					requestId: 'req-1',
-					autopromptString: 'auto query',
-					searchType: 'neural',
 					results: [
 						{
-							id: 'id-1',
-							title: 'Exa result',
+							id: 'doc-1',
+							title: 'Doc',
 							url: 'https://example.com',
-							text: 'Body text',
-							score: 0.7,
-							author: 'Author',
+							text: 'Text content',
 						},
 					],
 				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
 		);
-		vi.stubGlobal('fetch', fetch);
-		const { ExaSearchProvider } = await import('./index.js');
+
+		const provider = new ExaSearchProvider();
+		const results = await provider.search({
+			query: '  latest docs  ',
+		});
+
+		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
+		expect(body).toEqual({
+			query: 'latest docs',
+			type: 'auto',
+			numResults: 10,
+			contents: { text: { maxCharacters: 3000 } },
+		});
+		expect(results[0]).toMatchObject({
+			title: 'Doc',
+			url: 'https://example.com',
+			snippet: 'Text content',
+			metadata: { requestId: 'req-1' },
+		});
+	});
+
+	it('maps modern Exa fields into the search request', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(JSON.stringify({ results: [] }), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' },
+			}),
+		);
+
+		const output_schema = {
+			type: 'object',
+			properties: { answer: { type: 'string' } },
+		};
+
+		const provider = new ExaSearchProvider();
+		await provider.search({
+			query: 'company research',
+			limit: 5,
+			include_domains: ['example.com'],
+			search_type: 'deep-reasoning',
+			category: 'company',
+			user_location: 'US',
+			contents: { summary: true },
+			additional_queries: ['funding', 'headquarters'],
+			output_schema,
+			system_prompt: 'Return concise data.',
+		});
+
+		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
+		expect(body).toEqual({
+			query: 'company research',
+			type: 'deep-reasoning',
+			numResults: 5,
+			includeDomains: ['example.com'],
+			contents: { summary: true },
+			additionalQueries: ['funding', 'headquarters'],
+			category: 'company',
+			userLocation: 'US',
+			outputSchema: output_schema,
+			systemPrompt: 'Return concise data.',
+		});
+	});
+
+	it('does not require resolvedSearchType or score in responses', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: [
+						{
+							title: 'No score',
+							url: 'https://example.com/no-score',
+							summary: 'Summary only',
+						},
+					],
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		const provider = new ExaSearchProvider();
+		const [result] = await provider.search({
+			query: 'missing fields',
+		});
+
+		expect(result.score).toBeUndefined();
+		expect(result.metadata?.resolvedSearchType).toBeUndefined();
+		expect(result.snippet).toBe('Summary only');
+	});
+
+	it('maps the current searchType field without requiring its retired predecessor', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					searchType: 'auto',
+					results: [
+						{
+							title: 'Current response',
+							url: 'https://example.com/current',
+							text: 'Current content',
+						},
+					],
+				}),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+
+		const [result] = await new ExaSearchProvider().search({
+			query: 'current field',
+		});
+
+		expect(result.metadata?.resolvedSearchType).toBe('auto');
+	});
+
+	it('rejects a malformed results envelope as a provider error', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: { unexpected: true } }),
+				{ status: 200 },
+			),
+		);
 
 		await expect(
-			new ExaSearchProvider().search({
-				query: ' exa search ',
-				limit: 1,
-				include_domains: ['example.com'],
-				exclude_domains: ['bad.example'],
-			}),
-		).resolves.toMatchObject([
-			{
-				title: 'Exa result',
-				url: 'https://example.com',
-				snippet: 'Body text',
-				score: 0.7,
-				source_provider: 'exa',
-				metadata: { id: 'id-1', resolvedSearchType: 'neural' },
-			},
-		]);
-		const request_init = fetch.mock.calls[0]?.[1];
-		expect(JSON.parse(request_init?.body as string)).toMatchObject({
-			query: 'exa search',
-			numResults: 1,
-			includeDomains: ['example.com'],
-			excludeDomains: ['bad.example'],
+			new ExaSearchProvider().search({ query: 'malformed' }),
+		).rejects.toMatchObject({
+			type: 'PROVIDER_ERROR',
+			provider: 'exa',
+			message: 'Malformed exa response',
 		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	});
 });

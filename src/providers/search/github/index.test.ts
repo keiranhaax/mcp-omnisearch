@@ -6,127 +6,190 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { config } from '../../../config/env.js';
 
-const search = vi.hoisted(() => ({
-	code: vi.fn(),
-	repos: vi.fn(),
-	users: vi.fn(),
-}));
+const code_mock = vi.fn();
+const repos_mock = vi.fn();
+const users_mock = vi.fn();
 
 vi.mock('octokit', () => ({
 	Octokit: class {
-		rest = { search };
+		rest = {
+			search: {
+				code: code_mock,
+				repos: repos_mock,
+				users: users_mock,
+			},
+		};
 	},
 }));
 
-describe('GitHubSearchProvider', () => {
+import { GitHubSearchProvider } from './index.js';
+
+const previous_api_key = config.search.github.api_key;
+
+describe('GitHubSearchProvider response validation', () => {
 	beforeEach(() => {
-		vi.resetModules();
-		vi.stubEnv('GITHUB_API_KEY', 'test-github-key');
-		search.code.mockReset();
-		search.repos.mockReset();
-		search.users.mockReset();
+		code_mock.mockReset();
+		repos_mock.mockReset();
+		users_mock.mockReset();
+		config.search.github.api_key = 'github-test-key';
 	});
 
 	afterEach(() => {
-		vi.unstubAllEnvs();
+		config.search.github.api_key = previous_api_key;
 		vi.restoreAllMocks();
 	});
 
-	it('maps code search text matches into snippets', async () => {
-		search.code.mockResolvedValue({
+	it('accepts valid code, repository, and user envelopes', async () => {
+		code_mock.mockResolvedValue({
 			data: {
 				items: [
 					{
 						name: 'index.ts',
 						path: 'src/index.ts',
-						html_url: 'https://github.test/file',
-						score: 9,
+						html_url:
+							'https://github.com/acme/repo/blob/main/src/index.ts',
+						score: 1,
 						repository: {
-							full_name: 'owner/repo',
-							html_url: 'https://github.test/owner/repo',
+							full_name: 'acme/repo',
+							html_url: 'https://github.com/acme/repo',
 						},
-						text_matches: [
-							{ fragment: 'first' },
-							{ fragment: 'second' },
-						],
 					},
 				],
 			},
 		});
-		const { GitHubSearchProvider } = await import('./index.js');
-
-		await expect(
-			new GitHubSearchProvider().search_code({
-				query: 'term',
-				limit: 1,
-			}),
-		).resolves.toMatchObject([
-			{
-				title: 'owner/repo/src/index.ts',
-				url: 'https://github.test/file',
-				snippet: 'first ... second',
-				score: 9,
-				metadata: { search_type: 'code', repository: 'owner/repo' },
-			},
-		]);
-	});
-
-	it('maps repository search metadata', async () => {
-		search.repos.mockResolvedValue({
+		repos_mock.mockResolvedValue({
 			data: {
 				items: [
 					{
-						full_name: 'owner/repo',
-						html_url: 'https://github.test/owner/repo',
-						description: 'Description',
+						full_name: 'acme/repo',
+						html_url: 'https://github.com/acme/repo',
+						description: null,
 						stargazers_count: 10,
 						forks_count: 2,
 						pushed_at: '2026-01-01T00:00:00Z',
-						language: 'TypeScript',
-						score: 4,
+						language: null,
+						score: 1,
 					},
 				],
 			},
 		});
-		const { GitHubSearchProvider } = await import('./index.js');
-
-		await expect(
-			new GitHubSearchProvider().search_repositories({
-				query: 'repo',
-			}),
-		).resolves.toMatchObject([
-			{
-				title: 'owner/repo',
-				snippet: expect.stringContaining('TypeScript'),
-				metadata: { search_type: 'repository', stars: 10 },
-			},
-		]);
-	});
-
-	it('maps user search fallbacks', async () => {
-		search.users.mockResolvedValue({
+		users_mock.mockResolvedValue({
 			data: {
 				items: [
 					{
 						login: 'octocat',
-						html_url: 'https://github.test/octocat',
+						html_url: 'https://github.com/octocat',
 						type: 'User',
-						score: 3,
+						score: 1,
 					},
 				],
 			},
 		});
-		const { GitHubSearchProvider } = await import('./index.js');
 
+		const provider = new GitHubSearchProvider();
 		await expect(
-			new GitHubSearchProvider().search_users({ query: 'octocat' }),
-		).resolves.toMatchObject([
-			{
-				title: 'octocat',
-				snippet: 'GitHub user: octocat • User',
-				metadata: { search_type: 'user', username: 'octocat' },
-			},
-		]);
+			provider.search_code({ query: 'code' }),
+		).resolves.toHaveLength(1);
+		await expect(
+			provider.search_repositories({ query: 'repo' }),
+		).resolves.toHaveLength(1);
+		await expect(
+			provider.search_users({ query: 'user' }),
+		).resolves.toHaveLength(1);
 	});
+
+	it('defaults score to 0 when omitted or null', async () => {
+		code_mock.mockResolvedValue({
+			data: {
+				items: [
+					{
+						name: 'index.ts',
+						path: 'src/index.ts',
+						html_url:
+							'https://github.com/acme/repo/blob/main/src/index.ts',
+						repository: {
+							full_name: 'acme/repo',
+							html_url: 'https://github.com/acme/repo',
+						},
+					},
+				],
+			},
+		});
+		repos_mock.mockResolvedValue({
+			data: {
+				items: [
+					{
+						full_name: 'acme/repo',
+						html_url: 'https://github.com/acme/repo',
+						description: null,
+						stargazers_count: 10,
+						forks_count: 2,
+						pushed_at: '2026-01-01T00:00:00Z',
+						language: null,
+						score: null,
+					},
+				],
+			},
+		});
+		users_mock.mockResolvedValue({
+			data: {
+				items: [
+					{
+						login: 'octocat',
+						html_url: 'https://github.com/octocat',
+						type: 'User',
+					},
+				],
+			},
+		});
+
+		const provider = new GitHubSearchProvider();
+		await expect(
+			provider.search_code({ query: 'code' }),
+		).resolves.toMatchObject([{ score: 0 }]);
+		await expect(
+			provider.search_repositories({ query: 'repo' }),
+		).resolves.toMatchObject([{ score: 0 }]);
+		await expect(
+			provider.search_users({ query: 'user' }),
+		).resolves.toMatchObject([{ score: 0 }]);
+	});
+
+	it.each([
+		[
+			'code',
+			() => new GitHubSearchProvider().search_code({ query: 'code' }),
+			code_mock,
+		],
+		[
+			'repositories',
+			() =>
+				new GitHubSearchProvider().search_repositories({
+					query: 'repo',
+				}),
+			repos_mock,
+		],
+		[
+			'users',
+			() =>
+				new GitHubSearchProvider().search_users({ query: 'user' }),
+			users_mock,
+		],
+	] as const)(
+		'rejects a malformed %s envelope as a provider error',
+		async (_name, call, mock) => {
+			mock.mockResolvedValue({
+				data: { items: { unexpected: true } },
+			});
+
+			await expect(call()).rejects.toMatchObject({
+				type: 'PROVIDER_ERROR',
+				provider: 'github',
+				message: 'Malformed github response',
+			});
+			expect(mock).toHaveBeenCalledTimes(1);
+		},
+	);
 });

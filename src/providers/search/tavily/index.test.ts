@@ -6,91 +6,120 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { config } from '../../../config/env.js';
+import { TavilySearchProvider } from './index.js';
 
-const json_response = (body: unknown) =>
-	new Response(JSON.stringify(body), {
-		status: 200,
-		headers: { 'content-type': 'application/json' },
-	});
+const fetch_mock = vi.fn();
+const previous_api_key = config.search.tavily.api_key;
 
 describe('TavilySearchProvider', () => {
 	beforeEach(() => {
-		vi.resetModules();
-		vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+		fetch_mock.mockReset();
+		vi.stubGlobal('fetch', fetch_mock);
+		config.search.tavily.api_key = 'tavily-test-key';
 	});
 
 	afterEach(() => {
+		config.search.tavily.api_key = previous_api_key;
 		vi.unstubAllGlobals();
-		vi.unstubAllEnvs();
 		vi.restoreAllMocks();
 	});
 
-	it('maps results when Tavily returns numeric response_time metadata', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn(async () =>
-				json_response({
-					query: 'example domain',
-					results: [
-						{
-							title: 'Example Domains',
-							url: 'https://www.iana.org/help/example-domains',
-							content: 'Reserved example domains.',
-							score: 0.99986553,
-						},
-					],
-					response_time: 0.57,
-					request_id: '77d06e01-a9a1-4968-8fc3-5889dd2b61e9',
-				}),
+	it('applies the configured abort timeout to search requests', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: [], response_time: '0.1' }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
 			),
 		);
-		const { TavilySearchProvider } = await import('./index.js');
 
-		await expect(
-			new TavilySearchProvider().search({
-				query: 'example domain',
-				limit: 1,
-			}),
-		).resolves.toEqual([
-			{
-				title: 'Example Domains',
-				url: 'https://www.iana.org/help/example-domains',
-				snippet: 'Reserved example domains.',
-				score: 0.99986553,
-				source_provider: 'tavily',
-			},
-		]);
+		await new TavilySearchProvider().search({ query: 'test' });
+		expect(fetch_mock.mock.calls[0][1].signal).toBeInstanceOf(
+			AbortSignal,
+		);
 	});
 
 	it('normalizes date and country operators for Tavily API fields', async () => {
-		const fetch = vi.fn(
-			async (_input: RequestInfo | URL, _init?: RequestInit) =>
-				json_response({
-					results: [
-						{
-							title: 'Result',
-							url: 'https://example.com',
-							content: 'Content',
-							score: 0.5,
-						},
-					],
-					response_time: 0.2,
-				}),
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: [], response_time: '0.1' }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
 		);
-		vi.stubGlobal('fetch', fetch);
-		const { TavilySearchProvider } = await import('./index.js');
 
 		await new TavilySearchProvider().search({
 			query:
 				'example after:2024-05 before:2024-05-10 loc:United-Kingdom',
-			limit: 1,
 		});
 
-		const request_init = fetch.mock.calls[0]?.[1];
-		expect(JSON.parse(request_init?.body as string)).toMatchObject({
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body),
+		).toMatchObject({
 			start_date: '2024-05-01',
 			end_date: '2024-05-10',
 			country: 'united kingdom',
 		});
+	});
+
+	it.each(['1.67', 1.67])(
+		'accepts response_time as %o',
+		async (response_time) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						results: [
+							{
+								title: 'Result',
+								url: 'https://example.com',
+								content: 'Snippet',
+								score: 0.5,
+							},
+						],
+						response_time,
+					}),
+					{ status: 200 },
+				),
+			);
+
+			await expect(
+				new TavilySearchProvider().search({ query: 'timing' }),
+			).resolves.toHaveLength(1);
+		},
+	);
+
+	it('accepts an omitted results array as an empty current response', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(JSON.stringify({ response_time: '0.1' }), {
+				status: 200,
+			}),
+		);
+
+		await expect(
+			new TavilySearchProvider().search({ query: 'no results' }),
+		).resolves.toEqual([]);
+	});
+
+	it('rejects a malformed results envelope as a provider error', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: { unexpected: true } }),
+				{ status: 200 },
+			),
+		);
+
+		await expect(
+			new TavilySearchProvider().search({ query: 'malformed' }),
+		).rejects.toMatchObject({
+			type: 'PROVIDER_ERROR',
+			provider: 'tavily',
+			message: 'Malformed tavily response',
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	});
 });

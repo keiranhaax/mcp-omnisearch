@@ -1,14 +1,12 @@
 // Common type definitions for the MCP Omnisearch server
 
-export type ProviderMetadata = Record<string, unknown>;
-
 export interface SearchResult {
 	title: string;
 	url: string;
 	snippet: string;
 	score?: number;
 	source_provider: string;
-	metadata?: ProviderMetadata;
+	metadata?: Record<string, any>;
 }
 
 export interface BaseSearchParams {
@@ -16,6 +14,13 @@ export interface BaseSearchParams {
 	limit?: number;
 	include_domains?: string[];
 	exclude_domains?: string[];
+	output_schema?: Record<string, unknown>;
+	search_type?: string;
+	category?: string;
+	user_location?: string;
+	system_prompt?: string;
+	additional_queries?: string[];
+	contents?: Record<string, unknown>;
 }
 
 export interface ProcessingResult {
@@ -25,6 +30,7 @@ export interface ProcessingResult {
 		content: string;
 	}>;
 	metadata: {
+		[key: string]: any;
 		title?: string;
 		author?: string;
 		date?: string;
@@ -48,6 +54,7 @@ export interface ProcessingProvider {
 	process_content(
 		url: string | string[],
 		extract_depth?: 'basic' | 'advanced',
+		options?: Record<string, unknown>,
 	): Promise<ProcessingResult>;
 	name: string;
 	description: string;
@@ -56,22 +63,11 @@ export interface ProcessingProvider {
 // Error types
 export enum ErrorType {
 	API_ERROR = 'API_ERROR',
-	AUTH_ERROR = 'AUTH_ERROR',
 	RATE_LIMIT = 'RATE_LIMIT',
 	INVALID_INPUT = 'INVALID_INPUT',
-	TIMEOUT = 'TIMEOUT',
-	MALFORMED_RESPONSE = 'MALFORMED_RESPONSE',
 	PROVIDER_ERROR = 'PROVIDER_ERROR',
-	TRANSIENT_PROVIDER_ERROR = 'TRANSIENT_PROVIDER_ERROR',
-}
-
-export interface ProviderErrorDetails {
-	status?: number;
-	code?: string;
-	reset_time?: Date;
-	retryable?: boolean;
-	cause?: string;
-	[key: string]: unknown;
+	ENTITLEMENT_REQUIRED = 'ENTITLEMENT_REQUIRED',
+	ENDPOINT_NOT_FOUND = 'ENDPOINT_NOT_FOUND',
 }
 
 export class ProviderError extends Error {
@@ -79,7 +75,7 @@ export class ProviderError extends Error {
 		public type: ErrorType,
 		message: string,
 		public provider: string,
-		public details?: ProviderErrorDetails,
+		public details?: any,
 	) {
 		super(message);
 		this.name = 'ProviderError';

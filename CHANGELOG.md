@@ -1,69 +1,36 @@
 # mcp-omnisearch
 
-## 0.0.28
+## Unreleased
 
-### Patch Changes
+### Changes
 
-- 0bdfedd: Fix Tavily search response parsing by ignoring unused
-  response_time metadata and adding regression coverage tests.
-- 7cece81: Relax provider response parsing for current Exa, Kagi, and
-  Firecrawl API shapes.
-
-## 0.0.27
-
-### Patch Changes
-
-- 329a446: Fix Brave and Kagi search adapters to tolerate missing
-  fields and non-result provider rows.
-
-## 0.0.26
-
-### Patch Changes
-
-- 21e97fc: Add runtime response validation for search providers so
-  malformed API payloads fail with ProviderError.
-- 4ea9d22: Validate processing and Firecrawl provider responses at
-  runtime before extracting content from external payloads.
-- a362de4: Warn remote deployments about local file offload and
-  clarify inline mode for large results.
-- 3490c8d: Centralize provider definitions and derive web_extract
-  routing metadata from shared declarative provider-mode
-  configuration.
-- 819109c: Split README into focused operational docs covering
-  providers, operators, large results, deployment, and
-  troubleshooting.
-- aa7c1a3: Add MCP contract tests for tool registration, schemas,
-  responses, resources, large results, and compact extraction.
-- 67a01d5: Validate AI and GitHub provider responses at runtime before
-  mapping external payloads into results.
-- d75f2b4: Normalize provider errors, retry semantics, Firecrawl
-  polling, GitHub handling, and structured MCP error responses.
-- 372e335: Add advisory architecture check that warns when production
-  source files exceed the large-file threshold.
-
-## 0.0.25
-
-### Patch Changes
-
-- 9bb4832: Make retries transient-aware with configurable jitter while
-  preserving provider error details and HTTP status metadata.
-- 7ad7a65: Make provider status resources metadata-driven,
-  secret-safe, and truthful across search, AI, and processing
-  providers.
-- 386efb5: Reduce unsafe TypeScript in provider response parsing,
-  metadata, HTTP helpers, and GitHub error handling.
-- 49c7044: Deduplicate provider registration and MCP tool response
-  handling with shared registry and response helpers.
-- 8678ebd: Make large-result offload configurable so clients can
-  receive oversized responses inline and handle them themselves.
-- 80469ef: Rename non-kebab-case source files and directories to
-  kebab-case, updating imports and validating checks/tests.
-- c7dfc44: Add per-request large-result controls and optional raw
-  content omission for extraction responses.
-- 386efb5: Document provider operator behavior, large-result
-  tradeoffs, remote transport caveats, and common failure modes.
-- 60623c0: Add shared tool input schemas for query, limit, domain, and
-  extraction URL validation.
+- Remove all Kagi integrations and configuration.
+- Replace URL summarization with Firecrawl v2 `summary` format.
+- Add authenticated remote pagination for oversized results.
+- Harden retries, URL validation, provider timeouts, schemas, runtime
+  startup, and remote proxy deployment.
+- Refresh provider contracts: advertise Exa `publication`, tolerate
+  Brave no-result and mixed-row response shapes, normalize Tavily date
+  and country filters, and support current Exa and Firecrawl response
+  shapes, crawl parameters, and terminal statuses.
+- Runtime-validate retained upstream search, AI/GitHub, processing,
+  and shared Firecrawl response envelopes with secret-safe
+  malformed-response errors; deterministic schema failures are not
+  retried.
+- Record upstream provider classifications, runtime-validation
+  coverage, and excluded provider surfaces in
+  `docs/provider-synchronization.md`.
+- Serve MCP `2026-07-28` through project-local pinned
+  `mcp-proxy@6.7.3` while keeping stateless legacy `2025-11-25`
+  compatibility; retire the legacy `/sse` endpoint in favor of `/mcp`.
+- Add a narrow HTTP security guard (`src/server/http_guard.ts`) that
+  owns the public socket: Host and Origin allowlists with clean
+  userinfo rejection, route limiting to `POST /mcp` and `GET /ping`, a
+  4 MB pre-dispatch body bound, and rejection of modern envelopes
+  missing the `MCP-Protocol-Version` header (SDK issue `#2589`).
+- Record the Path A architecture decision and staging evidence in
+  `docs/architecture-decision-mcp-2026-07-28.md` and the operations
+  runbook in `docs/deployment.md`.
 
 ## 0.0.24
 

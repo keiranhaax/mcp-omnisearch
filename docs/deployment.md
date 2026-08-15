@@ -1,125 +1,151 @@
-# Deployment
+# Production deployment: MCP 2026-07-28 via pinned proxy (Path A)
 
-## MCP client configuration
+This fork runs in production on `vnic-keiran` behind a narrow HTTP
+security guard. This document is the reproducible runbook for that
+topology. The architecture decision and full staging evidence live in
+`docs/architecture-decision-mcp-2026-07-28.md`.
 
-Configure only the API keys you have. Missing keys disable only their
-matching providers.
+## Versions
 
-```json
-{
-	"mcpServers": {
-		"mcp-omnisearch": {
-			"command": "node",
-			"args": ["/path/to/mcp-omnisearch/dist/index.js"],
-			"env": {
-				"TAVILY_API_KEY": "your-tavily-key",
-				"KAGI_API_KEY": "your-kagi-key",
-				"BRAVE_API_KEY": "your-brave-key",
-				"GITHUB_API_KEY": "your-github-token",
-				"EXA_API_KEY": "your-exa-key",
-				"LINKUP_API_KEY": "your-linkup-key",
-				"FIRECRAWL_API_KEY": "your-firecrawl-key",
-				"FIRECRAWL_BASE_URL": "http://localhost:3002"
-			}
-		}
-	}
-}
+| Component                                 | Version  |
+| ----------------------------------------- | -------- |
+| Node.js                                   | v22.23.1 |
+| pnpm (Corepack, repo `packageManager`)    | 11.9.0   |
+| mcp-proxy (project-local, exact pin)      | 6.7.3    |
+| `@modelcontextprotocol/*` (via mcp-proxy) | ^2.0.0   |
+| Valibot                                   | ^1.4.2   |
+| tmcp (stdio registration layer)           | ^1.19.4  |
+
+The global `mcp-proxy@6.4.4` installation is deliberately left
+untouched as the rollback runtime; production no longer executes it.
+
+## Topology
+
+```
+client
+  -> http_guard (100.84.79.102:8000)      # src/guard.ts, dist/guard.js
+  -> mcp-proxy@6.7.3 (127.0.0.1:8002)     # loopback only, spawned child
+  -> node dist/index.js (stdio)           # tmcp registration, unchanged
 ```
 
-## Claude Desktop with WSL
+PM2 manages exactly one foreground process (`start-server.sh` ->
+`node ./dist/guard.js`); the guard spawns the proxy, which spawns the
+stdio server, and signals propagate down the chain.
 
-Prefer putting provider keys in the MCP client's `env` object. If your
-client cannot pass WSL environment variables directly, wrap startup in
-a shell script inside WSL that exports the needed keys and then runs
-`node /path/to/mcp-omnisearch/dist/index.js`.
+## Protocol support
 
-```json
-{
-	"mcpServers": {
-		"mcp-omnisearch": {
-			"command": "wsl.exe",
-			"args": ["bash", "-lc", "/path/to/start-mcp-omnisearch.sh"]
-		}
-	}
-}
-```
+- Modern `2026-07-28`: full envelope validation
+  (`io.modelcontextprotocol/protocolVersion` +
+  `io.modelcontextprotocol/clientCapabilities` in `params._meta`),
+  `MCP-Protocol-Version` and `Mcp-Method` headers required.
+- Legacy `2025-11-25`: stateless streamable HTTP on `/mcp`, no session
+  headers, no envelope required. This is what Hermes and the other
+  local clients speak.
+- `/sse` is retired (404). All known clients already use `/mcp`.
 
-## Docker
+## Edge policy (enforced by the guard)
 
-MCP Omnisearch supports containerized deployment using Docker with
-MCPO integration for HTTP/OpenAPI access.
+- `Host` allowlist: `100.84.79.102:8000` (direct Tailscale) and
+  `mcp.keiranh.cloud` (via Caddy). Anything else: 403. Userinfo or
+  malformed Host: 403 (never 500).
+- `Origin`: validated against the same allowlist when present; absent
+  Origin (non-browser clients) is allowed. No CORS headers are ever
+  emitted.
+- Routes: `POST /mcp` and `GET /ping` only. Everything else 404/405.
+- Body: 4 MB pre-dispatch bound (declared and chunked), 30 s intake
+  deadline; the proxy enforces the same bound again downstream.
+- `#2589` guard: a modern envelope without `MCP-Protocol-Version` gets
+  400 with JSON-RPC `-32020`; legacy no-envelope requests pass.
+- Authentication stays with the proxy (constant-time `X-API-Key`
+  comparison). The guard never inspects the key at request time; it
+  hands `MCP_API_KEY` to the spawned proxy as `MCP_PROXY_API_KEY` in
+  the child environment, keeping it out of `/proc/*/cmdline`. Caddy
+  translates `Authorization: Bearer` to `X-API-Key` and redacts both
+  from logs.
 
-### Docker Compose
+## Ingress paths
+
+- Direct Tailscale: `http://100.84.79.102:8000/mcp`
+- Public: `https://mcp.keiranh.cloud/omnisearch/mcp` (Caddy
+  `handle_path /omnisearch/*`, 4 MB `request_body`, Bearer
+  translation, `flush_interval -1` for SSE)
+
+## Configuration
+
+`start-server.sh` sources `.env` in place and passes an explicit
+allowlist of variables through `env -i`. Guard settings:
+
+| Variable              | Default                              | Purpose                        |
+| --------------------- | ------------------------------------ | ------------------------------ |
+| `GUARD_LISTEN_HOST`   | `$BIND_HOST`                         | Public socket bind             |
+| `GUARD_LISTEN_PORT`   | `$PORT`                              | Public socket port             |
+| `GUARD_ALLOWED_HOSTS` | `$BIND_HOST:$PORT,mcp.keiranh.cloud` | Host/Origin allowlist          |
+| `GUARD_UPSTREAM_PORT` | `8002`                               | Loopback proxy port            |
+| `GUARD_PUBLIC_HOSTS`  | `mcp.keiranh.cloud`                  | TLS hostname(s) Caddy forwards |
+
+The launcher fails closed on a wildcard `BIND_HOST` (the guard needs
+an explicit address to build the allowlist).
+
+## Verification commands
+
+Staging (worktree, port 8001):
 
 ```bash
-git clone https://github.com/spences10/mcp-omnisearch.git
-cd mcp-omnisearch
-# Create .env with the provider keys you want to enable.
-docker-compose up -d
+/home/ubuntu/worktrees/mcp-omnisearch-mcp-2026/staging/run-staging.sh
 ```
 
-### Docker CLI
+Direct production probes (never print the key):
 
 ```bash
-docker build -t mcp-omnisearch .
-docker run -d \
-  -p 8000:8000 \
-  --env-file .env \
-  --name mcp-omnisearch \
-  mcp-omnisearch
+key=$(grep -E '^MCP_API_KEY=' /opt/mcp-omnisearch/.env | head -1 | cut -d= -f2- | tr -d "\"'")
+curl -sS http://100.84.79.102:8000/ping
+curl -sS -X POST http://100.84.79.102:8000/mcp \
+  -H "X-API-Key: $key" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"elicitation":{},"roots":{},"sampling":{}}}}}'
 ```
 
-Container variables:
-
-- `TAVILY_API_KEY`
-- `KAGI_API_KEY`
-- `BRAVE_API_KEY`
-- `GITHUB_API_KEY`
-- `EXA_API_KEY`
-- `LINKUP_API_KEY`
-- `FIRECRAWL_API_KEY`
-- `FIRECRAWL_BASE_URL`
-- `PORT`, defaults to `8000`
-
-## OpenAPI access
-
-Once deployed through the container, the MCP server is accessible at:
-
-- Base URL: `http://your-container-host:8000`
-- OpenAPI endpoint: `/omnisearch`
-- Compatible with OpenWebUI and other tools expecting OpenAPI
-
-For HTTP, hosted, or containerized deployments, prefer
-`OMNISEARCH_LARGE_RESULT_MODE=inline`. See
-[large results](large-results.md).
-
-## Cloud deployment
-
-Deploy the container to any platform that supports Docker, including
-Cloud Run, Azure Container Instances, ECS/Fargate, Railway, Render,
-Fly.io, or Kubernetes.
+Public path and Hermes:
 
 ```bash
-docker build -t your-registry/mcp-omnisearch:latest .
-docker push your-registry/mcp-omnisearch:latest
+curl -sS https://mcp.keiranh.cloud/omnisearch/ping
+hermes mcp test omnisearch
 ```
 
-Configure environment variables through your platform settings.
+## Staging procedure and result isolation
 
-## Self-hosted Firecrawl
+Staging uses the same launcher with explicit overrides (`PORT=8001`,
+`GUARD_ALLOWED_HOSTS=100.84.79.102:8001`,
+`OMNISEARCH_RESULT_DIR=~/.cache/mcp-omnisearch/staging-mcp-2026` mode
+0700). Result offloads (>80 000 serialized chars) land in the staging
+directory only; verify the production result directory by metadata
+comparison (names, sizes, mtimes) before and after.
 
-Set `FIRECRAWL_BASE_URL` to route Firecrawl modes to a self-hosted
-instance:
+## Rollback
+
+The release commit is `21dd09d` on
+`feature/omnisearch-mcp-2026-07-28`; the pre-upgrade baseline is
+`e33186d` (`keiran/production-fork-baseline-20260717`).
 
 ```bash
-# Example values:
-# http://localhost:3002
-# https://your-firecrawl-domain.com
+cd /opt/mcp-omnisearch
+git checkout keiran/production-fork-baseline-20260717
+corepack pnpm install --frozen-lockfile
+corepack pnpm run build
+pm2 restart mcp-omnisearch
 ```
 
-Notes:
+The baseline launcher uses the global `mcp-proxy@6.4.4`, which was
+never modified. If the global binary itself is ever damaged, offline
+restore material lives in
+`~/backups/mcp-proxy-6.4.4-rollback-20260815T020944Z/` (tarball with
+verified sha512 integrity plus `ROLLBACK.md` with a rehearsed
+restore).
 
-- If `FIRECRAWL_BASE_URL` is unset, Firecrawl cloud is used.
-- Self-hosted instances should expose the same API endpoints, such as
-  `/v1/scrape` and `/v1/crawl`.
-- `FIRECRAWL_API_KEY` is still required.
+## Fork metadata policy
+
+This is a private fork deployed from git, not published to npm or the
+MCP registry. `package.json` stays at `0.0.24` and `server.json` is
+unchanged; version bumps and registry metadata only matter if the fork
+is ever published upstream again.

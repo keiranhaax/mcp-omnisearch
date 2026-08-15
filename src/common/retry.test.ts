@@ -1,76 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { is_retryable_error, retry_with_backoff } from './retry.js';
+import { retry_with_backoff } from './retry.js';
 import { ErrorType, ProviderError } from './types.js';
 
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
-});
-
-describe('is_retryable_error', () => {
-	it('retries rate limits, timeouts, network errors, and 5xx provider responses', () => {
-		expect(
-			is_retryable_error(
-				new ProviderError(ErrorType.RATE_LIMIT, 'slow down', 'brave'),
-			),
-		).toBe(true);
-		expect(
-			is_retryable_error(
-				new ProviderError(
-					ErrorType.PROVIDER_ERROR,
-					'bad gateway',
-					'kagi',
-					{ status: 502 },
-				),
-			),
-		).toBe(true);
-		expect(is_retryable_error(new TypeError('fetch failed'))).toBe(
-			true,
-		);
-		expect(
-			is_retryable_error(new DOMException('timeout', 'TimeoutError')),
-		).toBe(true);
-	});
-
-	it('does not retry invalid input, invalid keys, ordinary 4xx, or provider validation failures', () => {
-		expect(
-			is_retryable_error(
-				new ProviderError(
-					ErrorType.INVALID_INPUT,
-					'bad query',
-					'github',
-				),
-			),
-		).toBe(false);
-		expect(
-			is_retryable_error(
-				new ProviderError(
-					ErrorType.API_ERROR,
-					'Invalid API key',
-					'kagi',
-				),
-			),
-		).toBe(false);
-		expect(
-			is_retryable_error(
-				new ProviderError(
-					ErrorType.API_ERROR,
-					'bad request',
-					'tavily',
-					{ status: 400 },
-				),
-			),
-		).toBe(false);
-		expect(
-			is_retryable_error(
-				new ProviderError(
-					ErrorType.PROVIDER_ERROR,
-					'No content extracted',
-					'firecrawl',
-				),
-			),
-		).toBe(false);
-	});
 });
 
 describe('retry_with_backoff', () => {
@@ -81,67 +15,69 @@ describe('retry_with_backoff', () => {
 		expect(fn).toHaveBeenCalledTimes(1);
 	});
 
-	it('retries retryable errors with exponential backoff until the operation succeeds', async () => {
+	it('retries transient errors with exponential backoff', async () => {
 		vi.useFakeTimers();
-
 		const fn = vi
 			.fn<() => Promise<string>>()
-			.mockRejectedValueOnce(new TypeError('first failure'))
+			.mockRejectedValueOnce(new Error('first failure'))
 			.mockRejectedValueOnce(
 				new ProviderError(
-					ErrorType.RATE_LIMIT,
-					'second failure',
-					'brave',
+					ErrorType.PROVIDER_ERROR,
+					'transient provider failure',
+					'test',
 				),
 			)
 			.mockResolvedValueOnce('ok');
 
-		const promise = retry_with_backoff(fn, {
-			max_retries: 3,
-			initial_delay: 100,
-			jitter_ratio: 0,
-		});
-
+		const promise = retry_with_backoff(fn, 3, 100);
+		const resolution = expect(promise).resolves.toBe('ok');
 		expect(fn).toHaveBeenCalledTimes(1);
-
 		await vi.advanceTimersByTimeAsync(100);
 		expect(fn).toHaveBeenCalledTimes(2);
-
 		await vi.advanceTimersByTimeAsync(200);
 		expect(fn).toHaveBeenCalledTimes(3);
-
-		await expect(promise).resolves.toBe('ok');
+		await resolution;
 	});
 
-	it('applies configurable jitter to retry delays', async () => {
+	it('rethrows the final retryable error after exhausting retries', async () => {
 		vi.useFakeTimers();
-
+		const error = new Error('still failing');
 		const fn = vi
 			.fn<() => Promise<string>>()
-			.mockRejectedValueOnce(new TypeError('first failure'))
-			.mockResolvedValueOnce('ok');
-
-		const promise = retry_with_backoff(fn, {
-			max_retries: 1,
-			initial_delay: 100,
-			jitter_ratio: 0.2,
-			random: () => 1,
-		});
+			.mockRejectedValue(error);
+		const promise = retry_with_backoff(fn, 2, 50);
+		const rejection = expect(promise).rejects.toBe(error);
 
 		expect(fn).toHaveBeenCalledTimes(1);
-		await vi.advanceTimersByTimeAsync(119);
-		expect(fn).toHaveBeenCalledTimes(1);
-		await vi.advanceTimersByTimeAsync(1);
+		await vi.advanceTimersByTimeAsync(50);
 		expect(fn).toHaveBeenCalledTimes(2);
-
-		await expect(promise).resolves.toBe('ok');
+		await vi.advanceTimersByTimeAsync(100);
+		expect(fn).toHaveBeenCalledTimes(3);
+		await rejection;
 	});
 
-	it('does not retry non-retryable errors', async () => {
-		const error = new ProviderError(
+	it('does not retry permanent provider errors', async () => {
+		for (const type of [
 			ErrorType.INVALID_INPUT,
-			'bad query',
-			'web_search',
+			ErrorType.ENTITLEMENT_REQUIRED,
+			ErrorType.ENDPOINT_NOT_FOUND,
+		]) {
+			const error = new ProviderError(type, 'permanent', 'test');
+			const fn = vi
+				.fn<() => Promise<string>>()
+				.mockRejectedValue(error);
+
+			await expect(retry_with_backoff(fn)).rejects.toBe(error);
+			expect(fn).toHaveBeenCalledTimes(1);
+		}
+	});
+
+	it('does not retry provider errors explicitly marked non-retryable', async () => {
+		const error = new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'malformed provider response',
+			'test',
+			{ retryable: false },
 		);
 		const fn = vi
 			.fn<() => Promise<string>>()
@@ -151,26 +87,34 @@ describe('retry_with_backoff', () => {
 		expect(fn).toHaveBeenCalledTimes(1);
 	});
 
-	it('rethrows the final error after exhausting retries', async () => {
-		vi.useFakeTimers();
-
-		const error = new TypeError('still failing');
+	it('does not retry HTTP 4xx API errors', async () => {
+		const error = new ProviderError(
+			ErrorType.API_ERROR,
+			'bad request',
+			'test',
+			{ status: 400 },
+		);
 		const fn = vi
 			.fn<() => Promise<string>>()
 			.mockRejectedValue(error);
-		const promise = retry_with_backoff(fn, {
-			max_retries: 2,
-			initial_delay: 50,
-			jitter_ratio: 0,
-		});
-		const rejection = promise.catch((caught) => caught);
 
+		await expect(retry_with_backoff(fn)).rejects.toBe(error);
 		expect(fn).toHaveBeenCalledTimes(1);
-		await vi.advanceTimersByTimeAsync(50);
-		expect(fn).toHaveBeenCalledTimes(2);
-		await vi.advanceTimersByTimeAsync(100);
-		expect(fn).toHaveBeenCalledTimes(3);
+	});
 
-		await expect(rejection).resolves.toBe(error);
+	it('allows retries to be disabled for costly job creation', async () => {
+		const error = new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'transient but costly',
+			'firecrawl_agent',
+		);
+		const fn = vi
+			.fn<() => Promise<string>>()
+			.mockRejectedValue(error);
+
+		await expect(
+			retry_with_backoff(fn, { max_retries: 0 }),
+		).rejects.toBe(error);
+		expect(fn).toHaveBeenCalledTimes(1);
 	});
 });

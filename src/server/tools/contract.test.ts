@@ -1,316 +1,199 @@
+import { afterEach, describe, expect, it } from 'vitest';
 import * as v from 'valibot';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { config } from '../../config/env.js';
+import {
+	initialize_ai_search,
+	register_ai_search,
+} from './ai_search.js';
+import { tool_descriptions } from './descriptions.js';
+import {
+	initialize_web_search,
+	register_web_search,
+} from './web_search.js';
 
-interface RegisteredTool {
-	definition: {
-		name: string;
-		schema: v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>;
-	};
-	handler: (args: any) => Promise<any>;
-}
+const max_description_length = 300;
 
-const API_KEY_NAMES = [
-	'TAVILY_API_KEY',
-	'BRAVE_API_KEY',
-	'KAGI_API_KEY',
-	'GITHUB_API_KEY',
-	'EXA_API_KEY',
-	'LINKUP_API_KEY',
-	'FIRECRAWL_API_KEY',
-];
+const routing_contracts = [
+	{ name: 'web_search', words: ['Search'] },
+	{ name: 'github_search', words: ['Search', 'GitHub'] },
+	{ name: 'ai_search', words: ['Answer', 'Research'] },
+	{ name: 'web_extract', words: ['Extract', 'Process'] },
+	{ name: 'brave_llm_context', words: ['context', 'RAG'] },
+	{ name: 'brave_news_search', words: ['News', 'Search'] },
+	{ name: 'brave_media_search', words: ['Media', 'Search'] },
+	{ name: 'firecrawl_agent', words: ['Credit-sensitive'] },
+	{ name: 'context_web_extract', words: ['Context.dev Web'] },
+	{ name: 'context_brand_intel', words: ['Brand'] },
+	{ name: 'context_styleguide', words: ['Design'] },
+	{ name: 'context_classify', words: ['Business'] },
+	{ name: 'context_transaction_identify', words: ['Transactions'] },
+] as const;
 
-const create_mock_server = () => {
-	const tools: RegisteredTool[] = [];
-	return {
-		tools,
-		server: {
-			tool: (
-				definition: RegisteredTool['definition'],
-				handler: RegisteredTool['handler'],
-			) => {
-				tools.push({ definition, handler });
-			},
-		},
-	};
-};
+const search_keys = ['tavily', 'brave', 'exa'] as const;
+const original_search_keys = Object.fromEntries(
+	search_keys.map((provider) => [
+		provider,
+		config.search[provider].api_key,
+	]),
+) as Record<(typeof search_keys)[number], string | undefined>;
 
-const load_contract = async (
-	keys: Record<string, string | undefined>,
+const ai_search_keys = [
+	'exa_answer',
+	'exa_deep_research',
+	'linkup',
+	'brave_answers',
+	'tavily_research',
+] as const;
+const original_ai_search_keys = Object.fromEntries(
+	ai_search_keys.map((provider) => [
+		provider,
+		config.ai_response[provider].api_key,
+	]),
+) as Record<(typeof ai_search_keys)[number], string | undefined>;
+
+const capture_schema = (
+	register: (server: any) => void,
+	tool_name: string,
 ) => {
-	vi.resetModules();
-	for (const key of API_KEY_NAMES) delete process.env[key];
-	for (const [key, value] of Object.entries(keys)) {
-		if (value !== undefined) process.env[key] = value;
-	}
-	const tools_module = await import('./index.js');
-	const { tools, server } = create_mock_server();
-	vi.spyOn(console, 'error').mockImplementation(() => {});
-	vi.spyOn(console, 'warn').mockImplementation(() => {});
-	tools_module.initialize_providers();
-	tools_module.register_tools(server as any);
-	return { tools, tools_module };
-};
+	let schema: v.GenericSchema | undefined;
+	register({
+		tool: (definition: { name: string; schema: v.GenericSchema }) => {
+			if (definition.name === tool_name) schema = definition.schema;
+		},
+	});
 
-const parse_tool_body = (response: {
-	content: Array<{ text: string }>;
-}) => JSON.parse(response.content[0].text);
-
-const mock_tavily_extract_response = (content: string) => {
-	vi.stubGlobal(
-		'fetch',
-		vi.fn().mockResolvedValue(
-			new Response(
-				JSON.stringify({
-					results: [
-						{
-							url: 'https://example.com',
-							raw_content: content,
-						},
-					],
-					failed_results: [],
-					response_time: 0.1,
-				}),
-				{ status: 200 },
-			),
-		),
-	);
+	expect(schema).toBeDefined();
+	return schema!;
 };
 
 afterEach(() => {
-	for (const key of API_KEY_NAMES) delete process.env[key];
-	vi.unstubAllGlobals();
-	vi.restoreAllMocks();
+	for (const provider of search_keys) {
+		config.search[provider].api_key = original_search_keys[provider];
+	}
+	for (const provider of ai_search_keys) {
+		config.ai_response[provider].api_key =
+			original_ai_search_keys[provider];
+	}
+	initialize_web_search();
+	initialize_ai_search();
 });
 
-describe('MCP tool contract', () => {
-	it('registers no public tools when no providers are configured', async () => {
-		const { tools, tools_module } = await load_contract({});
-
-		expect(tools).toEqual([]);
-		expect(tools_module.provider_status_entries).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					id: 'brave',
-					status: 'unavailable',
-					unavailable_reason: 'missing_api_key',
-				}),
-			]),
-		);
+describe('Omnisearch tool descriptions', () => {
+	it('keeps descriptions concise and single-line', () => {
+		for (const [name, description] of Object.entries(
+			tool_descriptions,
+		)) {
+			expect(description.trim()).toBe(description);
+			expect(description).not.toContain('\n');
+			if (description.length > max_description_length) {
+				throw new Error(
+					`${name} description is ${description.length} chars; keep it <= ${max_description_length}`,
+				);
+			}
+		}
 	});
 
-	it('registers tools from the configured provider set', async () => {
-		const { tools } = await load_contract({
-			BRAVE_API_KEY: 'brave-key',
-			GITHUB_API_KEY: 'github-token',
-			KAGI_API_KEY: 'kagi-key',
-			FIRECRAWL_API_KEY: 'firecrawl-key',
-		});
+	it('keeps explicit routing words for agent tool selection', () => {
+		for (const contract of routing_contracts) {
+			const description = tool_descriptions[contract.name];
+			const normalized = description.toLowerCase();
+			const has_routing_word = contract.words.some((word) =>
+				normalized.includes(word.toLowerCase()),
+			);
 
-		expect(tools.map((tool) => tool.definition.name)).toEqual([
-			'web_search',
-			'github_search',
-			'ai_search',
-			'web_extract',
-		]);
+			expect(has_routing_word).toBe(true);
+		}
 	});
 
-	it('validates public web_search payloads at the registered schema', async () => {
-		const { tools } = await load_contract({
-			BRAVE_API_KEY: 'brave-key',
-		});
-		const schema = tools.find(
-			(tool) => tool.definition.name === 'web_search',
-		)!.definition.schema;
+	it('keeps exactly 13 routed MCP tool names', () => {
+		expect(Object.keys(tool_descriptions)).toHaveLength(13);
+	});
+});
 
+describe('Omnisearch public tool schemas', () => {
+	it('advertises configured non-You web search providers only', () => {
+		for (const provider of search_keys) {
+			config.search[provider].api_key = `${provider}-contract-key`;
+		}
+		expect(initialize_web_search()).toBe(true);
+		const schema = capture_schema(register_web_search, 'web_search');
+
+		for (const provider of search_keys) {
+			expect(
+				v.safeParse(schema, { query: 'provider contract', provider })
+					.success,
+			).toBe(true);
+		}
 		expect(
 			v.safeParse(schema, {
-				query: 'sveltekit docs',
-				provider: 'brave',
-				limit: 5,
-				include_domains: ['svelte.dev'],
-				large_result_mode: 'inline',
+				query: 'provider contract',
+				provider: 'you',
 			}).success,
-		).toBe(true);
-		expect(
-			v.safeParse(schema, { query: '', provider: 'brave' }).success,
 		).toBe(false);
+	});
+
+	it('advertises configured non-You AI search providers only', () => {
+		for (const provider of ai_search_keys) {
+			config.ai_response[provider].api_key =
+				`${provider}-contract-key`;
+		}
+
+		expect(initialize_ai_search()).toBe(true);
+		const schema = capture_schema(register_ai_search, 'ai_search');
+
+		for (const provider of ai_search_keys) {
+			expect(
+				v.safeParse(schema, { query: 'provider contract', provider })
+					.success,
+			).toBe(true);
+		}
 		expect(
 			v.safeParse(schema, {
-				query: 'test',
-				provider: 'brave',
-				include_domains: ['bad-domain'],
+				query: 'provider contract',
+				provider: 'you_research',
 			}).success,
 		).toBe(false);
+	});
+
+	it('does not expose the retired provider-specific research effort parameter', () => {
+		config.ai_response.exa_answer.api_key = 'exa-contract-key';
+		expect(initialize_ai_search()).toBe(true);
+		const schema = capture_schema(register_ai_search, 'ai_search');
+		const entries = (schema as v.ObjectSchema<any, any>).entries;
+
+		expect(entries).not.toHaveProperty('you_research_effort');
+	});
+
+	it('advertises the current Exa publication category only', () => {
+		for (const provider of search_keys) {
+			config.search[provider].api_key =
+				provider === 'exa' ? 'exa-contract-key' : undefined;
+		}
+		expect(initialize_web_search()).toBe(true);
+
+		const schema = capture_schema(register_web_search, 'web_search');
+		const input = { query: 'academic work', provider: 'exa' };
 		expect(
-			v.safeParse(schema, {
-				query: 'test',
-				provider: 'brave',
-				limit: 51,
-			}).success,
-		).toBe(false);
-		expect(
-			v.safeParse(schema, { query: 'test', provider: 'kagi' })
+			v.safeParse(schema, { ...input, category: 'publication' })
 				.success,
-		).toBe(false);
-	});
-
-	it('validates public web_extract payloads and unavailable modes at the MCP layer', async () => {
-		const { tools } = await load_contract({
-			TAVILY_API_KEY: 'tavily-key',
-		});
-		const tool = tools.find(
-			(entry) => entry.definition.name === 'web_extract',
-		)!;
-
-		expect(
-			v.safeParse(tool.definition.schema, {
-				url: 'https://example.com',
-				provider: 'tavily',
-				mode: 'extract',
-				include_raw_contents: false,
-			}).success,
 		).toBe(true);
-		expect(
-			v.safeParse(tool.definition.schema, {
-				url: 'not-a-url',
-				provider: 'tavily',
-			}).success,
-		).toBe(false);
-		expect(
-			v.safeParse(tool.definition.schema, {
-				url: 'https://example.com',
-				provider: 'tavily',
-				mode: 'bogus',
-			}).success,
-		).toBe(false);
+		for (const retired of [
+			'research paper',
+			'pdf',
+			'github',
+			'tweet',
+		]) {
+			expect(
+				v.safeParse(schema, { ...input, category: retired }).success,
+			).toBe(false);
+		}
 
-		const response = await tool.handler({
-			url: 'https://example.com',
-			provider: 'tavily',
-			mode: 'summarize',
-		});
-		const body = parse_tool_body(response);
-
-		expect(response.isError).toBe(true);
-		expect(body).toEqual(
-			expect.objectContaining({
-				type: 'INVALID_INPUT',
-				provider: 'web_extract',
-				retryable: false,
-			}),
-		);
-	});
-
-	it('returns success and provider error shapes through registered web_search handler', async () => {
-		const { tools } = await load_contract({
-			BRAVE_API_KEY: 'brave-key',
-		});
-		const tool = tools.find(
-			(entry) => entry.definition.name === 'web_search',
-		)!;
-
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValueOnce(
-				new Response(
-					JSON.stringify({
-						web: {
-							results: [
-								{
-									title: 'Example',
-									url: 'https://example.com',
-									description: 'Example result',
-								},
-							],
-						},
-					}),
-					{ status: 200 },
-				),
-			),
-		);
-
-		const success = await tool.handler({
-			query: 'example',
-			provider: 'brave',
-			large_result_mode: 'inline',
-		});
-		expect(parse_tool_body(success)).toEqual([
-			{
-				title: 'Example',
-				url: 'https://example.com',
-				snippet: 'Example result',
-				source_provider: 'brave',
-			},
-		]);
-
-		vi.stubGlobal(
-			'fetch',
-			vi
-				.fn()
-				.mockResolvedValue(new Response('nope', { status: 401 })),
-		);
-		const failure = await tool.handler({
-			query: 'example',
-			provider: 'brave',
-		});
-
-		expect(failure.isError).toBe(true);
-		expect(parse_tool_body(failure)).toEqual({
-			error: 'Invalid API key',
-			type: 'AUTH_ERROR',
-			provider: 'brave',
-			retryable: false,
-		});
-	});
-
-	it('covers large-result inline/file modes and compact extraction at the MCP layer', async () => {
-		const { tools } = await load_contract({
-			TAVILY_API_KEY: 'tavily-key',
-		});
-		const tool = tools.find(
-			(entry) => entry.definition.name === 'web_extract',
-		)!;
-		const large_content = `# Large\n${'word '.repeat(20_000)}`;
-
-		mock_tavily_extract_response('small content');
-		const compact = parse_tool_body(
-			await tool.handler({
-				url: 'https://example.com',
-				provider: 'tavily',
-				mode: 'extract',
-				include_raw_contents: false,
-				large_result_mode: 'inline',
-			}),
-		);
-		expect(compact.raw_contents).toBeUndefined();
-		expect(compact.content).toBe('small content');
-
-		mock_tavily_extract_response(large_content);
-		const inline = parse_tool_body(
-			await tool.handler({
-				url: 'https://example.com',
-				provider: 'tavily',
-				mode: 'extract',
-				large_result_mode: 'inline',
-			}),
-		);
-		expect(inline.raw_contents[0].content).toBe(large_content);
-
-		mock_tavily_extract_response(large_content);
-		const file = parse_tool_body(
-			await tool.handler({
-				url: 'https://example.com',
-				provider: 'tavily',
-				mode: 'extract',
-				large_result_mode: 'file',
-			}),
-		);
-		expect(file).toEqual(
-			expect.objectContaining({
-				file_path: expect.stringContaining('mcp-web_extract-'),
-				estimated_tokens: expect.any(Number),
-				read_hint: expect.stringContaining('Use Read tool'),
-			}),
-		);
+		const entries = (schema as v.ObjectSchema<any, any>).entries;
+		for (const retired_parameter of [
+			'startCrawlDate',
+			'endCrawlDate',
+		]) {
+			expect(entries).not.toHaveProperty(retired_parameter);
+		}
 	});
 });

@@ -1,59 +1,60 @@
-# Use Node.js 20 LTS Alpine for smallest image size
+# Use Node.js 24 Alpine
 FROM node:24-alpine
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies including Python and uv
-RUN apk add --no-cache python3 py3-pip gettext && \
-    pip3 install --break-system-packages uv
+# MCPO uses Python/uv to expose the stdio MCP server over HTTP.
+RUN apk add --no-cache python3 py3-pip gettext \
+    && pip3 install --break-system-packages uv
 
-# Install pnpm globally
-RUN npm install -g pnpm
+# Use the repository-pinned package manager release.
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
 
-# Copy package files for dependency installation
-COPY package.json pnpm-lock.yaml ./
-
-# Install dependencies
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod=false
 
-# Copy source code
 COPY . .
+RUN pnpm run build && pnpm prune --prod
 
-# Build the TypeScript project
-RUN pnpm run build
+# Keep runtime substitution so credentials are not baked into the image.
+RUN printf '%s\n' \
+    '{' \
+    '  "mcpServers": {' \
+    '    "omnisearch": {' \
+    '      "command": "node",' \
+    '      "args": ["dist/index.js"],' \
+    '      "env": {' \
+    '        "BRAVE_API_KEY": "${BRAVE_API_KEY}",' \
+    '        "BRAVE_ANSWERS_API_KEY": "${BRAVE_ANSWERS_API_KEY}",' \
+    '        "TAVILY_API_KEY": "${TAVILY_API_KEY}",' \
+    '        "GITHUB_API_KEY": "${GITHUB_API_KEY}",' \
+    '        "EXA_API_KEY": "${EXA_API_KEY}",' \
+    '        "LINKUP_API_KEY": "${LINKUP_API_KEY}",' \
+    '        "CONTEXT_DEV_API_KEY": "${CONTEXT_DEV_API_KEY}",' \
+    '        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",' \
+    '        "FIRECRAWL_BASE_URL": "${FIRECRAWL_BASE_URL}",' \
+    '        "FIRECRAWL_AGENT_URL": "${FIRECRAWL_AGENT_URL}",' \
+    '        "OMNISEARCH_RESULT_TTL_MS": "${OMNISEARCH_RESULT_TTL_MS}",' \
+    '        "OMNISEARCH_RESULT_MAX_BYTES": "${OMNISEARCH_RESULT_MAX_BYTES}",' \
+    '        "OMNISEARCH_RESULT_STORE_MAX_BYTES": "${OMNISEARCH_RESULT_STORE_MAX_BYTES}"' \
+    '      }' \
+    '    }' \
+    '  }' \
+    '}' > /app/mcpo-config.json
 
-# Remove development dependencies to reduce image size
-RUN pnpm prune --prod
+RUN python3 -m json.tool /app/mcpo-config.json > /dev/null
 
-# Create MCPO config file
-RUN echo '{\
-  "mcpServers": {\
-    "omnisearch": {\
-      "command": "node",\
-      "args": ["dist/index.js"],\
-      "env": {\
-        "BRAVE_API_KEY": "${BRAVE_API_KEY}",\
-        "TAVILY_API_KEY": "${TAVILY_API_KEY}",\
-        "KAGI_API_KEY": "${KAGI_API_KEY}",\
-        "GITHUB_API_KEY": "${GITHUB_API_KEY}",\
-        "EXA_API_KEY": "${EXA_API_KEY}",\
-        "LINKUP_API_KEY": "${LINKUP_API_KEY}",\
-        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"\
-      }\
-    }\
-  }\
-}' > /app/mcpo-config.json
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    'set -eu' \
+    'envsubst < /app/mcpo-config.json > /tmp/mcpo-config-final.json' \
+    'exec uv tool run mcpo --port ${PORT:-8000} --config /tmp/mcpo-config-final.json' \
+    > /app/start.sh \
+    && chmod +x /app/start.sh \
+    && chown -R node:node /app
 
-# Create startup script file
-RUN printf '#!/bin/sh\n# Substitute environment variables in config\nenvsubst < /app/mcpo-config.json > /app/mcpo-config-final.json\n\n# Start MCPO with the config\nexec uv tool run mcpo --port ${PORT:-8000} --config /app/mcpo-config-final.json\n' > /app/start.sh && \
-    chmod +x /app/start.sh
-
-# Expose port for MCPO
+USER node
 EXPOSE 8000
-
-# Set environment to production
 ENV NODE_ENV=production
 
-# Run the startup script
 CMD ["/app/start.sh"]

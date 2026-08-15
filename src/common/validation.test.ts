@@ -43,12 +43,34 @@ describe('is_api_key_valid', () => {
 });
 
 describe('is_valid_url', () => {
-	it('accepts valid absolute URLs', () => {
+	it('accepts public HTTP and HTTPS URLs', () => {
 		expect(is_valid_url('https://example.com/path?q=1')).toBe(true);
+		expect(is_valid_url('http://docs.example.com')).toBe(true);
 	});
 
-	it('rejects invalid URLs', () => {
+	it('rejects malformed, non-HTTP, and credential-bearing URLs', () => {
 		expect(is_valid_url('not-a-url')).toBe(false);
+		expect(is_valid_url('file:///etc/passwd')).toBe(false);
+		expect(is_valid_url('ftp://example.com/file')).toBe(false);
+		expect(is_valid_url('https://user:pass@example.com')).toBe(false);
+	});
+
+	it('rejects local, private, link-local, and metadata targets', () => {
+		for (const url of [
+			'http://localhost:3000',
+			'http://service.local/path',
+			'http://127.0.0.1',
+			'http://10.0.0.4',
+			'http://172.16.0.1',
+			'http://192.168.1.1',
+			'http://100.84.79.102',
+			'http://169.254.169.254/latest/meta-data',
+			'http://[::1]',
+			'http://[fd00::1]',
+			'http://metadata.google.internal',
+		]) {
+			expect(is_valid_url(url), url).toBe(false);
+		}
 	});
 });
 
@@ -79,6 +101,21 @@ describe('validate_processing_urls', () => {
 				type: ErrorType.INVALID_INPUT,
 				provider: 'firecrawl',
 				message: 'Invalid URL provided: nope',
+			}),
+		);
+	});
+
+	it('caps multi-URL requests to prevent unbounded paid fan-out', () => {
+		const urls = Array.from(
+			{ length: 21 },
+			(_, index) => `https://example.com/${index}`,
+		);
+		expect(() =>
+			validate_processing_urls(urls, 'firecrawl'),
+		).toThrowError(
+			expect.objectContaining({
+				type: ErrorType.INVALID_INPUT,
+				message: 'A maximum of 20 URLs is allowed per request',
 			}),
 		);
 	});

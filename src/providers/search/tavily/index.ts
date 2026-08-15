@@ -4,12 +4,12 @@ import {
 	sanitize_query,
 } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider-response.js';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	apply_search_operators,
 	parse_search_operators,
-} from '../../../common/search-operators.js';
+} from '../../../common/search_operators.js';
 import {
 	BaseSearchParams,
 	SearchProvider,
@@ -18,28 +18,20 @@ import {
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface TavilySearchRequest {
-	query: string;
-	max_results: number;
-	include_domains: string[];
-	exclude_domains: string[];
-	search_depth: 'basic';
-	topic: 'general';
-	start_date?: string;
-	end_date?: string;
-	exact_match?: boolean;
-	country?: string;
-}
-
 const tavily_search_response_schema = v.object({
-	results: v.array(
-		v.object({
-			title: v.string(),
-			url: v.string(),
-			content: v.string(),
-			score: v.number(),
-		}),
+	results: v.optional(
+		v.array(
+			v.object({
+				title: v.string(),
+				url: v.string(),
+				content: v.string(),
+				score: v.number(),
+			}),
+		),
 	),
+	// Tavily's docs declare number<float> but real responses have been
+	// observed returning a string (e.g. "1.67"); accept both.
+	response_time: v.optional(v.union([v.string(), v.number()])),
 });
 
 const normalize_tavily_date = (date: string) => {
@@ -85,7 +77,7 @@ export class TavilySearchProvider implements SearchProvider {
 					...(search_params.exclude_domains ?? []),
 				];
 
-				const request_body: TavilySearchRequest = {
+				const request_body: Record<string, any> = {
 					query: sanitize_query(search_params.query),
 					max_results: params.limit ?? 5,
 					include_domains:
@@ -139,6 +131,7 @@ export class TavilySearchProvider implements SearchProvider {
 							'Content-Type': 'application/json',
 						},
 						body: JSON.stringify(request_body),
+						signal: AbortSignal.timeout(config.search.tavily.timeout),
 					},
 				);
 				const data = parse_provider_response(
@@ -147,7 +140,7 @@ export class TavilySearchProvider implements SearchProvider {
 					raw_data,
 				);
 
-				return data.results.map((result) => ({
+				return (data.results ?? []).map((result) => ({
 					title: result.title,
 					url: result.url,
 					snippet: result.content,

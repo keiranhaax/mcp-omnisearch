@@ -1,109 +1,21 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
-import type {
-	ProviderCategory,
-	ProviderStatus,
-} from './provider-registry.js';
-import { provider_status_entries } from './tools/index.js';
-
-const categories: ProviderCategory[] = [
-	'search',
-	'ai_response',
-	'processing',
-];
-
-const unique = (values: readonly string[]) =>
-	Array.from(new Set(values)).sort();
-
-const grouped_provider_status = () => {
-	const grouped: Record<ProviderCategory, ProviderStatus[]> = {
-		search: [],
-		ai_response: [],
-		processing: [],
-	};
-
-	for (const provider of provider_status_entries) {
-		grouped[provider.category].push(provider);
-	}
-
-	return grouped;
-};
-
-const aggregate_provider_info = (
-	provider_name: string,
-	category?: ProviderCategory,
-) => {
-	const entries = provider_status_entries.filter(
-		(provider) =>
-			(provider.id === provider_name ||
-				provider.name === provider_name) &&
-			(!category || provider.category === category),
-	);
-
-	if (entries.length === 0) return undefined;
-
-	const status = entries.some(
-		(provider) => provider.status === 'available',
-	)
-		? 'available'
-		: 'unavailable';
-
-	return {
-		name: provider_name,
-		status,
-		categories: unique(entries.map((provider) => provider.category)),
-		tools: unique(entries.flatMap((provider) => provider.tools)),
-		modes: unique(entries.flatMap((provider) => provider.modes)),
-		capabilities: unique(
-			entries.flatMap((provider) => provider.capabilities),
-		),
-		providers: entries.map((provider) => ({
-			id: provider.id,
-			name: provider.name,
-			category: provider.category,
-			status: provider.status,
-			api_key_name: provider.api_key_name,
-			description: provider.description,
-			tools: provider.tools,
-			modes: provider.modes,
-			capabilities: provider.capabilities,
-			unavailable_reason: provider.unavailable_reason,
-		})),
-	};
-};
+import { available_providers } from './tools/index.js';
+import {
+	get_provider_health_snapshot,
+	get_provider_health_summary,
+} from './provider_health.js';
 
 export const setup_handlers = (server: McpServer<GenericSchema>) => {
 	// Provider Status Resource
 	server.resource(
 		{
 			name: 'provider-status',
-			description: 'Current status of all configured providers',
+			description: 'Current status of all search providers',
 			uri: 'omnisearch://providers/status',
 		},
 		async () => {
-			const providers = grouped_provider_status();
-			const available_count = Object.fromEntries(
-				categories.map((category) => [
-					category,
-					providers[category].filter(
-						(provider) => provider.status === 'available',
-					).length,
-				]),
-			) as Record<ProviderCategory, number>;
-			const unavailable_count = Object.fromEntries(
-				categories.map((category) => [
-					category,
-					providers[category].filter(
-						(provider) => provider.status === 'unavailable',
-					).length,
-				]),
-			) as Record<ProviderCategory, number>;
-			const total = provider_status_entries.length;
-			const available_total = categories.reduce(
-				(sum, category) => sum + available_count[category],
-				0,
-			);
-
+			const health_summary = get_provider_health_summary();
 			return {
 				contents: [
 					{
@@ -112,19 +24,28 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 						text: JSON.stringify(
 							{
 								status:
-									available_total === 0
-										? 'unavailable'
-										: available_total === total
-											? 'operational'
-											: 'degraded',
-								providers,
-								available_count: {
-									...available_count,
-									total: available_total,
+									health_summary.degraded > 0
+										? 'degraded'
+										: 'operational',
+								providers: {
+									search: Array.from(available_providers.search),
+									ai_response: Array.from(
+										available_providers.ai_response,
+									),
+									processing: Array.from(
+										available_providers.processing,
+									),
 								},
-								unavailable_count: {
-									...unavailable_count,
-									total: total - available_total,
+								provider_health: get_provider_health_snapshot(),
+								health_summary,
+								available_count: {
+									search: available_providers.search.size,
+									ai_response: available_providers.ai_response.size,
+									processing: available_providers.processing.size,
+									total:
+										available_providers.search.size +
+										available_providers.ai_response.size +
+										available_providers.processing.size,
 								},
 							},
 							null,
@@ -140,26 +61,29 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 	server.resource(
 		{
 			name: 'provider-info',
-			description: 'Information about a specific configured provider',
-			uri: 'omnisearch://providers/{provider}/info',
+			description: 'Registration and runtime health for a provider',
+			uri: 'omnisearch://search/{provider}/info',
 		},
 		async (uri) => {
+			// Handle provider info template
 			const providerMatch = uri.match(
-				/^omnisearch:\/\/(providers|search|ai_response|processing)\/([^/]+)\/info$/,
+				/^omnisearch:\/\/search\/([^/]+)\/info$/,
 			);
 			if (providerMatch) {
-				const [, scope, providerName] = providerMatch;
-				const category =
-					scope === 'providers'
-						? undefined
-						: (scope as ProviderCategory);
-				const providerInfo = aggregate_provider_info(
-					providerName,
-					category,
-				);
+				const providerName = providerMatch[1];
 
-				if (!providerInfo) {
-					throw new Error(`Unknown provider: ${providerName}`);
+				const category = available_providers.search.has(providerName)
+					? 'search'
+					: available_providers.ai_response.has(providerName)
+						? 'ai_response'
+						: available_providers.processing.has(providerName)
+							? 'processing'
+							: undefined;
+
+				if (!category) {
+					throw new Error(
+						`Provider not available: ${providerName} (missing API key)`,
+					);
 				}
 
 				return {
@@ -167,7 +91,19 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 						{
 							uri,
 							mimeType: 'application/json',
-							text: JSON.stringify(providerInfo, null, 2),
+							text: JSON.stringify(
+								{
+									name: providerName,
+									status: 'registered',
+									category,
+									runtime_health:
+										get_provider_health_snapshot()[category][
+											providerName
+										],
+								},
+								null,
+								2,
+							),
 						},
 					],
 				};

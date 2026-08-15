@@ -1,35 +1,9 @@
-import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { store_result } from './result_store.js';
 import { ErrorType, ProviderError } from './types.js';
 
 const CHARS_PER_TOKEN = 4;
 const MAX_SAFE_TOKENS = 20000;
 const MAX_SAFE_CHARS = MAX_SAFE_TOKENS * CHARS_PER_TOKEN;
-
-// `file` is legacy/local stdio behavior: it returns a path on the
-// server filesystem and only works when the MCP client can read that
-// same filesystem. Remote/container transports should prefer `inline`.
-export type LargeResultMode = 'inline' | 'file';
-
-export interface HandleLargeResultOptions {
-	mode?: LargeResultMode;
-}
-
-const get_large_result_mode = (
-	mode_override?: LargeResultMode,
-): LargeResultMode => {
-	if (mode_override) return mode_override;
-
-	const configured_mode = process.env.OMNISEARCH_LARGE_RESULT_MODE;
-
-	if (configured_mode === 'inline' || configured_mode === 'file') {
-		return configured_mode;
-	}
-
-	return 'file';
-};
 
 export interface Section {
 	title: string;
@@ -37,9 +11,10 @@ export interface Section {
 }
 
 export interface LargeResultResponse {
-	file_path: string;
+	result_id: string;
 	total_lines: number;
 	estimated_tokens: number;
+	expires_at: string;
 	sections: Section[];
 	read_hint: string;
 	metadata?: Record<string, unknown>;
@@ -126,8 +101,7 @@ const format_as_text = (
 
 export const handle_large_result = <T>(
 	result: T,
-	provider_name: string,
-	options: HandleLargeResultOptions = {},
+	_provider_name: string,
 ): T | LargeResultResponse => {
 	const json = JSON.stringify(result, null, 2);
 	const char_count = json.length;
@@ -136,22 +110,10 @@ export const handle_large_result = <T>(
 		return result;
 	}
 
-	if (get_large_result_mode(options.mode) === 'inline') {
-		return result;
-	}
-
-	// Server-side temp-file offload is intentionally local-only. Keep
-	// remote MCP deployments on `inline` so clients receive readable data
-	// instead of an inaccessible server path.
-	const file_id = randomUUID();
-	const file_path = join(
-		tmpdir(),
-		`mcp-${provider_name}-${file_id}.txt`,
-	);
 	const { text, sections, total_lines } = format_as_text(
 		result as Record<string, unknown>,
 	);
-	writeFileSync(file_path, text, 'utf-8');
+	const stored = store_result(text);
 
 	const result_obj = result as Record<string, unknown>;
 	const metadata = result_obj.metadata as
@@ -161,11 +123,12 @@ export const handle_large_result = <T>(
 	const urls_processed = metadata?.urls_processed ?? 'unknown';
 
 	return {
-		file_path,
+		result_id: stored.result_id,
 		total_lines,
 		estimated_tokens: Math.round(char_count / CHARS_PER_TOKEN),
+		expires_at: stored.expires_at,
 		sections,
-		read_hint: `Use Read tool with file_path="${file_path}" and offset=LINE_NUMBER limit=50 to read a section`,
+		read_hint: `Call result_read with result_id="${stored.result_id}", offset=LINE_NUMBER, and limit=50 to read a section`,
 		metadata: {
 			word_count,
 			urls_processed,
@@ -177,19 +140,10 @@ export const handle_large_result = <T>(
 export interface ProcessedUrlResult {
 	url: string;
 	content: string;
-	metadata?: Record<string, unknown> & { title?: string };
+	metadata?: any;
 	success: boolean;
 	error?: string;
 }
-
-export const omit_raw_contents = <
-	T extends { raw_contents?: unknown },
->(
-	result: T,
-) => {
-	const { raw_contents: _raw_contents, ...compact_result } = result;
-	return compact_result;
-};
 
 export const aggregate_url_results = (
 	results: ProcessedUrlResult[],

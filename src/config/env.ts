@@ -3,14 +3,17 @@
 // Search provider API keys
 export const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 export const BRAVE_API_KEY = process.env.BRAVE_API_KEY;
-export const KAGI_API_KEY = process.env.KAGI_API_KEY;
+export const BRAVE_ANSWERS_API_KEY =
+	process.env.BRAVE_ANSWERS_API_KEY;
 export const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 export const EXA_API_KEY = process.env.EXA_API_KEY;
 export const LINKUP_API_KEY = process.env.LINKUP_API_KEY;
+export const CONTEXT_DEV_API_KEY = process.env.CONTEXT_DEV_API_KEY;
 
 // Content processing API keys
 export const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 export const FIRECRAWL_BASE_URL = process.env.FIRECRAWL_BASE_URL;
+export const FIRECRAWL_AGENT_URL = process.env.FIRECRAWL_AGENT_URL;
 
 // Provider configuration
 export const config = {
@@ -25,11 +28,6 @@ export const config = {
 			base_url: 'https://api.search.brave.com/res/v1',
 			timeout: 10000, // 10 seconds
 		},
-		kagi: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0',
-			timeout: 20000, // 20 seconds
-		},
 		github: {
 			api_key: GITHUB_API_KEY,
 			base_url: 'https://api.github.com',
@@ -40,30 +38,51 @@ export const config = {
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
 		},
+		context_dev: {
+			api_key: CONTEXT_DEV_API_KEY,
+			base_url: 'https://api.context.dev/v1',
+			timeout: 60000,
+		},
+		brave_media: {
+			api_key: BRAVE_API_KEY,
+			base_url: 'https://api.search.brave.com/res/v1',
+			timeout: 15000,
+		},
+		brave_news: {
+			api_key: BRAVE_API_KEY,
+			base_url: 'https://api.search.brave.com/res/v1',
+			timeout: 15000,
+		},
 	},
 	ai_response: {
-		kagi_fastgpt: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0/fastgpt',
-			timeout: 30000, // 30 seconds
-		},
 		exa_answer: {
 			api_key: EXA_API_KEY,
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
+		},
+		exa_deep_research: {
+			api_key: EXA_API_KEY,
+			base_url: 'https://api.exa.ai',
+			timeout: 70000, // Exa deep-reasoning can take up to ~60 seconds
 		},
 		linkup: {
 			api_key: LINKUP_API_KEY,
 			base_url: 'https://api.linkup.so/v1',
 			timeout: 30000, // 30 seconds
 		},
+		brave_answers: {
+			api_key: BRAVE_ANSWERS_API_KEY || BRAVE_API_KEY,
+			base_url:
+				'https://api.search.brave.com/res/v1/chat/completions',
+			timeout: 30000,
+		},
+		tavily_research: {
+			api_key: TAVILY_API_KEY,
+			base_url: 'https://api.tavily.com',
+			timeout: 120000, // 2 minutes for deep research
+		},
 	},
 	processing: {
-		kagi_summarizer: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0/summarize',
-			timeout: 30000, // 30 seconds
-		},
 		tavily_extract: {
 			api_key: TAVILY_API_KEY,
 			base_url: 'https://api.tavily.com',
@@ -114,41 +133,27 @@ export const config = {
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
 		},
-	},
-	enhancement: {
-		kagi_enrichment: {
-			api_key: KAGI_API_KEY,
-			base_url: 'https://kagi.com/api/v0/enrich',
-			timeout: 20000, // 20 seconds
+		brave_llm_context: {
+			api_key: BRAVE_API_KEY,
+			base_url: 'https://api.search.brave.com/res/v1/llm/context',
+			timeout: 30000,
+		},
+		firecrawl_agent: {
+			api_key: FIRECRAWL_API_KEY,
+			override_url: FIRECRAWL_AGENT_URL,
+			base_url: FIRECRAWL_BASE_URL
+				? `${FIRECRAWL_BASE_URL}/v1/agent`
+				: 'https://api.firecrawl.dev/v1/agent',
+			timeout: 180000, // 3 minutes for agent tasks
+		},
+		firecrawl_search: {
+			api_key: FIRECRAWL_API_KEY,
+			base_url: FIRECRAWL_BASE_URL
+				? `${FIRECRAWL_BASE_URL}/v2/search`
+				: 'https://api.firecrawl.dev/v2/search',
+			timeout: 60000,
 		},
 	},
-};
-
-const remote_deployment_markers = [
-	'AWS_LAMBDA_FUNCTION_NAME',
-	'CONTAINER',
-	'DOCKER_CONTAINER',
-	'FLY_APP_NAME',
-	'K_SERVICE',
-	'RENDER',
-	'VERCEL',
-];
-
-export const should_warn_for_local_file_offload = (
-	env: NodeJS.ProcessEnv = process.env,
-) =>
-	env.OMNISEARCH_LARGE_RESULT_MODE === 'file' &&
-	remote_deployment_markers.some((marker) => Boolean(env[marker]));
-
-export const warn_for_local_file_offload = (
-	env: NodeJS.ProcessEnv = process.env,
-	warn: (message: string) => void = console.warn,
-) => {
-	if (!should_warn_for_local_file_offload(env)) return;
-
-	warn(
-		'Warning: OMNISEARCH_LARGE_RESULT_MODE=file returns server-side temp-file paths and is only useful for local shared-filesystem stdio clients. Use OMNISEARCH_LARGE_RESULT_MODE=inline for remote, hosted, or containerized MCP deployments.',
-	);
 };
 
 // Validate required environment variables
@@ -163,9 +168,6 @@ export const validate_config = () => {
 	if (!BRAVE_API_KEY) missing_keys.push('BRAVE_API_KEY');
 	else available_keys.push('BRAVE_API_KEY');
 
-	if (!KAGI_API_KEY) missing_keys.push('KAGI_API_KEY');
-	else available_keys.push('KAGI_API_KEY');
-
 	if (!GITHUB_API_KEY) missing_keys.push('GITHUB_API_KEY');
 	else available_keys.push('GITHUB_API_KEY');
 
@@ -177,6 +179,9 @@ export const validate_config = () => {
 
 	if (!LINKUP_API_KEY) missing_keys.push('LINKUP_API_KEY');
 	else available_keys.push('LINKUP_API_KEY');
+
+	if (!CONTEXT_DEV_API_KEY) missing_keys.push('CONTEXT_DEV_API_KEY');
+	else available_keys.push('CONTEXT_DEV_API_KEY');
 
 	// Log available keys
 	if (available_keys.length > 0) {
@@ -195,6 +200,4 @@ export const validate_config = () => {
 			)}. Some providers will not be available.`,
 		);
 	}
-
-	warn_for_local_file_offload();
 };

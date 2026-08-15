@@ -11,11 +11,11 @@ describe('handle_rate_limit', () => {
 	it('throws a provider error with the reset time in details', () => {
 		const reset_time = new Date('2026-04-15T12:00:00.000Z');
 
-		expect(() => handle_rate_limit('brave', reset_time)).toThrow(
+		expect(() => handle_rate_limit('brave', reset_time)).toThrowError(
 			expect.objectContaining({
 				type: ErrorType.RATE_LIMIT,
 				provider: 'brave',
-				details: { reset_time, retryable: true },
+				details: { reset_time },
 				message:
 					'Rate limit exceeded for brave. Reset at 2026-04-15T12:00:00.000Z',
 			}),
@@ -28,11 +28,11 @@ describe('handle_provider_error', () => {
 		const error = new ProviderError(
 			ErrorType.PROVIDER_ERROR,
 			'already wrapped',
-			'kagi',
+			'test_provider',
 		);
 
 		expect(() =>
-			handle_provider_error(error, 'kagi', 'fetch results'),
+			handle_provider_error(error, 'test_provider', 'fetch results'),
 		).toThrow(error);
 	});
 
@@ -43,7 +43,7 @@ describe('handle_provider_error', () => {
 				'tavily',
 				'fetch search results',
 			),
-		).toThrow(
+		).toThrowError(
 			expect.objectContaining({
 				type: ErrorType.API_ERROR,
 				provider: 'tavily',
@@ -62,27 +62,45 @@ describe('sanitize_query', () => {
 });
 
 describe('create_error_response', () => {
-	it('formats provider errors with typed retry metadata', () => {
+	it('formats provider errors with the provider prefix', () => {
 		const error = new ProviderError(
-			ErrorType.AUTH_ERROR,
+			ErrorType.API_ERROR,
 			'Invalid API key',
 			'exa',
-			{ retryable: false },
 		);
 
 		expect(create_error_response(error)).toEqual({
-			error: 'Invalid API key',
-			type: ErrorType.AUTH_ERROR,
-			provider: 'exa',
-			retryable: false,
+			error: 'exa error [API_ERROR]: Invalid API key',
+		});
+	});
+
+	it('adds endpoint and guidance for entitlement and endpoint errors', () => {
+		const entitlement_error = new ProviderError(
+			ErrorType.ENTITLEMENT_REQUIRED,
+			'API key does not have access to this endpoint',
+			'test_provider',
+			{ url: 'https://api.example.com/v1/search' },
+		);
+		expect(create_error_response(entitlement_error)).toEqual({
+			error:
+				'test_provider error [ENTITLEMENT_REQUIRED]: API key does not have access to this endpoint (endpoint: https://api.example.com/v1/search) Verify API key plan/entitlement for this endpoint.',
+		});
+
+		const endpoint_error = new ProviderError(
+			ErrorType.ENDPOINT_NOT_FOUND,
+			'Endpoint not found',
+			'firecrawl_agent',
+			{ url: 'https://api.firecrawl.dev/v1/agent' },
+		);
+		expect(create_error_response(endpoint_error)).toEqual({
+			error:
+				'firecrawl_agent error [ENDPOINT_NOT_FOUND]: Endpoint not found (endpoint: https://api.firecrawl.dev/v1/agent) Verify endpoint configuration or set FIRECRAWL_AGENT_URL.',
 		});
 	});
 
 	it('formats generic errors as unexpected errors', () => {
 		expect(create_error_response(new Error('unexpected'))).toEqual({
 			error: 'Unexpected error: unexpected',
-			type: ErrorType.API_ERROR,
-			retryable: false,
 		});
 	});
 });

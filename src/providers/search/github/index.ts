@@ -1,10 +1,11 @@
 import { Octokit } from 'octokit';
 import * as v from 'valibot';
-import { normalize_provider_http_error } from '../../../common/errors.js';
-import { parse_provider_response } from '../../../common/provider-response.js';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
+	ErrorType,
+	ProviderError,
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
@@ -17,7 +18,7 @@ const github_code_search_response_schema = v.object({
 			name: v.string(),
 			path: v.string(),
 			html_url: v.string(),
-			score: v.number(),
+			score: v.optional(v.nullable(v.number())),
 			repository: v.object({
 				full_name: v.string(),
 				html_url: v.string(),
@@ -43,7 +44,7 @@ const github_repository_search_response_schema = v.object({
 			forks_count: v.number(),
 			pushed_at: v.string(),
 			language: v.nullable(v.string()),
-			score: v.number(),
+			score: v.optional(v.nullable(v.number())),
 		}),
 	),
 });
@@ -55,20 +56,10 @@ const github_user_search_response_schema = v.object({
 			html_url: v.string(),
 			bio: v.optional(v.nullable(v.string())),
 			type: v.string(),
-			score: v.number(),
+			score: v.optional(v.nullable(v.number())),
 		}),
 	),
 });
-
-interface GitHubSearchError {
-	status?: number;
-	message?: string;
-}
-
-const is_github_search_error = (
-	error: unknown,
-): error is GitHubSearchError =>
-	typeof error === 'object' && error !== null;
 
 export class GitHubSearchProvider implements SearchProvider {
 	name = 'github';
@@ -109,8 +100,10 @@ export class GitHubSearchProvider implements SearchProvider {
 				);
 
 				return data.items.map((item) => {
+					// Extract better snippet from text matches
 					let snippet = `No snippet available for ${item.path}`;
 					if (item.text_matches && item.text_matches.length > 0) {
+						// Combine multiple fragments for better context
 						const fragments = item.text_matches
 							.map((match) => match.fragment)
 							.filter(Boolean);
@@ -123,8 +116,9 @@ export class GitHubSearchProvider implements SearchProvider {
 						title: `${item.repository.full_name}/${item.path}`,
 						url: item.html_url,
 						snippet,
-						score: item.score,
+						score: item.score ?? 0,
 						source_provider: this.name,
+						// Add metadata for better context
 						metadata: {
 							repository: item.repository.full_name,
 							file_path: item.path,
@@ -168,6 +162,7 @@ export class GitHubSearchProvider implements SearchProvider {
 				);
 
 				return data.items.map((item) => {
+					// Create richer description
 					let snippet =
 						item.description ?? 'No description available.';
 					if (item.language) {
@@ -179,7 +174,7 @@ export class GitHubSearchProvider implements SearchProvider {
 						title: item.full_name,
 						url: item.html_url,
 						snippet,
-						score: item.score,
+						score: item.score ?? 0,
 						source_provider: this.name,
 						metadata: {
 							repository: item.full_name,
@@ -236,7 +231,7 @@ export class GitHubSearchProvider implements SearchProvider {
 					url: user.html_url,
 					snippet:
 						user.bio ?? `GitHub user: ${user.login} • ${user.type}`,
-					score: user.score,
+					score: user.score ?? 0,
 					source_provider: this.name,
 					metadata: {
 						username: user.login,
@@ -254,18 +249,48 @@ export class GitHubSearchProvider implements SearchProvider {
 
 	// Centralized error handling
 	private handle_search_error(error: unknown): never {
+		if (error instanceof ProviderError) throw error;
+
 		const status =
-			is_github_search_error(error) &&
+			error &&
+			typeof error === 'object' &&
+			'status' in error &&
 			typeof error.status === 'number'
 				? error.status
 				: 500;
 		const message =
-			is_github_search_error(error) &&
-			typeof error.message === 'string'
+			error instanceof Error
 				? error.message
 				: 'An unexpected error occurred.';
 
-		throw normalize_provider_http_error(this.name, status, message);
+		switch (status) {
+			case 401:
+			case 403:
+				throw new ProviderError(
+					ErrorType.API_ERROR,
+					`Invalid or unauthorized GitHub API key: ${message}`,
+					this.name,
+				);
+			case 422:
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					`Invalid GitHub search query: ${message}`,
+					this.name,
+				);
+			case 429:
+				throw new ProviderError(
+					ErrorType.RATE_LIMIT,
+					`GitHub API rate limit exceeded: ${message}`,
+					this.name,
+				);
+			default:
+				throw new ProviderError(
+					ErrorType.PROVIDER_ERROR,
+					`GitHub API error: ${message}`,
+					this.name,
+					{ status },
+				);
+		}
 	}
 }
 

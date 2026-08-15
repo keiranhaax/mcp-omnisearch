@@ -7,110 +7,82 @@ export const delay = (ms: number): Promise<void> => {
 export interface RetryOptions {
 	max_retries?: number;
 	initial_delay?: number;
-	jitter_ratio?: number;
-	random?: () => number;
-	should_retry?: (error: unknown) => boolean;
+	retry_if?: (error: unknown) => boolean;
 }
 
-const is_object_with_name = (
+export const is_non_retryable_provider_error = (
 	error: unknown,
-): error is { name: string } =>
-	typeof error === 'object' &&
-	error !== null &&
-	'name' in error &&
-	typeof error.name === 'string';
+): boolean => {
+	if (!(error instanceof ProviderError)) return false;
+	return (
+		typeof error.details === 'object' &&
+		error.details !== null &&
+		(error.details as { retryable?: unknown }).retryable === false
+	);
+};
 
 export const is_retryable_error = (error: unknown): boolean => {
-	if (error instanceof ProviderError) {
-		if (typeof error.details?.retryable === 'boolean') {
-			return error.details.retryable;
-		}
+	if (!(error instanceof ProviderError)) return true;
 
-		if (
-			error.type === ErrorType.RATE_LIMIT ||
-			error.type === ErrorType.TIMEOUT ||
-			error.type === ErrorType.TRANSIENT_PROVIDER_ERROR
-		) {
-			return true;
-		}
-
-		const status = error.details?.status;
-		return (
-			status !== undefined &&
-			(status === 408 || status === 429 || status >= 500)
-		);
+	if (is_non_retryable_provider_error(error)) {
+		return false;
 	}
 
-	if (is_object_with_name(error)) {
+	if (
+		error.type === ErrorType.RATE_LIMIT ||
+		error.type === ErrorType.PROVIDER_ERROR
+	) {
+		return true;
+	}
+
+	if (error.type === ErrorType.API_ERROR) {
+		const status =
+			error.details && typeof error.details === 'object'
+				? (error.details as { status?: unknown }).status
+				: undefined;
+		if (typeof status !== 'number') return true;
 		return (
-			error.name === 'AbortError' ||
-			error.name === 'TimeoutError' ||
-			error.name === 'TypeError'
+			status === 408 ||
+			status === 425 ||
+			status === 429 ||
+			status >= 500
 		);
 	}
 
 	return false;
 };
 
-const normalize_retry_options = (
-	max_retries_or_options: number | RetryOptions = {},
-	initial_delay?: number,
-): Required<RetryOptions> => {
-	const options =
-		typeof max_retries_or_options === 'number'
-			? {
-					max_retries: max_retries_or_options,
-					initial_delay: initial_delay ?? 1000,
-				}
-			: max_retries_or_options;
-
-	return {
-		max_retries: options.max_retries ?? 3,
-		initial_delay: options.initial_delay ?? 1000,
-		jitter_ratio: options.jitter_ratio ?? 0.2,
-		random: options.random ?? Math.random,
-		should_retry: options.should_retry ?? is_retryable_error,
-	};
-};
-
-const apply_jitter = (
-	delay_time: number,
-	jitter_ratio: number,
-	random: () => number,
-) => {
-	if (jitter_ratio <= 0) return delay_time;
-	const jitter = 1 + (random() * 2 - 1) * jitter_ratio;
-	return Math.max(0, Math.round(delay_time * jitter));
-};
-
 export const retry_with_backoff = async <T>(
 	fn: () => Promise<T>,
-	max_retries_or_options?: number | RetryOptions,
-	initial_delay?: number,
+	options_or_max_retries: number | RetryOptions = 3,
+	legacy_initial_delay = 1000,
 ): Promise<T> => {
-	const options = normalize_retry_options(
-		max_retries_or_options,
-		initial_delay,
-	);
-	let retries = 0;
+	const options: Required<RetryOptions> =
+		typeof options_or_max_retries === 'number'
+			? {
+					max_retries: options_or_max_retries,
+					initial_delay: legacy_initial_delay,
+					retry_if: is_retryable_error,
+				}
+			: {
+					max_retries: options_or_max_retries.max_retries ?? 3,
+					initial_delay: options_or_max_retries.initial_delay ?? 1000,
+					retry_if:
+						options_or_max_retries.retry_if ?? is_retryable_error,
+				};
 
+	let retries = 0;
 	while (true) {
 		try {
 			return await fn();
 		} catch (error) {
 			if (
 				retries >= options.max_retries ||
-				!options.should_retry(error)
+				!options.retry_if(error)
 			) {
 				throw error;
 			}
-
-			const base_delay = options.initial_delay * Math.pow(2, retries);
-			const delay_time = apply_jitter(
-				base_delay,
-				options.jitter_ratio,
-				options.random,
-			);
+			const delay_time = options.initial_delay * Math.pow(2, retries);
 			await delay(delay_time);
 			retries++;
 		}
