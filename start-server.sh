@@ -12,6 +12,7 @@ if [[ -f /home/ubuntu/copilot-api/.env ]]; then
 	copilot_github_api_key="$(
 		set +u
 		set -a
+		# shellcheck source=/dev/null
 		source /home/ubuntu/copilot-api/.env
 		printf '%s' "${GH_TOKEN:-${GITHUB_TOKEN:-${GITHUB_API_KEY:-}}}"
 	)"
@@ -19,6 +20,7 @@ fi
 
 set -a
 if [[ -f .env ]]; then
+	# shellcheck source=/dev/null
 	source .env
 fi
 set +a
@@ -31,6 +33,7 @@ export GITHUB_API_KEY="${copilot_github_api_key:-${GH_TOKEN:-${GITHUB_TOKEN:-${G
 export BRAVE_API_KEY="${BRAVE_API_KEY:-${BRAVE_SEARCH_API_KEY:-}}"
 
 if [[ -f ./brave-key-rotation.sh ]]; then
+	# shellcheck source=/dev/null
 	source ./brave-key-rotation.sh
 fi
 
@@ -56,6 +59,21 @@ if [[ "${BIND_HOST}" != "0.0.0.0" && "${BIND_HOST}" != "::" ]]; then
 	fi
 fi
 
+# The guard owns the public socket and needs an explicit bind address to
+# build its Host allowlist; refusing a wildcard bind keeps the edge
+# fail-closed. GUARD_PUBLIC_HOSTS names the TLS hostname Caddy forwards
+# with the original Host header preserved.
+if [[ "${BIND_HOST}" == "0.0.0.0" || "${BIND_HOST}" == "::" ]]; then
+	printf 'BIND_HOST must be an explicit address when the guard fronts the server: %s\n' "${BIND_HOST}" >&2
+	exit 1
+fi
+: "${GUARD_PUBLIC_HOSTS:=mcp.keiranh.cloud}"
+: "${GUARD_UPSTREAM_PORT:=8002}"
+GUARD_LISTEN_HOST="${BIND_HOST}"
+GUARD_LISTEN_PORT="${PORT}"
+GUARD_ALLOWED_HOSTS="${GUARD_ALLOWED_HOSTS:-${BIND_HOST}:${PORT},${GUARD_PUBLIC_HOSTS}}"
+export GUARD_LISTEN_HOST GUARD_LISTEN_PORT GUARD_ALLOWED_HOSTS GUARD_UPSTREAM_PORT
+
 clean_env=(
   "HOME=${HOME}"
   "PATH=${PATH}"
@@ -79,6 +97,11 @@ for variable in \
   FIRECRAWL_API_KEY \
   FIRECRAWL_BASE_URL \
   FIRECRAWL_AGENT_URL \
+  MCP_API_KEY \
+  GUARD_LISTEN_HOST \
+  GUARD_LISTEN_PORT \
+  GUARD_ALLOWED_HOSTS \
+  GUARD_UPSTREAM_PORT \
   OMNISEARCH_RESULT_DIR \
   OMNISEARCH_RESULT_TTL_MS \
   OMNISEARCH_RESULT_MAX_BYTES \
@@ -90,9 +113,6 @@ do
   fi
 done
 
-exec env -i "${clean_env[@]}" mcp-proxy \
-  --host "${BIND_HOST}" \
-  --port "${PORT}" \
-  --apiKey "${MCP_API_KEY}" \
-  --stateless \
-  -- node ./dist/index.js
+# The guard spawns the pinned project-local mcp-proxy on loopback and the
+# stdio server beneath it; PM2 keeps managing this single process.
+exec env -i "${clean_env[@]}" node ./dist/guard.js
