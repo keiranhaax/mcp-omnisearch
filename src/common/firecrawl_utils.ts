@@ -85,9 +85,7 @@ export const poll_firecrawl_job = async <
 	config: PollingConfig,
 	schema: TSchema,
 ): Promise<v.InferOutput<TSchema> & FirecrawlPollingResponse> => {
-	let attempts = 0;
-
-	while (attempts < config.max_attempts) {
+	for (let attempts = 0; attempts < config.max_attempts; attempts++) {
 		await new Promise((resolve) =>
 			setTimeout(resolve, config.poll_interval),
 		);
@@ -141,8 +139,6 @@ export const poll_firecrawl_job = async <
 		if (status_result.status === 'completed') {
 			return status_result;
 		}
-
-		attempts++;
 	}
 
 	throw new ProviderError(

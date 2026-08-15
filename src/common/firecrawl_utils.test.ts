@@ -329,6 +329,34 @@ describe('poll_firecrawl_job', () => {
 		},
 	);
 
+	it('times out when every poll fails transiently', async () => {
+		http_json_mock.mockRejectedValue(
+			new Error('temporary network issue'),
+		);
+
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				max_attempts: 3,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			firecrawl_job_schema,
+		);
+		const rejection = expect(promise).rejects.toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			provider: 'firecrawl',
+			message:
+				'Job timed out - try again later or with a smaller scope',
+		});
+
+		await vi.advanceTimersByTimeAsync(30);
+		await rejection;
+		expect(http_json_mock).toHaveBeenCalledTimes(3);
+	});
+
 	it('times out after the configured number of attempts', async () => {
 		http_json_mock.mockResolvedValue({
 			success: true,
