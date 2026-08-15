@@ -3,622 +3,334 @@
 [![built with vite+](https://img.shields.io/badge/built%20with-Vite+-646CFF?logo=vite&logoColor=white)](https://viteplus.dev)
 [![tested with vitest](https://img.shields.io/badge/tested%20with-Vitest-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev)
 
-A Model Context Protocol (MCP) server that provides unified access to
-multiple search providers and AI tools. This server combines the
-capabilities of Tavily, Brave, Exa AI, GitHub, Linkup, Firecrawl, and
-Context.dev through consolidated search/extraction tools plus focused
-provider-specific tools.
+> [!IMPORTANT]
+> This repository is a customized fork of
+> [spences10/mcp-omnisearch](https://github.com/spences10/mcp-omnisearch).
+> It preserves the original project's unified search foundation while
+> maintaining a different provider catalog, expanded tool surface,
+> hardened remote transport, and production-oriented result handling.
+> Kagi and You.com integrations are not included in this fork.
 
-<a href="https://glama.ai/mcp/servers/gz5wgmptd8">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/gz5wgmptd8/badge" alt="Glama badge" />
-</a>
+A Model Context Protocol (MCP) server that gives agents one interface for
+web search, cited research, GitHub discovery, content extraction, news
+and media search, web automation, and business intelligence.
 
-## Features
+The current fork integrates Tavily, Brave, Exa, GitHub, Linkup,
+Firecrawl, and Context.dev through four consolidated tools and ten
+focused tools. Tools and providers are registered only when their
+required API keys are available.
 
-### 🔍 `web_search` — Web Search
+## What this fork adds
 
-Search the web for information. Providers: tavily (factual/citations),
-brave (privacy/operators), and exa (AI-semantic).
+- **Expanded MCP surface:** 14 tools covering search, research,
+  extraction, news, media, autonomous web tasks, brand intelligence,
+  style guides, business classification, and transaction
+  identification.
+- **Modern and legacy MCP compatibility:** MCP `2026-07-28` plus
+  stateless legacy `2025-11-25` support over `/mcp`.
+- **Hardened HTTP transport:** a narrow guard in front of a pinned
+  project-local `mcp-proxy`, with Host and Origin allowlists, strict
+  routes, a 4 MiB body limit, request deadlines, and protocol-header
+  enforcement.
+- **Private large-result pagination:** oversized responses are stored
+  with opaque IDs in a private, bounded, expiring result store and read
+  through `result_read`.
+- **Runtime provider health:** MCP resources report configured providers,
+  recent successes, and degraded states without exposing credentials.
+- **Defensive provider handling:** runtime response validation, typed and
+  redacted errors, bounded retries, and current provider-contract
+  compatibility.
+- **Safer extraction:** public HTTP(S) URL validation blocks credentials,
+  loopback, private networks, link-local addresses, and common metadata
+  endpoints.
+- **Production-oriented runtime:** explicit environment allowlisting,
+  path-independent startup, pinned package tooling, and documented
+  staging and rollback procedures.
 
-Parameters:
+## Providers
 
-- `query` (string, required): Search query
-- `provider` (string, required): `tavily`, `brave`, or `exa`
-- `limit` (number, optional): Maximum number of results (default: 10)
-- `include_domains` (array, optional): Only return results from these
-  domains
-- `exclude_domains` (array, optional): Exclude results from these
-  domains
+| Capability | Providers |
+| --- | --- |
+| Web search | Tavily, Brave, Exa |
+| AI answers and research | Exa Answer, Exa Deep Research, Brave Answers, Tavily Research, Linkup |
+| GitHub discovery | GitHub |
+| Extraction and processing | Tavily Extract, Exa Contents/Similar, Firecrawl |
+| News, media, and RAG context | Brave News, Brave Media, Brave LLM Context |
+| Autonomous web tasks | Firecrawl Agent |
+| Web and business intelligence | Context.dev |
 
-### 🤖 `ai_search` — AI-Powered Answers
+Provider availability depends on configuration and provider-side
+entitlements. Missing keys disable only the affected capabilities.
 
-Get AI-powered answers with citations and reasoning. Providers:
-exa_answer (semantic AI), exa_deep_research (deep research),
-brave_answers, tavily_research, and linkup (deep agentic search with
-sources).
+## MCP tools
 
-Parameters:
+### Consolidated tools
 
-- `query` (string, required): Question or search query
-- `provider` (string, required): `exa_answer`, `exa_deep_research`,
-  `brave_answers`, `tavily_research`, or `linkup`
-- `limit` (number, optional): Maximum number of results (default: 10)
+- `web_search`: search with Tavily, Brave, or Exa. Supports provider-aware
+  domain filters, Brave operators, and advanced Exa retrieval options.
+- `ai_search`: cited answers and research through Exa, Brave Answers,
+  Tavily Research, or Linkup.
+- `github_search`: search public GitHub code, repositories, and users with
+  standard GitHub qualifiers.
+- `web_extract`: use Tavily extraction, Exa contents/similar pages, or
+  Firecrawl scrape, summarize, crawl, map, extract, actions, and search.
 
-### 🔎 `github_search` — GitHub Search
+### Focused tools
 
-Search GitHub for code, repositories, or users. Supports advanced
-syntax: `filename:`, `path:`, `repo:`, `user:`, `language:`,
-`in:file`.
+- `brave_llm_context`: retrieve LLM-ready Brave grounding chunks.
+- `brave_news_search`: search recent news with freshness, locale,
+  SafeSearch, pagination, and extra snippets.
+- `brave_media_search`: search Brave images or videos.
+- `firecrawl_agent`: run credit-sensitive multi-step Firecrawl web tasks.
+- `context_web_extract`: scrape markdown/HTML/images/screenshots, crawl,
+  map sites, or search the web with Context.dev.
+- `context_brand_intel`: retrieve company and brand identity data.
+- `context_styleguide`: extract style-guide signals and fonts.
+- `context_classify`: classify companies using NAICS, SIC, or EIC.
+- `context_transaction_identify`: resolve transaction descriptors to
+  brands or companies.
+- `result_read`: paginate oversized results using opaque result IDs.
 
-Parameters:
+The exact tool list is dynamic. A tool is omitted from MCP discovery when
+its required provider key is unavailable.
 
-- `query` (string, required): Search query
-- `search_type` (string, optional): `code`, `repositories`, or `users`
-  (default: code)
-- `limit` (number, optional): Maximum number of results (default: 10)
-- `sort` (string, optional): `stars`, `forks`, or `updated`
-  (repositories only)
+## Search operators and provider options
 
-### 📄 `web_extract` — Content Extraction and Processing
+Brave accepts operators directly in the query string:
 
-Extract, process, or summarize web content from URLs. Providers:
-tavily (content extraction), firecrawl
-(scrape/summarize/crawl/map/extract/actions/search), exa (content
-retrieval/similar pages).
+- `site:example.com`, `-site:example.com`
+- `filetype:pdf` or `ext:pdf`
+- `intitle:term`, `inurl:term`, `inbody:term`, `inpage:term`
+- `lang:en`, `loc:us`
+- `before:2024`, `after:2024-01-01`
+- `"exact phrase"`, `+required`, `-excluded`
 
-Parameters:
+GitHub search supports qualifiers such as `filename:`, `path:`, `repo:`,
+`user:`, `language:`, and `in:file`.
 
-- `url` (string or array, required): URL or array of URLs to process
-- `provider` (string, required): `tavily`, `firecrawl`, or `exa`
-- `mode` (string, optional): Processing mode. Firecrawl:
-  scrape/summarize/crawl/map/extract/actions/search. Exa:
-  contents/similar. Tavily: extract. Defaults to provider default.
-- `extract_depth` (string, optional): `basic` or `advanced` (default:
-  basic)
-
-### `result_read` — Remote Result Pagination
-
-Large results are stored privately on the server for up to 24 hours.
-Use the opaque `result_id` returned by another tool to read the result
-in bounded line ranges. This works for remote MCP clients that cannot
-access the VPS filesystem.
-
-Additional focused tools provide Brave LLM context, Brave news/media
-search, Firecrawl agent workflows, and Context.dev web, brand,
-styleguide, classification, and transaction intelligence.
-
-### 🎯 Search Operators
-
-MCP Omnisearch provides powerful search capabilities through operators
-and parameters:
-
-#### Search Operator Reference
-
-**Brave Operators** (use in query string):
-
-- **Domain**: `site:example.com`, `-site:example.com`
-- **File type**: `filetype:pdf` or `ext:pdf`
-- **Location**: `intitle:term`, `inurl:term`, `inbody:term`,
-  `inpage:term`
-- **Language**: `lang:en` (ISO 639-1 codes)
-- **Country**: `loc:us` (ISO 3166-1 codes)
-- **Date**: `before:2024`, `after:2024-01-01`
-- **Exact**: `"exact phrase"`
-- **Include/Exclude**: `+required`, `-excluded`
-
-**Tavily** (API parameters only):
-
-- Domain filtering: `include_domains`, `exclude_domains`
-
-#### Example Usage
-
-```typescript
-// Brave: Advanced operators in query
-{
-  "query": "filetype:pdf lang:en site:microsoft.com +typescript -javascript",
-  "provider": "brave"
-}
-
-// Brave: Search gists
-{
-  "query": "site:gist.github.com claude code settings",
-  "provider": "brave"
-}
-
-// Tavily: API parameters for domain filtering
-{
-  "query": "typescript guide",
-  "provider": "tavily",
-  "include_domains": ["microsoft.com"]
-}
-```
-
-#### Provider Capabilities
-
-- **Brave Search**: Full native operator support in query string
-- **Tavily Search**: Domain filtering through API parameters
-- **Exa Search**: Domain filtering through API parameters, semantic
-  search with neural understanding
-- **GitHub Search**: Advanced code search syntax with qualifiers:
-  - `filename:remote.ts` - Search for specific files
-  - `path:src/lib` - Search within specific directories
-  - `repo:user/repo` - Search within specific repositories
-  - `user:username` - Search within a user's repositories
-  - `language:typescript` - Filter by programming language
-  - `in:file "export function"` - Search for text within files
-
-## Flexible API Key Requirements
-
-MCP Omnisearch is designed to work with the API keys you have
-available. You don't need to have keys for all providers - the server
-will automatically detect which API keys are available and only enable
-those providers.
-
-For example:
-
-- If you only have a Tavily and Brave API key, only those providers
-  will be available
-- Missing provider keys simply disable those providers; the rest keep
-  working normally
-- The server will log which providers are available based on the API
-  keys you've configured
-
-This flexibility makes it easy to get started with just one or two
-providers and add more as needed.
+Tavily and Exa expose provider-aware domain and retrieval options through
+their tool schemas. Inspect MCP discovery for the current schema instead
+of assuming every provider accepts the same fields.
 
 ## Configuration
 
-This server requires configuration through your MCP client. Here are
-examples for different environments:
+### Local stdio client
 
-### Cline Configuration
-
-Add this to your Cline MCP settings:
+Build the project, then configure any stdio-capable MCP client:
 
 ```json
 {
-	"mcpServers": {
-		"mcp-omnisearch": {
-			"command": "node",
-			"args": ["/path/to/mcp-omnisearch/dist/index.js"],
-			"env": {
-				"TAVILY_API_KEY": "your-tavily-key",
-				"BRAVE_API_KEY": "your-brave-key",
-				"GITHUB_API_KEY": "your-github-key",
-				"EXA_API_KEY": "your-exa-key",
-				"LINKUP_API_KEY": "your-linkup-key",
-				"FIRECRAWL_API_KEY": "your-firecrawl-key",
-				"FIRECRAWL_BASE_URL": "http://localhost:3002"
-			},
-			"disabled": false,
-			"autoApprove": []
-		}
-	}
+  "mcpServers": {
+    "mcp-omnisearch": {
+      "command": "node",
+      "args": ["/path/to/mcp-omnisearch/dist/index.js"],
+      "env": {
+        "TAVILY_API_KEY": "your-tavily-key",
+        "BRAVE_API_KEY": "your-brave-key",
+        "BRAVE_ANSWERS_API_KEY": "your-optional-brave-answers-key",
+        "GITHUB_API_KEY": "your-github-key",
+        "EXA_API_KEY": "your-exa-key",
+        "LINKUP_API_KEY": "your-linkup-key",
+        "FIRECRAWL_API_KEY": "your-firecrawl-key",
+        "CONTEXT_DEV_API_KEY": "your-context-dev-key"
+      }
+    }
+  }
 }
 ```
 
-### Claude Desktop with WSL Configuration
+Only add keys for providers you intend to use. Keep credentials out of
+source control.
 
-For WSL environments, add this to your Claude Desktop configuration:
+### Environment variables
 
-```json
-{
-	"mcpServers": {
-		"mcp-omnisearch": {
-			"command": "wsl.exe",
-			"args": [
-				"bash",
-				"-c",
-				"TAVILY_API_KEY=key1 BRAVE_API_KEY=key2 GITHUB_API_KEY=key3 EXA_API_KEY=key4 LINKUP_API_KEY=key5 FIRECRAWL_API_KEY=key6 FIRECRAWL_BASE_URL=http://localhost:3002 node /path/to/mcp-omnisearch/dist/index.js"
-			]
-		}
-	}
-}
-```
+| Variable | Capability |
+| --- | --- |
+| `TAVILY_API_KEY` | Tavily search, extraction, and research |
+| `BRAVE_API_KEY` | Brave web, news, media, LLM context, and Answers fallback |
+| `BRAVE_ANSWERS_API_KEY` | Optional separate Brave Answers credential |
+| `GITHUB_API_KEY` | GitHub code, repository, and user search |
+| `EXA_API_KEY` | Exa search, answers, deep research, contents, and similar pages |
+| `LINKUP_API_KEY` | Linkup sourced answers |
+| `FIRECRAWL_API_KEY` | Firecrawl processing, search, and agent tools |
+| `FIRECRAWL_BASE_URL` | Optional self-hosted Firecrawl base URL |
+| `FIRECRAWL_AGENT_URL` | Optional Firecrawl Agent endpoint override |
+| `CONTEXT_DEV_API_KEY` | Context.dev web and business-intelligence tools |
+| `OMNISEARCH_RESULT_DIR` | Private result-store directory |
+| `OMNISEARCH_RESULT_TTL_MS` | Result retention, default 24 hours and maximum 7 days |
+| `OMNISEARCH_RESULT_MAX_BYTES` | Per-result limit, default 25 MiB |
+| `OMNISEARCH_RESULT_STORE_MAX_BYTES` | Total quota, default 256 MiB with oldest-first eviction |
 
-### Environment Variables
+The result directory is created with mode `0700`; stored results use mode
+`0600`. `result_read` returns at most 500 lines per request.
 
-The server uses API keys for each provider. **You don't need keys for
-all providers** - only the providers corresponding to your available
-API keys will be activated:
+### GitHub token
 
-- `TAVILY_API_KEY`: Tavily search, extraction, and research
-- `BRAVE_API_KEY`: Brave web, news, media, and LLM context
-- `BRAVE_ANSWERS_API_KEY`: Optional separate Brave Answers credential
-- `GITHUB_API_KEY`: GitHub code, repository, and user search
-- `EXA_API_KEY`: Exa search, answers, deep research, contents, and
-  similar
-- `LINKUP_API_KEY`: Linkup sourced answers
-- `CONTEXT_DEV_API_KEY`: Context.dev web, brand, styleguide,
-  classification, and transaction tools
-- `FIRECRAWL_API_KEY`: Firecrawl scrape, summarize, crawl, map,
-  extract, actions, search, and agent tools
-- `FIRECRAWL_BASE_URL`: Optional self-hosted Firecrawl base URL
-- `FIRECRAWL_AGENT_URL`: Optional Firecrawl agent endpoint override
-- `OMNISEARCH_RESULT_TTL_MS`: Oversized-result retention in
-  milliseconds (default: 24 hours, maximum: 7 days)
-- `OMNISEARCH_RESULT_MAX_BYTES`: Maximum bytes for one stored result
-  (default: 25 MiB)
-- `OMNISEARCH_RESULT_STORE_MAX_BYTES`: Total result-store quota
-  (default: 256 MiB; oldest results are evicted first)
+For public GitHub search, use a token limited to public repository access.
+Do not grant private-repository scopes unless that access is deliberately
+required by your deployment.
 
-You can start with just one or two API keys and add more later as
-needed. The server will log which providers are available on startup.
+### Self-hosted Firecrawl
 
-### GitHub API Key Setup
+Set `FIRECRAWL_BASE_URL` to a Firecrawl instance exposing the expected v2
+endpoints. A `FIRECRAWL_API_KEY` is still required. Use
+`FIRECRAWL_AGENT_URL` only when the Agent endpoint differs from the base
+URL.
 
-To use GitHub search features, you'll need a GitHub personal access
-token with **public repository access only** for security:
+## Transport and deployment
 
-1. **Go to GitHub Settings**: Navigate to
-   [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
+### Stdio
 
-2. **Create a new token**: Click "Generate new token" → "Generate new
-   token (classic)"
-
-3. **Configure token settings**:
-   - **Name**: `MCP Omnisearch - Public Search`
-   - **Expiration**: Choose your preferred expiration (90 days
-     recommended)
-   - **Scopes**: **Leave all checkboxes UNCHECKED**
-
-     ⚠️ **Important**: Do not select any scopes. An empty scope token
-     can only access public repositories and user profiles, which is
-     exactly what we want for search functionality.
-
-4. **Generate and copy**: Click "Generate token" and copy the token
-   immediately
-
-5. **Add to environment**: Set `GITHUB_API_KEY=your_token_here`
-
-**Security Notes**:
-
-- This token configuration ensures no access to private repositories
-- Only public code search, repository discovery, and user profiles are
-  accessible
-- Rate limits: 5,000 requests/hour for code search, 10 requests/minute
-  for code search specifically
-- You can revoke the token anytime from GitHub settings if needed
-
-### Self-Hosted Firecrawl Configuration
-
-If you're running a self-hosted instance of Firecrawl, you can
-configure MCP Omnisearch to use it by setting the `FIRECRAWL_BASE_URL`
-environment variable. This allows you to maintain complete control
-over your data processing pipeline.
-
-**Self-hosted Firecrawl setup:**
-
-1. Follow the
-   [Firecrawl self-hosting guide](https://docs.firecrawl.dev/contributing/self-host)
-2. Set up your Firecrawl instance (default runs on
-   `http://localhost:3002`)
-3. Configure MCP Omnisearch with your self-hosted URL:
+The core server runs over stdio:
 
 ```bash
-FIRECRAWL_BASE_URL=http://localhost:3002
-# or for a remote self-hosted instance:
-FIRECRAWL_BASE_URL=https://your-firecrawl-domain.com
+corepack pnpm install --frozen-lockfile
+corepack pnpm run build
+node dist/index.js
 ```
 
-**Important notes:**
+### Hardened MCP HTTP deployment
 
-- If `FIRECRAWL_BASE_URL` is not set, MCP Omnisearch will default to
-  the Firecrawl cloud service
-- Self-hosted instances should expose the Firecrawl v2 endpoints
-  (`/v2/scrape`, `/v2/crawl`, and related routes)
-- You'll still need a `FIRECRAWL_API_KEY` even for self-hosted
-  instances
-- Self-hosted Firecrawl provides enhanced security and customization
-  options
+This fork includes a production deployment path:
 
-## API
-
-The server exposes 4 consolidated MCP tools. Each tool dispatches to
-the provider you select:
-
-### web_search
-
-Search the web for information.
-
-```json
-{
-	"query": "latest developments in quantum computing",
-	"provider": "tavily"
-}
+```text
+client -> HTTP guard -> mcp-proxy@6.7.3 -> stdio server
 ```
 
-```json
-{
-	"query": "rust programming language features site:github.com",
-	"provider": "brave",
-	"limit": 15
-}
-```
+It supports modern MCP `2026-07-28` and stateless legacy MCP
+`2025-11-25` on `POST /mcp`. `GET /ping` is the only health route. The
+legacy `/sse` route is intentionally retired.
 
-```json
-{
-	"query": "latest AI research papers",
-	"provider": "exa",
-	"include_domains": ["arxiv.org", "scholar.google.com"]
-}
-```
+Authentication remains in `mcp-proxy`; the guard enforces network and
+protocol boundaries without inspecting the API key. See:
 
-### ai_search
+- [Production deployment](docs/deployment.md)
+- [MCP 2026-07-28 architecture decision](docs/architecture-decision-mcp-2026-07-28.md)
+- [Provider synchronization matrix](docs/provider-synchronization.md)
 
-Get AI-powered answers with citations.
+The checked-in production runbook documents this fork's deployed topology.
+Adapt hosts, ports, process management, and credentials for your own
+environment.
 
-```json
-{
-	"query": "Explain the differences between REST and GraphQL",
-	"provider": "exa_answer"
-}
-```
+### Docker and OpenAPI
 
-```json
-{
-	"query": "How does machine learning work?",
-	"provider": "brave_answers"
-}
-```
-
-```json
-{
-	"query": "What are the latest advances in quantum computing?",
-	"provider": "linkup"
-}
-```
-
-### github_search
-
-Search GitHub for code, repositories, or users.
-
-```json
-{
-	"query": "filename:remote.ts @sveltejs/kit",
-	"search_type": "code",
-	"limit": 5
-}
-```
-
-```json
-{
-	"query": "sveltekit remote functions",
-	"search_type": "repositories",
-	"sort": "stars"
-}
-```
-
-```json
-{
-	"query": "Rich-Harris",
-	"search_type": "users",
-	"limit": 3
-}
-```
-
-### web_extract
-
-Extract, process, or summarize web content from URLs.
-
-```json
-{
-	"url": "https://example.com/long-article",
-	"provider": "firecrawl",
-	"mode": "summarize"
-}
-```
-
-```json
-{
-	"url": [
-		"https://example.com/article1",
-		"https://example.com/article2"
-	],
-	"provider": "tavily"
-}
-```
-
-```json
-{
-	"url": "https://example.com",
-	"provider": "firecrawl",
-	"mode": "crawl",
-	"extract_depth": "advanced"
-}
-```
-
-```json
-{
-	"url": "https://arxiv.org/abs/2106.09685",
-	"provider": "exa",
-	"mode": "similar"
-}
-```
-
-## Docker Deployment
-
-MCP Omnisearch supports containerized deployment using Docker with
-MCPO (Model Context Protocol Over HTTP) integration, enabling cloud
-deployment and OpenAPI access.
-
-### Hardened HTTP deployment (this fork)
-
-This fork serves MCP protocol revisions `2026-07-28` (modern) and
-`2025-11-25` (stateless legacy) over HTTP through a project-local
-pinned `mcp-proxy` fronted by a narrow security guard that enforces
-Host/Origin allowlists, route limiting, a 4 MB body bound, and the
-`MCP-Protocol-Version` header rule. See
-[docs/deployment.md](docs/deployment.md) for the topology,
-configuration, verification commands, and rollback procedure, and
-[docs/architecture-decision-mcp-2026-07-28.md](docs/architecture-decision-mcp-2026-07-28.md)
-for the decision record and staging evidence.
-
-### Quick Start with Docker
-
-1. **Using Docker Compose (Recommended)**:
+The Docker image uses MCPO to expose the stdio server as HTTP/OpenAPI for
+clients such as OpenWebUI:
 
 ```bash
-# Clone the repository
-git clone https://github.com/spences10/mcp-omnisearch.git
+git clone https://github.com/keiranhaax/mcp-omnisearch.git
 cd mcp-omnisearch
-
-# Create .env file with your API keys
-echo "TAVILY_API_KEY=your-tavily-key" > .env
-echo "BRAVE_API_KEY=your-brave-key" >> .env
-echo "EXA_API_KEY=your-exa-key" >> .env
-echo "GITHUB_API_KEY=your-github-key" >> .env
-# Add other API keys as needed
-echo "LINKUP_API_KEY=your-linkup-key" >> .env
-echo "FIRECRAWL_API_KEY=your-firecrawl-key" >> .env
-
-# Start the container
-docker-compose up -d
+cp .env.example .env 2>/dev/null || touch .env
+# Add only the provider keys you need to .env
+docker compose up -d --build
 ```
 
-2. **Using Docker directly**:
+The default container port is `8000`, and the generated MCPO route is
+`/omnisearch`. This Docker/MCPO path is separate from the hardened native
+`/mcp` deployment described above.
 
-```bash
-docker build -t mcp-omnisearch .
-docker run -d \
-  -p 8000:8000 \
-  -e TAVILY_API_KEY=your-tavily-key \
-  -e BRAVE_API_KEY=your-brave-key \
-  -e EXA_API_KEY=your-exa-key \
-  -e GITHUB_API_KEY=your-github-key \
-  -e LINKUP_API_KEY=your-linkup-key \
-  -e FIRECRAWL_API_KEY=your-firecrawl-key \
-  --name mcp-omnisearch \
-  mcp-omnisearch
+## Examples
+
+### Brave operator search
+
+```json
+{
+  "query": "filetype:pdf site:microsoft.com +typescript -javascript",
+  "provider": "brave",
+  "limit": 10
+}
 ```
 
-### Container Environment Variables
+### Exa deep research
 
-Configure the container using environment variables for each provider:
+```json
+{
+  "query": "Compare current MCP transport security guidance",
+  "provider": "exa_deep_research",
+  "exa_deep_search_type": "deep-reasoning"
+}
+```
 
-- `TAVILY_API_KEY`: Tavily search, extraction, and research
-- `BRAVE_API_KEY`: Brave search, news, media, and context
-- `BRAVE_ANSWERS_API_KEY`: Optional separate Brave Answers credential
-- `GITHUB_API_KEY`: GitHub search
-- `EXA_API_KEY`: Exa search, answers, and content APIs
-- `LINKUP_API_KEY`: Linkup sourced answers
-- `CONTEXT_DEV_API_KEY`: Context.dev tools
-- `FIRECRAWL_API_KEY`: Firecrawl processing and agent APIs
-- `FIRECRAWL_BASE_URL`: Optional self-hosted Firecrawl URL
-- `FIRECRAWL_AGENT_URL`: Optional agent endpoint override
-- `PORT`: Container port (defaults to 8000)
+### Firecrawl search
 
-### OpenAPI Access
+```json
+{
+  "provider": "firecrawl",
+  "mode": "search",
+  "query": "Model Context Protocol security",
+  "firecrawl_search_options": {
+    "sources": ["web", "news"],
+    "limit": 10
+  }
+}
+```
 
-Once deployed, the MCP server is accessible via OpenAPI at:
+### Read an oversized result
 
-- **Base URL**: `http://your-container-host:8000`
-- **OpenAPI Endpoint**: `/omnisearch`
-- **Compatible with**: OpenWebUI and other tools expecting OpenAPI
-
-### Cloud Deployment
-
-The containerized version can be deployed to any container platform
-that supports Docker:
-
-- Cloud Run (Google Cloud)
-- Container Instances (Azure)
-- ECS/Fargate (AWS)
-- Railway, Render, Fly.io
-- Any Kubernetes cluster
-
-Example deployment to a cloud platform:
-
-```bash
-# Build and tag for your registry
-docker build -t your-registry/mcp-omnisearch:latest .
-docker push your-registry/mcp-omnisearch:latest
-
-# Deploy with your platform's CLI or web interface
-# Configure environment variables through your platform's settings
+```json
+{
+  "result_id": "opaque-id-returned-by-another-tool",
+  "offset": 1,
+  "limit": 200
+}
 ```
 
 ## Development
 
-### Setup
-
-1. Clone the repository
-2. Install dependencies:
+Requires Node.js 22 or newer and the repository-pinned pnpm release.
 
 ```bash
-pnpm install
+corepack enable
+corepack pnpm install --frozen-lockfile
+corepack pnpm run check
+corepack pnpm test
+corepack pnpm run build
 ```
 
-3. Build the project:
+Use an isolated branch or worktree for non-trivial changes. Do not use a
+live deployment checkout as a scratch workspace.
 
-```bash
-pnpm run build
-```
+## Fork scope and upstream relationship
 
-4. Run in development mode:
+This is a maintained customization, not a drop-in mirror of upstream.
+Notable differences include:
 
-```bash
-pnpm run dev
-```
+- Kagi and You.com integrations are removed.
+- Brave, Firecrawl, Exa, and Context.dev capabilities are expanded.
+- Result delivery uses private authenticated pagination rather than
+  exposing local filesystem paths to remote clients.
+- The fork retains its own provider dispatch, runtime-health model,
+  validation, and deployment architecture.
+- Upstream changes are reviewed and selectively ported instead of merged
+  blindly when they conflict with the fork's contracts or production
+  safeguards.
 
-### Publishing
-
-1. Update version in package.json
-2. Build the project:
-
-```bash
-pnpm run build
-```
-
-3. Publish to npm:
-
-```bash
-pnpm publish
-```
-
-## Troubleshooting
-
-### API Keys and Access
-
-Each provider requires its own API key and may have different access
-requirements:
-
-- **Tavily**: Requires an API key from their developer portal
-- **Brave**: API key from their developer portal
-- **GitHub**: Personal access token with **no scopes selected**
-  (public access only)
-- **Exa AI**: API key from their dashboard at
-  [dashboard.exa.ai](https://dashboard.exa.ai)
-- **Linkup**: API key from their developer portal
-- **Firecrawl**: API key required from their developer portal
-
-### Rate Limits
-
-Each provider has its own rate limits. The server will handle rate
-limit errors gracefully and return appropriate error messages.
+The original project and authorship remain credited to
+[Scott Spence's mcp-omnisearch](https://github.com/spences10/mcp-omnisearch).
+See the repository's fork relationship and Git history for provenance.
 
 ## Contributing
 
-Please read CONTRIBUTING.md before opening a PR. In short:
-
-- Start by opening an issue to propose your change and align scope.
-- Prefer small, focused PRs with a clear explanation (problem →
-  approach → verification).
-- Follow provider conventions: use `src/common/http.ts` (`http_json`)
-  for HTTP, read keys from `src/config/env.ts`, respect timeouts, and
-  surface errors via `ProviderError`.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Keep changes focused, preserve public MCP contracts unless a breaking
+change is intentional, and include verification for provider, schema,
+transport, or deployment changes.
 
 ## License
 
-MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License. See [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-Built on:
+This customized fork builds on the original
+[mcp-omnisearch](https://github.com/spences10/mcp-omnisearch) and the
+services provided by:
 
 - [Model Context Protocol](https://github.com/modelcontextprotocol)
-- [Tavily Search](https://tavily.com)
+- [Tavily](https://tavily.com)
 - [Brave Search](https://search.brave.com)
-- [Exa AI](https://exa.ai)
+- [Exa](https://exa.ai)
+- [GitHub](https://github.com)
 - [Linkup](https://linkup.so)
 - [Firecrawl](https://firecrawl.dev)
+- [Context.dev](https://context.dev)
