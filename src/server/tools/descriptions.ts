@@ -1,10 +1,10 @@
 export const tool_descriptions = {
 	web_search:
-		'Search: find web pages, articles, or data. Use Brave for operators, Exa for semantic or deep search, Tavily for factual results, and You for LLM-ready snippets.',
+		'Search: find web pages, articles, or data. Use Brave for operators, Exa for semantic or deep search, and Tavily for factual results.',
 	github_search:
 		'Search GitHub: find code, repositories, or users. Supports filename:, path:, repo:, user:, language:, and in:file syntax.',
 	ai_search:
-		'Answer/Research: get synthesized answers with citations. Use Exa for fast or deep research, Brave Answers as fallback, and Tavily/You only when needed.',
+		'Answer/Research: get synthesized answers with citations. Use Exa for fast or deep research, Brave Answers as fallback, Tavily for research, and Linkup for sourced answers.',
 	web_extract:
 		'Extract/Process: read or process known URLs. Firecrawl handles scrape/summarize/crawl/map/extract/actions/search; Exa handles contents/similar; Tavily extracts.',
 	brave_llm_context:

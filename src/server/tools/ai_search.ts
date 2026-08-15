@@ -22,15 +22,13 @@ import { ExaDeepResearchProvider } from '../../providers/ai_response/exa_deep_re
 import { LinkupProvider } from '../../providers/ai_response/linkup/index.js';
 import { BraveAnswersProvider } from '../../providers/ai_response/brave_answers/index.js';
 import { TavilyResearchProvider } from '../../providers/ai_response/tavily_research/index.js';
-import { YouResearchProvider } from '../../providers/ai_response/you_research/index.js';
 
 export type AISearchProviderName =
 	| 'exa_answer'
 	| 'exa_deep_research'
 	| 'linkup'
 	| 'brave_answers'
-	| 'tavily_research'
-	| 'you_research';
+	| 'tavily_research';
 
 const providers = new Map<string, SearchProvider>();
 
@@ -66,13 +64,6 @@ export const initialize_ai_search = (): boolean => {
 		)
 	)
 		providers.set('tavily_research', new TavilyResearchProvider());
-	if (
-		is_api_key_valid(
-			config.ai_response.you_research.api_key,
-			'you_research',
-		)
-	)
-		providers.set('you_research', new YouResearchProvider());
 
 	return providers.size > 0;
 };
@@ -119,14 +110,6 @@ export const register_ai_search = (
 						v.description('Maximum number of results (default: 10)'),
 					),
 				),
-				you_research_effort: v.optional(
-					v.pipe(
-						v.picklist(['lite', 'standard', 'deep', 'exhaustive']),
-						v.description(
-							'You.com research effort level. Only used when provider is you_research.',
-						),
-					),
-				),
 				output_schema: v.optional(
 					v.pipe(
 						v.record(v.string(), v.any()),
@@ -158,7 +141,6 @@ export const register_ai_search = (
 			query,
 			provider,
 			limit,
-			you_research_effort,
 			output_schema,
 			exa_deep_search_type,
 			system_prompt,
@@ -176,7 +158,6 @@ export const register_ai_search = (
 				const results = await selected.search({
 					query,
 					limit,
-					you_research_effort,
 					output_schema,
 					search_type: exa_deep_search_type,
 					system_prompt,

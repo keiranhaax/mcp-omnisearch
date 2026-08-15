@@ -78,12 +78,12 @@ describe('create_error_response', () => {
 		const entitlement_error = new ProviderError(
 			ErrorType.ENTITLEMENT_REQUIRED,
 			'API key does not have access to this endpoint',
-			'you',
-			{ url: 'https://api.ydc-index.io/v1/agents/search' },
+			'test_provider',
+			{ url: 'https://api.example.com/v1/search' },
 		);
 		expect(create_error_response(entitlement_error)).toEqual({
 			error:
-				'you error [ENTITLEMENT_REQUIRED]: API key does not have access to this endpoint (endpoint: https://api.ydc-index.io/v1/agents/search) Verify API key plan/entitlement for this endpoint.',
+				'test_provider error [ENTITLEMENT_REQUIRED]: API key does not have access to this endpoint (endpoint: https://api.example.com/v1/search) Verify API key plan/entitlement for this endpoint.',
 		});
 
 		const endpoint_error = new ProviderError(

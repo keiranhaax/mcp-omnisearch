@@ -185,16 +185,16 @@ describe('setup_handlers', () => {
 
 	it('reports degraded status when a provider has runtime failures', async () => {
 		reset_available_providers();
-		available_providers.search.add('you');
-		register_provider('search', 'you');
+		available_providers.search.add('test_provider');
+		register_provider('search', 'test_provider');
 		mark_provider_error(
 			'search',
-			'you',
+			'test_provider',
 			new ProviderError(
 				ErrorType.ENTITLEMENT_REQUIRED,
 				'API key does not have access to this endpoint',
-				'you',
-				{ url: 'https://api.ydc-index.io/v1/agents/search' },
+				'test_provider',
+				{ url: 'https://api.example.com/v1/search' },
 			),
 		);
 
@@ -210,11 +210,12 @@ describe('setup_handlers', () => {
 		expect(status_body.status).toBe('degraded');
 		expect(status_body.health_summary.degraded).toBe(1);
 		expect(
-			status_body.provider_health.search.you.last_runtime_status,
+			status_body.provider_health.search.test_provider
+				.last_runtime_status,
 		).toBe('entitlement_required');
-		expect(status_body.provider_health.search.you.active_error).toBe(
-			true,
-		);
+		expect(
+			status_body.provider_health.search.test_provider.active_error,
+		).toBe(true);
 	});
 
 	it('does not count stale errors after a newer provider success', async () => {

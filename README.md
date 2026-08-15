@@ -5,9 +5,9 @@
 
 A Model Context Protocol (MCP) server that provides unified access to
 multiple search providers and AI tools. This server combines the
-capabilities of Tavily, Brave, Exa AI, GitHub, Linkup, You.com,
-Firecrawl, and Context.dev through consolidated search/extraction
-tools plus focused provider-specific tools.
+capabilities of Tavily, Brave, Exa AI, GitHub, Linkup, Firecrawl, and
+Context.dev through consolidated search/extraction tools plus focused
+provider-specific tools.
 
 <a href="https://glama.ai/mcp/servers/gz5wgmptd8">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/gz5wgmptd8/badge" alt="Glama badge" />
@@ -18,13 +18,12 @@ tools plus focused provider-specific tools.
 ### 🔍 `web_search` — Web Search
 
 Search the web for information. Providers: tavily (factual/citations),
-brave (privacy/operators), exa (AI-semantic), you (LLM-ready
-snippets).
+brave (privacy/operators), and exa (AI-semantic).
 
 Parameters:
 
 - `query` (string, required): Search query
-- `provider` (string, required): `tavily`, `brave`, `exa`, or `you`
+- `provider` (string, required): `tavily`, `brave`, or `exa`
 - `limit` (number, optional): Maximum number of results (default: 10)
 - `include_domains` (array, optional): Only return results from these
   domains
@@ -35,14 +34,14 @@ Parameters:
 
 Get AI-powered answers with citations and reasoning. Providers:
 exa_answer (semantic AI), exa_deep_research (deep research),
-brave_answers, tavily_research, you_research, and linkup (deep agentic
-search with sources).
+brave_answers, tavily_research, and linkup (deep agentic search with
+sources).
 
 Parameters:
 
 - `query` (string, required): Question or search query
 - `provider` (string, required): `exa_answer`, `exa_deep_research`,
-  `brave_answers`, `tavily_research`, `you_research`, or `linkup`
+  `brave_answers`, `tavily_research`, or `linkup`
 - `limit` (number, optional): Maximum number of results (default: 10)
 
 ### 🔎 `github_search` — GitHub Search
@@ -230,7 +229,6 @@ API keys will be activated:
 - `EXA_API_KEY`: Exa search, answers, deep research, contents, and
   similar
 - `LINKUP_API_KEY`: Linkup sourced answers
-- `YOU_API_KEY`: You.com search and research
 - `CONTEXT_DEV_API_KEY`: Context.dev web, brand, styleguide,
   classification, and transaction tools
 - `FIRECRAWL_API_KEY`: Firecrawl scrape, summarize, crawl, map,
@@ -504,7 +502,6 @@ Configure the container using environment variables for each provider:
 - `GITHUB_API_KEY`: GitHub search
 - `EXA_API_KEY`: Exa search, answers, and content APIs
 - `LINKUP_API_KEY`: Linkup sourced answers
-- `YOU_API_KEY`: You.com search and research
 - `CONTEXT_DEV_API_KEY`: Context.dev tools
 - `FIRECRAWL_API_KEY`: Firecrawl processing and agent APIs
 - `FIRECRAWL_BASE_URL`: Optional self-hosted Firecrawl URL

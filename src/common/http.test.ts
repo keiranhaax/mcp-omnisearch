@@ -171,10 +171,10 @@ describe('http_json', () => {
 		);
 
 		await expect(
-			http_json('you', 'https://api.example.com'),
+			http_json('test_provider', 'https://api.example.com'),
 		).rejects.toMatchObject({
 			type: ErrorType.ENTITLEMENT_REQUIRED,
-			provider: 'you',
+			provider: 'test_provider',
 			message: 'API key does not have access to this endpoint',
 		});
 	});

@@ -34,6 +34,10 @@ their tests is classified below. Dependency, package-manager,
 version-bump, editor, and CI-only commits are handled separately after
 the matrix.
 
+This matrix records the provider surface at the synchronization audit.
+The fork-only You search and You Research capabilities present then
+were later retired and are not part of the current provider surface.
+
 | Upstream change                                                                     | Classification         | Local evidence and decision                                                                                                                                                                                                                                                                |
 | ----------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Configurable large-result offload (`8678ebdd5bad07687852d00b38d3bfbccb1776d7`)      | conflicting            | The fork uses authenticated pagination plus a private, bounded, expiring result store. Preserve that remote contract rather than add upstream's global inline/file mode.                                                                                                                   |
@@ -73,15 +77,16 @@ baseline.
 The three pinned validation diffs were checked provider by provider:
 
 - `21e97fc1c5a13d94826cc9a09fc2375c5cc1305a`: Brave, Exa, and Tavily
-  are runtime-validated locally. Kagi is removed. You search is a
-  fork-only provider added before this sync and is absent from the
-  pinned upstream diff, so adding a new You schema is intentionally
-  outside this narrow port.
+  are runtime-validated locally. Kagi is removed. At the audit, You
+  search was a fork-only provider absent from the pinned upstream
+  diff, so adding a new schema was outside that narrow port; the
+  capability was later retired.
 - `67a01d54b72d02e6acecd1cd7d57b2fc48186700`: Exa Answer, Linkup, and
   GitHub code/repository/user responses are runtime-validated locally.
   Kagi FastGPT is removed. Fork-only Brave Answers, Exa Deep Research,
-  Tavily Research, and You Research are absent from the pinned diff
-  and are not broadened in this task.
+  Tavily Research, and (at the audit) You Research are absent from the
+  pinned diff and were not broadened in that task. You Research was
+  later retired.
 - `4ea9d2211bb4493a584433dde8c79aebde6c8848`: Exa Contents, Exa
   Similar, and Tavily Extract use provider-specific runtime schemas.
   Firecrawl Actions, Crawl, Extract, Map, and Scrape use explicit

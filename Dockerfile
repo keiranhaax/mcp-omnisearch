@@ -30,7 +30,6 @@ RUN printf '%s\n' \
     '        "GITHUB_API_KEY": "${GITHUB_API_KEY}",' \
     '        "EXA_API_KEY": "${EXA_API_KEY}",' \
     '        "LINKUP_API_KEY": "${LINKUP_API_KEY}",' \
-    '        "YOU_API_KEY": "${YOU_API_KEY}",' \
     '        "CONTEXT_DEV_API_KEY": "${CONTEXT_DEV_API_KEY}",' \
     '        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",' \
     '        "FIRECRAWL_BASE_URL": "${FIRECRAWL_BASE_URL}",' \

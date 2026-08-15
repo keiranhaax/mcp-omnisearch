@@ -8,7 +8,6 @@ export const BRAVE_ANSWERS_API_KEY =
 export const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 export const EXA_API_KEY = process.env.EXA_API_KEY;
 export const LINKUP_API_KEY = process.env.LINKUP_API_KEY;
-export const YOU_API_KEY = process.env.YOU_API_KEY;
 export const CONTEXT_DEV_API_KEY = process.env.CONTEXT_DEV_API_KEY;
 
 // Content processing API keys
@@ -38,11 +37,6 @@ export const config = {
 			api_key: EXA_API_KEY,
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
-		},
-		you: {
-			api_key: YOU_API_KEY,
-			base_url: 'https://api.ydc-index.io',
-			timeout: 15000,
 		},
 		context_dev: {
 			api_key: CONTEXT_DEV_API_KEY,
@@ -86,11 +80,6 @@ export const config = {
 			api_key: TAVILY_API_KEY,
 			base_url: 'https://api.tavily.com',
 			timeout: 120000, // 2 minutes for deep research
-		},
-		you_research: {
-			api_key: YOU_API_KEY,
-			base_url: 'https://api.ydc-index.io/v1/agents/research',
-			timeout: 120000,
 		},
 	},
 	processing: {
@@ -190,9 +179,6 @@ export const validate_config = () => {
 
 	if (!LINKUP_API_KEY) missing_keys.push('LINKUP_API_KEY');
 	else available_keys.push('LINKUP_API_KEY');
-
-	if (!YOU_API_KEY) missing_keys.push('YOU_API_KEY');
-	else available_keys.push('YOU_API_KEY');
 
 	if (!CONTEXT_DEV_API_KEY) missing_keys.push('CONTEXT_DEV_API_KEY');
 	else available_keys.push('CONTEXT_DEV_API_KEY');
