@@ -57,8 +57,11 @@ stdio server, and signals propagate down the chain.
 - `#2589` guard: a modern envelope without `MCP-Protocol-Version` gets
   400 with JSON-RPC `-32020`; legacy no-envelope requests pass.
 - Authentication stays with the proxy (constant-time `X-API-Key`
-  comparison). The guard never receives the key. Caddy translates
-  `Authorization: Bearer` to `X-API-Key` and redacts both from logs.
+  comparison). The guard never inspects the key at request time; it
+  hands `MCP_API_KEY` to the spawned proxy as `MCP_PROXY_API_KEY` in
+  the child environment, keeping it out of `/proc/*/cmdline`. Caddy
+  translates `Authorization: Bearer` to `X-API-Key` and redacts both
+  from logs.
 
 ## Ingress paths
 

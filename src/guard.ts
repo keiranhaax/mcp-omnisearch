@@ -88,8 +88,6 @@ const child: ChildProcess = spawn(
 		upstream_host,
 		'--port',
 		String(upstream_port),
-		'--apiKey',
-		api_key,
 		'--stateless',
 		'--server',
 		'stream',
@@ -100,7 +98,12 @@ const child: ChildProcess = spawn(
 		process.execPath,
 		server_entry,
 	],
-	{ stdio: ['ignore', 'inherit', 'inherit'], env: process.env },
+	{
+		stdio: ['ignore', 'inherit', 'inherit'],
+		// The key travels via yargs' env prefix (MCP_PROXY_API_KEY ->
+		// --apiKey) so it never appears in /proc/*/cmdline listings.
+		env: { ...process.env, MCP_PROXY_API_KEY: api_key },
+	},
 );
 
 const wait_for_upstream = (
