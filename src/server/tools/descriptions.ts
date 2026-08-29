@@ -1,6 +1,6 @@
 export const tool_descriptions = {
 	web_search:
-		'Search: find web pages, articles, or data. Use Brave for operators, Exa for semantic or deep search, and Tavily for factual results.',
+		'Search: find web pages, articles, or data. Use Brave for operators, Exa for semantic or deep search, Tavily for factual results, and You.com as a fast fallback.',
 	github_search:
 		'Search GitHub: find code, repositories, or users. Supports filename:, path:, repo:, user:, language:, and in:file syntax.',
 	ai_search:

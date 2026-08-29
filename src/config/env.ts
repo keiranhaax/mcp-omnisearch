@@ -7,6 +7,7 @@ export const BRAVE_ANSWERS_API_KEY =
 	process.env.BRAVE_ANSWERS_API_KEY;
 export const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 export const EXA_API_KEY = process.env.EXA_API_KEY;
+export const YOU_API_KEY = process.env.YOU_API_KEY;
 export const LINKUP_API_KEY = process.env.LINKUP_API_KEY;
 export const CONTEXT_DEV_API_KEY = process.env.CONTEXT_DEV_API_KEY;
 
@@ -37,6 +38,11 @@ export const config = {
 			api_key: EXA_API_KEY,
 			base_url: 'https://api.exa.ai',
 			timeout: 30000, // 30 seconds
+		},
+		you: {
+			api_key: YOU_API_KEY,
+			base_url: 'https://api.you.com',
+			timeout: 10000, // 10 seconds
 		},
 		context_dev: {
 			api_key: CONTEXT_DEV_API_KEY,

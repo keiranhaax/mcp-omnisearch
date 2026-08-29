@@ -29,7 +29,7 @@ const routing_contracts = [
 	{ name: 'context_transaction_identify', words: ['Transactions'] },
 ] as const;
 
-const search_keys = ['tavily', 'brave', 'exa'] as const;
+const search_keys = ['tavily', 'brave', 'exa', 'you'] as const;
 const original_search_keys = Object.fromEntries(
 	search_keys.map((provider) => [
 		provider,
@@ -111,7 +111,7 @@ describe('Omnisearch tool descriptions', () => {
 });
 
 describe('Omnisearch public tool schemas', () => {
-	it('advertises configured non-You web search providers only', () => {
+	it('advertises configured web search providers only', () => {
 		for (const provider of search_keys) {
 			config.search[provider].api_key = `${provider}-contract-key`;
 		}
@@ -127,7 +127,7 @@ describe('Omnisearch public tool schemas', () => {
 		expect(
 			v.safeParse(schema, {
 				query: 'provider contract',
-				provider: 'you',
+				provider: 'nonexistent',
 			}).success,
 		).toBe(false);
 	});
