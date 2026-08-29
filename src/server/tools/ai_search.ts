@@ -14,7 +14,7 @@ import {
 	mark_provider_error,
 	mark_provider_success,
 } from '../provider_health.js';
-import { tool_descriptions } from './descriptions.js';
+import { describe_ai_search } from './descriptions.js';
 
 // Concrete provider imports
 import { ExaAnswerProvider } from '../../providers/ai_response/exa_answer/index.js';
@@ -83,7 +83,7 @@ export const register_ai_search = (
 	server.tool(
 		{
 			name: 'ai_search',
-			description: tool_descriptions.ai_search,
+			description: describe_ai_search(provider_names),
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,

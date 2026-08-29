@@ -4,7 +4,7 @@ export const tool_descriptions = {
 	github_search:
 		'Search GitHub: find code, repositories, or users. Supports filename:, path:, repo:, user:, language:, and in:file syntax.',
 	ai_search:
-		'Answer/Research: get synthesized answers with citations. Use Exa for fast or deep research, Brave Answers as fallback, Tavily for research, and Linkup for sourced answers.',
+		'Answer/Research: get synthesized answers with citations. Use Exa for fast or deep research, Brave Answers as fallback, and Tavily for research.',
 	web_extract:
 		'Extract/Process: read or process known URLs. Firecrawl handles scrape/summarize/crawl/map/extract/actions/search; Exa handles contents/similar; Tavily extracts.',
 	brave_llm_context:
@@ -28,3 +28,31 @@ export const tool_descriptions = {
 } as const;
 
 export type OmnisearchToolName = keyof typeof tool_descriptions;
+
+export const describe_ai_search = (
+	provider_names: string[],
+): string => {
+	const available = new Set(provider_names);
+	const hints: string[] = [];
+	if (
+		available.has('exa_answer') &&
+		available.has('exa_deep_research')
+	) {
+		hints.push('Exa for fast or deep research');
+	} else if (available.has('exa_answer')) {
+		hints.push('Exa for fast answers');
+	} else if (available.has('exa_deep_research')) {
+		hints.push('Exa for deep research');
+	}
+	if (available.has('brave_answers')) {
+		hints.push('Brave Answers as fallback');
+	}
+	if (available.has('tavily_research')) {
+		hints.push('Tavily for research');
+	}
+	if (available.has('linkup')) {
+		hints.push('Linkup for sourced answers');
+	}
+	const use = hints.length ? ` Use ${hints.join(', ')}.` : '';
+	return `Answer/Research: get synthesized answers with citations.${use}`;
+};
