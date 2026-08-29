@@ -19,6 +19,15 @@ const entitlement_pattern =
 const endpoint_missing_pattern =
 	/(cannot (get|post|put|patch|delete)\s+\/|endpoint not found|route not found|unknown endpoint)/i;
 
+export const safe_endpoint = (url: string): string => {
+	try {
+		const parsed = new URL(url);
+		return `${parsed.origin}${parsed.pathname}`;
+	} catch {
+		return url.split('?')[0];
+	}
+};
+
 export const http_json = async <T = any>(
 	provider: string,
 	url: string,
@@ -34,7 +43,7 @@ export const http_json = async <T = any>(
 			options.expectedStatuses.includes(res.status));
 
 	if (!okOrExpected) {
-		const message =
+		const raw_message =
 			(body &&
 				(body.message ||
 					body.detail ||
@@ -46,9 +55,13 @@ export const http_json = async <T = any>(
 						: undefined))) ||
 			raw ||
 			res.statusText;
+		const message =
+			typeof raw_message === 'string'
+				? raw_message
+				: JSON.stringify(raw_message);
 		const details = {
 			status: res.status,
-			url,
+			url: safe_endpoint(url),
 			method: (options.method || 'GET').toUpperCase(),
 			response: message,
 		};

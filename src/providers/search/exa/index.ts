@@ -36,15 +36,15 @@ const exa_search_response_schema = v.object({
 	results: v.optional(
 		v.array(
 			v.object({
-				id: v.optional(v.string()),
-				title: v.optional(v.string()),
-				url: v.optional(v.string()),
-				publishedDate: v.optional(v.string()),
-				author: v.optional(v.string()),
-				text: v.optional(v.string()),
-				score: v.optional(v.number()),
-				highlights: v.optional(v.array(v.string())),
-				summary: v.optional(v.string()),
+				id: v.nullish(v.string()),
+				title: v.nullish(v.string()),
+				url: v.nullish(v.string()),
+				publishedDate: v.nullish(v.string()),
+				author: v.nullish(v.string()),
+				text: v.nullish(v.string()),
+				score: v.nullish(v.number()),
+				highlights: v.nullish(v.array(v.string())),
+				summary: v.nullish(v.string()),
 			}),
 		),
 	),
@@ -55,7 +55,7 @@ const exa_search_response_schema = v.object({
 const build_contents = (params: BaseSearchParams) => {
 	return params.contents
 		? { ...params.contents }
-		: { text: { maxCharacters: 3000 } };
+		: { text: { maxCharacters: 1500 } };
 };
 
 const build_search_body = (
@@ -125,7 +125,7 @@ export class ExaSearchProvider implements SearchProvider {
 					url: result.url || '',
 					snippet:
 						result.text || result.summary || 'No content available',
-					score: result.score,
+					score: result.score ?? undefined,
 					source_provider: this.name,
 					metadata: {
 						id: result.id,

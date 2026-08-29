@@ -15,15 +15,16 @@ describe('retry_with_backoff', () => {
 		expect(fn).toHaveBeenCalledTimes(1);
 	});
 
-	it('retries transient errors with exponential backoff', async () => {
+	it('retries transient errors with jittered exponential backoff', async () => {
 		vi.useFakeTimers();
+		vi.spyOn(Math, 'random').mockReturnValue(1);
 		const fn = vi
 			.fn<() => Promise<string>>()
-			.mockRejectedValueOnce(new Error('first failure'))
+			.mockRejectedValueOnce(new TypeError('network failure'))
 			.mockRejectedValueOnce(
 				new ProviderError(
-					ErrorType.PROVIDER_ERROR,
-					'transient provider failure',
+					ErrorType.RATE_LIMIT,
+					'rate limited',
 					'test',
 				),
 			)
@@ -32,6 +33,7 @@ describe('retry_with_backoff', () => {
 		const promise = retry_with_backoff(fn, 3, 100);
 		const resolution = expect(promise).resolves.toBe('ok');
 		expect(fn).toHaveBeenCalledTimes(1);
+		// Jittered delay is in [0, 100]; advancing by the ceiling covers it
 		await vi.advanceTimersByTimeAsync(100);
 		expect(fn).toHaveBeenCalledTimes(2);
 		await vi.advanceTimersByTimeAsync(200);
@@ -41,7 +43,8 @@ describe('retry_with_backoff', () => {
 
 	it('rethrows the final retryable error after exhausting retries', async () => {
 		vi.useFakeTimers();
-		const error = new Error('still failing');
+		vi.spyOn(Math, 'random').mockReturnValue(1);
+		const error = new TypeError('still failing');
 		const fn = vi
 			.fn<() => Promise<string>>()
 			.mockRejectedValue(error);
@@ -54,6 +57,19 @@ describe('retry_with_backoff', () => {
 		await vi.advanceTimersByTimeAsync(100);
 		expect(fn).toHaveBeenCalledTimes(3);
 		await rejection;
+	});
+
+	it('does not retry generic errors or timeouts', async () => {
+		const timeout_error = new Error('operation timed out');
+		timeout_error.name = 'TimeoutError';
+		for (const error of [new Error('unknown'), timeout_error]) {
+			const fn = vi
+				.fn<() => Promise<string>>()
+				.mockRejectedValue(error);
+
+			await expect(retry_with_backoff(fn)).rejects.toBe(error);
+			expect(fn).toHaveBeenCalledTimes(1);
+		}
 	});
 
 	it('does not retry permanent provider errors', async () => {

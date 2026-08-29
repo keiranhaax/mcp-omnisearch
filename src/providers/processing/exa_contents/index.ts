@@ -28,16 +28,17 @@ const exa_contents_response_schema = v.object({
 	results: v.array(
 		v.object({
 			id: v.string(),
-			title: v.string(),
+			title: v.nullish(v.string()),
 			url: v.string(),
-			text: v.optional(v.string()),
-			highlights: v.optional(v.array(v.string())),
-			summary: v.optional(v.string()),
-			publishedDate: v.optional(v.string()),
-			author: v.optional(v.string()),
+			text: v.nullish(v.string()),
+			highlights: v.nullish(v.array(v.string())),
+			summary: v.nullish(v.string()),
+			publishedDate: v.nullish(v.string()),
+			author: v.nullish(v.string()),
 		}),
 	),
 	requestId: v.optional(v.string()),
+	costDollars: v.optional(v.unknown()),
 });
 
 export class ExaContentsProvider implements ProcessingProvider {
@@ -127,7 +128,7 @@ export class ExaContentsProvider implements ProcessingProvider {
 					total_word_count += word_count;
 
 					// Add to combined content
-					combined_content += `## ${result.title}\n\n`;
+					combined_content += `## ${result.title ?? result.url}\n\n`;
 					if (result.author) {
 						combined_content += `**Author:** ${result.author}\n`;
 					}

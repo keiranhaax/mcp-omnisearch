@@ -19,18 +19,18 @@ const exa_answer_response_schema = v.object({
 	citations: v.optional(
 		v.array(
 			v.object({
-				id: v.optional(v.string()),
-				title: v.optional(v.string()),
+				id: v.nullish(v.string()),
+				title: v.nullish(v.string()),
 				url: v.string(),
-				publishedDate: v.optional(v.string()),
-				text: v.optional(v.string()),
-				image: v.optional(v.string()),
-				favicon: v.optional(v.string()),
+				publishedDate: v.nullish(v.string()),
+				text: v.nullish(v.string()),
+				image: v.nullish(v.string()),
+				favicon: v.nullish(v.string()),
 			}),
 		),
 	),
 	requestId: v.string(),
-	costDollars: v.optional(v.number()),
+	costDollars: v.optional(v.unknown()),
 });
 
 export class ExaAnswerProvider implements SearchProvider {

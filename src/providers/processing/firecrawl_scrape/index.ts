@@ -32,6 +32,7 @@ export interface FirecrawlScrapeOptions {
 	formats?: FirecrawlScrapeFormat[];
 	question?: string;
 	highlights_query?: string;
+	wait_for_ms?: number;
 	lockdown?: boolean;
 	maxAge?: number;
 	minAge?: number;
@@ -110,8 +111,11 @@ const build_scrape_body = (
 		url,
 		formats: options.formats?.length ? options.formats : ['markdown'],
 		onlyMainContent: options.onlyMainContent ?? true,
-		waitFor: extract_depth === 'advanced' ? 5000 : 2000,
 	};
+
+	if (options.wait_for_ms !== undefined && options.wait_for_ms > 0) {
+		body.waitFor = Math.min(options.wait_for_ms, 15000);
+	}
 
 	if (options.question) {
 		body.formats = [{ type: 'question', question: options.question }];
@@ -171,71 +175,89 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 			);
 
 			try {
-				const results: ProcessedUrlResult[] = await Promise.all(
-					urls.map(async (single_url) => {
-						try {
-							const data = await make_firecrawl_request(
+				const scrape_single = async (
+					single_url: string,
+				): Promise<ProcessedUrlResult> => {
+					try {
+						const data = await make_firecrawl_request(
+							this.name,
+							config.processing.firecrawl_scrape.base_url,
+							api_key,
+							build_scrape_body(
+								single_url,
+								extract_depth,
+								scrape_options,
+							),
+							config.processing.firecrawl_scrape.timeout,
+							firecrawl_scrape_response_schema,
+						);
+
+						validate_firecrawl_response(
+							data,
+							this.name,
+							'Error scraping URL',
+						);
+
+						if (!data.data) {
+							throw new ProviderError(
+								ErrorType.PROVIDER_ERROR,
+								'No data returned from API',
 								this.name,
-								config.processing.firecrawl_scrape.base_url,
-								api_key,
-								build_scrape_body(
-									single_url,
-									extract_depth,
-									scrape_options,
-								),
-								config.processing.firecrawl_scrape.timeout,
-								firecrawl_scrape_response_schema,
 							);
-
-							validate_firecrawl_response(
-								data,
-								this.name,
-								'Error scraping URL',
-							);
-
-							if (!data.data) {
-								throw new ProviderError(
-									ErrorType.PROVIDER_ERROR,
-									'No data returned from API',
-									this.name,
-								);
-							}
-
-							const content = extract_content(data.data);
-
-							if (!content) {
-								throw new ProviderError(
-									ErrorType.PROVIDER_ERROR,
-									'No content extracted from URL',
-									this.name,
-								);
-							}
-
-							return {
-								url: single_url,
-								content,
-								metadata: {
-									...data.data.metadata,
-									warning: data.data.warning,
-								},
-								success: true,
-							};
-						} catch (error) {
-							if (is_non_retryable_provider_error(error)) {
-								throw error;
-							}
-							console.error(`Error processing ${single_url}:`, error);
-							return {
-								url: single_url,
-								content: '',
-								success: false,
-								error:
-									error instanceof Error
-										? error.message
-										: 'Unknown error',
-							};
 						}
-					}),
+
+						const content = extract_content(data.data);
+
+						if (!content) {
+							throw new ProviderError(
+								ErrorType.PROVIDER_ERROR,
+								'No content extracted from URL',
+								this.name,
+							);
+						}
+
+						return {
+							url: single_url,
+							content,
+							metadata: {
+								...data.data.metadata,
+								warning: data.data.warning,
+							},
+							success: true,
+						};
+					} catch (error) {
+						if (is_non_retryable_provider_error(error)) {
+							throw error;
+						}
+						console.error(`Error processing ${single_url}:`, error);
+						return {
+							url: single_url,
+							content: '',
+							success: false,
+							error:
+								error instanceof Error
+									? error.message
+									: 'Unknown error',
+						};
+					}
+				};
+
+				// Bounded concurrency: at most 4 simultaneous paid requests
+				const concurrency = 4;
+				const results: ProcessedUrlResult[] = Array.from({
+					length: urls.length,
+				});
+				let next_index = 0;
+				await Promise.all(
+					Array.from(
+						{ length: Math.min(concurrency, urls.length) },
+						async () => {
+							while (next_index < urls.length) {
+								const i = next_index++;
+								results[i] = await scrape_single(urls[i]);
+							}
+						},
+					),
 				);
 
 				return aggregate_url_results(

@@ -10,6 +10,8 @@ import {
 } from '../../../common/search_operators.js';
 import {
 	BaseSearchParams,
+	ErrorType,
+	ProviderError,
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
@@ -54,9 +56,21 @@ export class BraveSearchProvider implements SearchProvider {
 					params.exclude_domains,
 				);
 
+				// Brave API limits: 400 chars / 50 words per query, max 20 results
+				if (query.length > 400 || query.split(/\s+/).length > 50) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'Brave query exceeds API limits (400 characters / 50 words). Shorten the query.',
+						this.name,
+						{ retryable: false },
+					);
+				}
+
 				const query_params = new URLSearchParams({
 					q: query,
-					count: (params.limit ?? 10).toString(),
+					count: Math.min(params.limit ?? 5, 20).toString(),
+					result_filter: 'web',
+					text_decorations: 'false',
 				});
 
 				const raw_data = await http_json(

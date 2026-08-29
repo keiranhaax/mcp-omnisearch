@@ -36,7 +36,7 @@ interface BraveAnswersResponse {
 export class BraveAnswersProvider implements SearchProvider {
 	name = 'brave_answers';
 	description =
-		'Brave AI-grounded answers with citations. SOTA 94.1% F1 on SimpleQA. OpenAI-compatible. Uses real-time web search for grounding. Best for factual Q&A with reduced hallucinations.';
+		'Brave AI-grounded answer (plain text, no inline citations in non-streaming mode). Uses real-time web search for grounding. For cited answers prefer search + extraction + local synthesis.';
 
 	async search(params: BaseSearchParams): Promise<SearchResult[]> {
 		const search_request = async () => {

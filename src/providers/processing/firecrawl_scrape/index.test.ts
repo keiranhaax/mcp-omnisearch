@@ -56,7 +56,6 @@ describe('FirecrawlScrapeProvider', () => {
 			url: 'https://example.com',
 			formats: ['markdown'],
 			onlyMainContent: true,
-			waitFor: 2000,
 		});
 		expect(result.content).toBe('Default markdown');
 		expect(result.metadata).toMatchObject({
@@ -100,8 +99,8 @@ describe('FirecrawlScrapeProvider', () => {
 			minAge: 1,
 			storeInCache: false,
 			removeBase64Images: true,
-			waitFor: 5000,
 		});
+		expect(body.waitFor).toBeUndefined();
 	});
 
 	it('maps question and highlights options into Firecrawl format objects', async () => {

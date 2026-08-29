@@ -56,7 +56,7 @@ describe('ExaSearchProvider', () => {
 			query: 'latest docs',
 			type: 'auto',
 			numResults: 10,
-			contents: { text: { maxCharacters: 3000 } },
+			contents: { text: { maxCharacters: 1500 } },
 		});
 		expect(results[0]).toMatchObject({
 			title: 'Doc',

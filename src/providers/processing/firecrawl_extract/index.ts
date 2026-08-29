@@ -71,7 +71,6 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 						scrapeOptions: {
 							formats: ['markdown'],
 							onlyMainContent: true,
-							waitFor: extract_depth === 'advanced' ? 5000 : 2000,
 						},
 					},
 					config.processing.firecrawl_extract.timeout,

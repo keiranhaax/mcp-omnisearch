@@ -22,30 +22,45 @@ export const is_non_retryable_provider_error = (
 };
 
 export const is_retryable_error = (error: unknown): boolean => {
-	if (!(error instanceof ProviderError)) return true;
+	if (!(error instanceof ProviderError)) {
+		// Do not retry timeouts: a slow call retried multiplies latency and cost.
+		if (
+			error instanceof Error &&
+			(error.name === 'TimeoutError' || error.name === 'AbortError')
+		) {
+			return false;
+		}
+		// Transient network errors (DNS, reset) are retryable.
+		return error instanceof TypeError;
+	}
 
 	if (is_non_retryable_provider_error(error)) {
 		return false;
 	}
 
-	if (
-		error.type === ErrorType.RATE_LIMIT ||
-		error.type === ErrorType.PROVIDER_ERROR
-	) {
+	if (error.type === ErrorType.RATE_LIMIT) {
 		return true;
 	}
 
-	if (error.type === ErrorType.API_ERROR) {
+	if (
+		error.type === ErrorType.API_ERROR ||
+		error.type === ErrorType.PROVIDER_ERROR
+	) {
 		const status =
 			error.details && typeof error.details === 'object'
 				? (error.details as { status?: unknown }).status
 				: undefined;
-		if (typeof status !== 'number') return true;
+		if (typeof status !== 'number') {
+			// Unknown provider errors are retryable only for PROVIDER_ERROR
+			return error.type === ErrorType.PROVIDER_ERROR;
+		}
 		return (
 			status === 408 ||
 			status === 425 ||
 			status === 429 ||
-			status >= 500
+			status === 502 ||
+			status === 503 ||
+			status === 504
 		);
 	}
 
@@ -54,8 +69,8 @@ export const is_retryable_error = (error: unknown): boolean => {
 
 export const retry_with_backoff = async <T>(
 	fn: () => Promise<T>,
-	options_or_max_retries: number | RetryOptions = 3,
-	legacy_initial_delay = 1000,
+	options_or_max_retries: number | RetryOptions = 1,
+	legacy_initial_delay = 250,
 ): Promise<T> => {
 	const options: Required<RetryOptions> =
 		typeof options_or_max_retries === 'number'
@@ -65,8 +80,8 @@ export const retry_with_backoff = async <T>(
 					retry_if: is_retryable_error,
 				}
 			: {
-					max_retries: options_or_max_retries.max_retries ?? 3,
-					initial_delay: options_or_max_retries.initial_delay ?? 1000,
+					max_retries: options_or_max_retries.max_retries ?? 1,
+					initial_delay: options_or_max_retries.initial_delay ?? 250,
 					retry_if:
 						options_or_max_retries.retry_if ?? is_retryable_error,
 				};
@@ -82,8 +97,9 @@ export const retry_with_backoff = async <T>(
 			) {
 				throw error;
 			}
-			const delay_time = options.initial_delay * Math.pow(2, retries);
-			await delay(delay_time);
+			// Full jitter: random delay in [0, exponential backoff]
+			const ceiling = options.initial_delay * Math.pow(2, retries);
+			await delay(Math.random() * ceiling);
 			retries++;
 		}
 	}
