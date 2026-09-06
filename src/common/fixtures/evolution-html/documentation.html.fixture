@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Offline client reference</title></head>
+<body><main>
+<h1>Client reference</h1>
+<p>Original synthetic API documentation for offline tests.</p>
+<h2>Pagination</h2>
+<p>Join byte continuations directly. Join ordinary line pages with a line feed.</p>
+<pre><code class="language-ts">const result = await client.read({ byte_offset: 0 });
+console.log(result.content);
+// Citation-like [1] and a fence marker ``` are source text.
+</code></pre>
+<ul><li>Keep opaque identifiers unchanged.</li><li>Stop at the final page.</li></ul>
+<table><thead><tr><th>Field</th><th>Unit</th></tr></thead><tbody><tr><td>byte_offset</td><td>UTF-8 bytes</td></tr><tr><td>offset</td><td>lines</td></tr></tbody></table>
+<p>A math sample: <math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mi>a</mi><mo>+</mo><mi>b</mi><mo>=</mo><mi>c</mi></mrow></math>.</p>
+<a href="./reference?version=2&amp;lang=en#pagination">Reference version two</a>
+</main></body></html>

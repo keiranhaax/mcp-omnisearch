@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Offline battery maintenance guide</title>
+  <meta name="author" content="Fixture Author">
+  <meta property="article:published_time" content="2026-01-02">
+  <link rel="canonical" href="https://example.test/guides/battery?edition=2">
+</head>
+<body>
+<nav>Home | Products | Sign in</nav>
+<article>
+  <h1>Battery maintenance</h1>
+  <p>This original synthetic article is an offline extraction fixture, not advice about a real product.</p>
+  <h2>Storage temperature</h2>
+  <p>The reference storage temperature is 18 degrees Celsius. Keep the sample device dry and inspect its case before use.</p>
+  <h2>Charge schedule</h2>
+  <p>The reference inspection interval is every 30 days. Record the charge level and any change in the sample device.</p>
+  <p>Read the <a href="../manual?edition=2&amp;language=en#storage">versioned manual</a> for the synthetic procedure.</p>
+</article>
+<footer>Cookie settings | Newsletter | All fixture text is original.</footer>
+</body>
+</html>

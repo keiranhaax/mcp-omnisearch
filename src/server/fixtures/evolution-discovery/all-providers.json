@@ -1,0 +1,1052 @@
+[
+	{
+		"name": "result_read",
+		"title": "Read up to 12000 UTF-8 bytes by opaque result_id. Follow next_offset and next_byte_offset as byte_offset within that line. Join byte continuations directly, ordinary line pages with LF. Results expire or may be evicted.",
+		"description": "Read up to 12000 UTF-8 bytes by opaque result_id. Follow next_offset and next_byte_offset as byte_offset within that line. Join byte continuations directly, ordinary line pages with LF. Results expire or may be evicted.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"result_id": {
+					"type": "string",
+					"pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89aAbB][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$",
+					"description": "Opaque result ID returned by an Omnisearch tool"
+				},
+				"offset": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 9007199254740991,
+					"description": "One-based line offset (default: 1)"
+				},
+				"byte_offset": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9007199254740991,
+					"description": "UTF-8 byte offset within the selected line; pass next_byte_offset unchanged (default: 0)"
+				},
+				"limit": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 500,
+					"description": "Maximum lines to return (default: 200, max: 500)"
+				}
+			},
+			"required": ["result_id"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": false
+		}
+	},
+	{
+		"name": "web_search",
+		"title": "Search: find web pages, articles, or data. Use Brave for operators, Exa for semantic or deep search, Tavily for factual results, and You.com as a fast fallback.",
+		"description": "Search: find web pages, articles, or data. Use Brave for operators, Exa for semantic or deep search, Tavily for factual results, and You.com as a fast fallback.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 5000,
+					"description": "Search query"
+				},
+				"provider": {
+					"enum": ["tavily", "brave", "exa", "you"],
+					"type": "string",
+					"description": "Search provider to use"
+				},
+				"limit": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100,
+					"description": "Maximum results. Tavily max 20; Brave/You cap at 20; Exa max 100. Defaults are provider-specific."
+				},
+				"include_domains": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"maxLength": 253
+					},
+					"maxItems": 50,
+					"description": "Only return results from these domains"
+				},
+				"exclude_domains": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"maxLength": 253
+					},
+					"maxItems": 50,
+					"description": "Exclude results from these domains"
+				},
+				"search_type": {
+					"enum": [
+						"instant",
+						"fast",
+						"auto",
+						"deep-lite",
+						"deep",
+						"deep-reasoning"
+					],
+					"type": "string",
+					"description": "Exa search type. Only used when provider is exa."
+				},
+				"category": {
+					"enum": [
+						"company",
+						"people",
+						"publication",
+						"news",
+						"personal site",
+						"financial report"
+					],
+					"type": "string",
+					"description": "Exa category filter. Only used when provider is exa."
+				},
+				"user_location": {
+					"type": "string",
+					"description": "Two-letter Exa user location country code, such as US."
+				},
+				"contents": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {},
+					"description": "Exa contents options. Only used when provider is exa."
+				},
+				"output_schema": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {},
+					"description": "Exa JSON output schema for synthesized output."
+				},
+				"system_prompt": {
+					"type": "string",
+					"maxLength": 10000,
+					"description": "Exa system prompt for synthesized output."
+				},
+				"additional_queries": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"maxItems": 10,
+					"description": "Additional top-level Exa search queries for multi-query retrieval."
+				}
+			},
+			"required": ["query", "provider"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "github_search",
+		"title": "Search GitHub: find code, repositories, or users. Supports filename:, path:, repo:, user:, language:, and in:file syntax.",
+		"description": "Search GitHub: find code, repositories, or users. Supports filename:, path:, repo:, user:, language:, and in:file syntax.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "string",
+					"description": "Search query"
+				},
+				"search_type": {
+					"enum": ["code", "repositories", "users"],
+					"type": "string",
+					"description": "What to search for (default: code)"
+				},
+				"limit": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100,
+					"description": "Maximum number of results (default: 10)"
+				},
+				"sort": {
+					"enum": ["stars", "forks", "updated"],
+					"type": "string",
+					"description": "Sort order (repositories only)"
+				}
+			},
+			"required": ["query"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "ai_search",
+		"title": "Answer/Research: get synthesized answers; citation availability depends on the provider. Use Exa for fast or deep research, Brave Answers for plain-text grounded answers, Tavily for research; use action=status with request_id to resume without creating another paid job, Linkup for sourced answers.",
+		"description": "Answer/Research: get synthesized answers; citation availability depends on the provider. Use Exa for fast or deep research, Brave Answers for plain-text grounded answers, Tavily for research; use action=status with request_id to resume without creating another paid job, Linkup for sourced answers.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 10000,
+					"description": "Question or search query; required except for Tavily action=status"
+				},
+				"action": {
+					"enum": ["research", "status"],
+					"type": "string",
+					"description": "Default research. status is only for tavily_research and performs a read-only GET.",
+					"default": "research"
+				},
+				"request_id": {
+					"type": "string",
+					"pattern": "^[a-zA-Z0-9_-]{1,200}$",
+					"description": "Existing Tavily task ID, required only for action=status"
+				},
+				"provider": {
+					"enum": [
+						"exa_answer",
+						"exa_deep_research",
+						"linkup",
+						"brave_answers",
+						"tavily_research"
+					],
+					"type": "string",
+					"description": "AI search provider to use"
+				},
+				"limit": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 50,
+					"description": "Maximum number of results (default: 10)"
+				},
+				"output_schema": {
+					"type": "object",
+					"propertyNames": {
+						"type": "string"
+					},
+					"additionalProperties": {},
+					"description": "JSON schema for structured output. Only used when provider is exa_deep_research."
+				},
+				"exa_deep_search_type": {
+					"enum": ["deep", "deep-reasoning"],
+					"type": "string",
+					"description": "Exa deep search mode. Only used when provider is exa_deep_research."
+				},
+				"system_prompt": {
+					"type": "string",
+					"maxLength": 10000,
+					"description": "Exa system prompt. Only used when provider is exa_deep_research."
+				}
+			},
+			"required": ["provider"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "web_extract",
+		"title": "Extract/Process: read or process known URLs. Firecrawl handles scrape/summarize/crawl/map/extract/actions/search; Exa handles contents/similar; Tavily extracts.",
+		"description": "Extract/Process: read or process known URLs. Firecrawl handles scrape/summarize/crawl/map/extract/actions/search; Exa handles contents/similar; Tavily extracts.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"url": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "array",
+							"items": {
+								"type": "string",
+								"maxLength": 4096
+							},
+							"maxItems": 20
+						}
+					],
+					"description": "URL, Exa result ID, or array of up to 20 values. Required for all modes except Firecrawl search."
+				},
+				"query": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 10000,
+					"description": "Search query (required when mode=search with Firecrawl). Also used by Tavily extract for chunk reranking."
+				},
+				"provider": {
+					"enum": ["tavily", "firecrawl", "exa"],
+					"type": "string",
+					"description": "Provider to use: Firecrawl for scrape/summarize/crawl/map/extract/actions/search, Exa for contents/similar, Tavily for extraction."
+				},
+				"mode": {
+					"enum": [
+						"extract",
+						"summarize",
+						"scrape",
+						"crawl",
+						"map",
+						"actions",
+						"search",
+						"contents",
+						"similar"
+					],
+					"type": "string",
+					"description": "Provider mode. firecrawl supports scrape/summarize/crawl/map/extract/actions/search; exa supports contents/similar; tavily supports extract. Defaults to provider default."
+				},
+				"extract_depth": {
+					"enum": ["basic", "advanced"],
+					"type": "string",
+					"description": "Extraction depth (default: basic)"
+				},
+				"firecrawl_options": {
+					"type": "object",
+					"properties": {
+						"formats": {
+							"type": "array",
+							"items": {
+								"anyOf": [
+									{
+										"enum": [
+											"markdown",
+											"summary",
+											"html",
+											"rawHtml",
+											"links",
+											"screenshot",
+											"json",
+											"question",
+											"highlights"
+										],
+										"type": "string"
+									},
+									{
+										"type": "object",
+										"properties": {
+											"type": {
+												"enum": [
+													"markdown",
+													"summary",
+													"html",
+													"rawHtml",
+													"links",
+													"screenshot",
+													"json",
+													"question",
+													"highlights"
+												],
+												"type": "string"
+											}
+										},
+										"required": ["type"]
+									}
+								]
+							},
+							"maxItems": 10,
+							"description": "Firecrawl scrape response formats. Defaults to markdown."
+						},
+						"question": {
+							"type": "string",
+							"maxLength": 10000,
+							"description": "Ask a focused extraction question during scrape."
+						},
+						"highlights_query": {
+							"type": "string",
+							"maxLength": 10000,
+							"description": "Return relevant page highlights for this query."
+						},
+						"lockdown": {
+							"type": "boolean",
+							"description": "Use Firecrawl lockdown/cache-only behavior when supported."
+						},
+						"maxAge": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991,
+							"description": "Maximum cache age in milliseconds."
+						},
+						"minAge": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991,
+							"description": "Minimum cache age in milliseconds."
+						},
+						"storeInCache": {
+							"type": "boolean",
+							"description": "Allow Firecrawl to store the scrape result in cache."
+						},
+						"zeroDataRetention": {
+							"type": "boolean",
+							"description": "Request zero data retention where supported."
+						},
+						"redactPII": {
+							"type": "boolean",
+							"description": "Redact personally identifiable information."
+						},
+						"onlyMainContent": {
+							"type": "boolean",
+							"description": "Prefer main article or page content."
+						},
+						"onlyCleanContent": {
+							"type": "boolean",
+							"description": "Return cleaned page content when supported."
+						},
+						"removeBase64Images": {
+							"type": "boolean",
+							"description": "Remove base64 images to avoid huge payloads."
+						}
+					},
+					"required": [],
+					"description": "Firecrawl scrape-only options: question, highlights_query, lockdown, cache, zero-data-retention, PII redaction, and content-cleaning flags."
+				},
+				"firecrawl_search_options": {
+					"type": "object",
+					"properties": {
+						"limit": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100,
+							"description": "Maximum Firecrawl search results."
+						},
+						"sources": {
+							"type": "array",
+							"items": {
+								"enum": ["web", "images", "news"],
+								"type": "string"
+							},
+							"maxItems": 3,
+							"description": "Firecrawl search verticals. Defaults to web."
+						},
+						"categories": {
+							"type": "array",
+							"items": {
+								"enum": ["github", "research", "pdf"],
+								"type": "string"
+							},
+							"maxItems": 3,
+							"description": "Firecrawl search categories for narrowed retrieval."
+						},
+						"includeDomains": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"maxLength": 253
+							},
+							"maxItems": 50,
+							"description": "Only search these domains."
+						},
+						"excludeDomains": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"maxLength": 253
+							},
+							"maxItems": 50,
+							"description": "Exclude these domains from results."
+						},
+						"tbs": {
+							"type": "string",
+							"maxLength": 200,
+							"description": "Firecrawl time filter string."
+						},
+						"location": {
+							"type": "string",
+							"maxLength": 500,
+							"description": "Search location hint."
+						},
+						"country": {
+							"type": "string",
+							"maxLength": 2,
+							"description": "Search country code."
+						},
+						"ignoreInvalidURLs": {
+							"type": "boolean",
+							"description": "Skip invalid URLs in search results."
+						},
+						"scrapeOptions": {
+							"type": "object",
+							"properties": {
+								"formats": {
+									"type": "array",
+									"items": {
+										"anyOf": [
+											{
+												"enum": [
+													"markdown",
+													"summary",
+													"html",
+													"rawHtml",
+													"links",
+													"screenshot",
+													"json",
+													"question",
+													"highlights"
+												],
+												"type": "string"
+											},
+											{
+												"type": "object",
+												"properties": {
+													"type": {
+														"enum": [
+															"markdown",
+															"summary",
+															"html",
+															"rawHtml",
+															"links",
+															"screenshot",
+															"json",
+															"question",
+															"highlights"
+														],
+														"type": "string"
+													}
+												},
+												"required": ["type"]
+											}
+										]
+									},
+									"maxItems": 10,
+									"description": "Formats to scrape for each Firecrawl search hit."
+								},
+								"onlyMainContent": {
+									"type": "boolean",
+									"description": "Scrape only main content for each hit."
+								},
+								"redactPII": {
+									"type": "boolean",
+									"description": "Redact PII in scraped search-hit content."
+								}
+							},
+							"required": [],
+							"description": "Optional scrape settings applied to Firecrawl search results."
+						}
+					},
+					"required": [],
+					"description": "Firecrawl search-only options: sources, categories, domain filters, geo/time filters, and per-result scrape settings."
+				}
+			},
+			"required": ["provider"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "brave_llm_context",
+		"title": "Research Context/RAG: retrieve LLM-ready grounding chunks from Brave. Use for dense context, not ordinary link search.",
+		"description": "Research Context/RAG: retrieve LLM-ready grounding chunks from Brave. Use for dense context, not ordinary link search.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "string",
+					"description": "Search query to get LLM-optimized context for."
+				},
+				"count": {
+					"type": "number",
+					"description": "Max search results to consider (1-50)."
+				},
+				"maximum_number_of_urls": {
+					"type": "number",
+					"description": "Max different URLs to include in context."
+				},
+				"maximum_number_of_tokens": {
+					"type": "number",
+					"description": "Approx max tokens in context (max 32768)."
+				},
+				"maximum_number_of_snippets": {
+					"type": "number",
+					"description": "Max snippets/chunks in context (max 256)."
+				},
+				"context_threshold_mode": {
+					"enum": ["disabled", "strict", "lenient", "balanced"],
+					"type": "string",
+					"description": "Threshold for including content"
+				},
+				"maximum_number_of_tokens_per_url": {
+					"type": "number",
+					"description": "Approx max tokens per URL (max 8192)."
+				},
+				"maximum_number_of_snippets_per_url": {
+					"type": "number",
+					"description": "Max snippets per URL (max 100)."
+				},
+				"freshness": {
+					"type": "string",
+					"description": "Freshness filter"
+				},
+				"country": {
+					"type": "string",
+					"description": "Country code"
+				},
+				"search_lang": {
+					"type": "string",
+					"description": "Search language code"
+				},
+				"enable_local": {
+					"type": "boolean",
+					"description": "Enable Brave local recall explicitly."
+				},
+				"goggles": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					],
+					"description": "Brave Goggles URL or inline definition for reranking."
+				},
+				"loc_lat": {
+					"type": "number"
+				},
+				"loc_long": {
+					"type": "number"
+				},
+				"loc_city": {
+					"type": "string"
+				},
+				"loc_state": {
+					"type": "string"
+				},
+				"loc_state_name": {
+					"type": "string"
+				},
+				"loc_country": {
+					"type": "string"
+				},
+				"loc_postal_code": {
+					"type": "string"
+				}
+			},
+			"required": ["query"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "brave_media_search",
+		"title": "Media Search: find Brave image or video results with SafeSearch and country/language filters. Use only when visual media results are needed.",
+		"description": "Media Search: find Brave image or video results with SafeSearch and country/language filters. Use only when visual media results are needed.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "string",
+					"description": "Media search query"
+				},
+				"type": {
+					"enum": ["images", "videos"],
+					"type": "string",
+					"description": "Media type"
+				},
+				"count": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 200,
+					"description": "Number of results (images 1-200; videos 1-50)"
+				},
+				"offset": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9,
+					"description": "Page offset for pagination"
+				},
+				"country": {
+					"type": "string",
+					"description": "2-letter country code"
+				},
+				"search_lang": {
+					"type": "string",
+					"description": "Search language code"
+				},
+				"safesearch": {
+					"type": "string",
+					"description": "SafeSearch level"
+				},
+				"freshness": {
+					"type": "string",
+					"description": "Freshness filter"
+				}
+			},
+			"required": ["query", "type"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "brave_news_search",
+		"title": "News Search: find recent news articles with freshness, pagination, country/language, SafeSearch, and snippets.",
+		"description": "News Search: find recent news articles with freshness, pagination, country/language, SafeSearch, and snippets.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": {
+					"type": "string",
+					"description": "News search query"
+				},
+				"count": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 50,
+					"description": "Number of results (1-50)"
+				},
+				"offset": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 9,
+					"description": "Page offset for pagination"
+				},
+				"country": {
+					"type": "string",
+					"description": "2-letter country code"
+				},
+				"search_lang": {
+					"type": "string",
+					"description": "Search language code"
+				},
+				"safesearch": {
+					"enum": ["off", "moderate", "strict"],
+					"type": "string",
+					"description": "SafeSearch level"
+				},
+				"freshness": {
+					"type": "string",
+					"description": "Freshness filter"
+				},
+				"extra_snippets": {
+					"type": "boolean",
+					"description": "Include additional excerpts per result"
+				}
+			},
+			"required": ["query"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "firecrawl_agent",
+		"title": "Autonomous Web Agent: Credit-sensitive; start a web task (default cap 100 credits), then use action=status or cancel with job_id. Repeating start creates a new paid job. Prefer search/extract for simple tasks.",
+		"description": "Autonomous Web Agent: Credit-sensitive; start a web task (default cap 100 credits), then use action=status or cancel with job_id. Repeating start creates a new paid job. Prefer search/extract for simple tasks.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"action": {
+					"enum": ["start", "status", "cancel"],
+					"type": "string",
+					"default": "start"
+				},
+				"job_id": {
+					"type": "string",
+					"format": "uuid",
+					"description": "Existing job ID for status/cancel; never starts a new job."
+				},
+				"prompt": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 10000,
+					"description": "Natural-language prompt for a new paid job. Start returns immediately; use status with job_id to retrieve results."
+				},
+				"wait_for_completion": {
+					"type": "boolean",
+					"description": "Opt into a bounded wait on start. Default false; status never creates a new job."
+				},
+				"model": {
+					"enum": ["spark-2", "spark-1-mini", "spark-1-pro"],
+					"type": "string",
+					"description": "Firecrawl agent model"
+				},
+				"max_credits": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 9007199254740991,
+					"description": "Maximum credits to spend; positive integer. Defaults to 100, not the provider default."
+				}
+			},
+			"required": [],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "context_web_extract",
+		"title": "Context.dev Web: scrape markdown/HTML/images/screenshots, crawl pages, get sitemaps, or web-search with optional markdown scraping.",
+		"description": "Context.dev Web: scrape markdown/HTML/images/screenshots, crawl pages, get sitemaps, or web-search with optional markdown scraping.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"mode": {
+					"enum": [
+						"markdown",
+						"html",
+						"crawl_markdown",
+						"sitemap",
+						"images",
+						"screenshot",
+						"web_search"
+					],
+					"type": "string"
+				},
+				"url": {
+					"type": "string"
+				},
+				"domain": {
+					"type": "string"
+				},
+				"query": {
+					"type": "string"
+				},
+				"limit": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100,
+					"default": 10
+				},
+				"timeoutMS": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 60000,
+					"default": 60000
+				},
+				"maxAgeMs": {
+					"type": "number"
+				},
+				"scrape_markdown": {
+					"type": "boolean"
+				},
+				"includeDomains": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"excludeDomains": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"freshness": {
+					"enum": [
+						"last_24_hours",
+						"last_week",
+						"last_month",
+						"last_year"
+					],
+					"type": "string"
+				}
+			},
+			"required": ["mode"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "context_brand_intel",
+		"title": "Context.dev Brand: retrieve brand/company intelligence such as logos, colors, socials, descriptions, industries, and domain/company/ticker matches.",
+		"description": "Context.dev Brand: retrieve brand/company intelligence such as logos, colors, socials, descriptions, industries, and domain/company/ticker matches.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"lookup_type": {
+					"enum": [
+						"domain",
+						"company_name",
+						"email",
+						"stock_ticker",
+						"simplified_domain"
+					],
+					"type": "string"
+				},
+				"value": {
+					"type": "string"
+				},
+				"timeoutMS": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 60000,
+					"default": 60000
+				},
+				"maxAgeMs": {
+					"type": "number"
+				}
+			},
+			"required": ["lookup_type", "value"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "context_styleguide",
+		"title": "Context.dev Design: extract styleguide signals and optional fonts for a domain or direct URL.",
+		"description": "Context.dev Design: extract styleguide signals and optional fonts for a domain or direct URL.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"domain": {
+					"type": "string"
+				},
+				"directUrl": {
+					"type": "string"
+				},
+				"include_fonts": {
+					"type": "boolean"
+				},
+				"timeoutMS": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 60000,
+					"default": 60000
+				},
+				"maxAgeMs": {
+					"type": "number"
+				}
+			},
+			"required": [],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "context_classify",
+		"title": "Context.dev Business: classify companies by NAICS, SIC, or EIC using domain or company name.",
+		"description": "Context.dev Business: classify companies by NAICS, SIC, or EIC using domain or company name.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"taxonomy": {
+					"enum": ["naics", "sic", "eic"],
+					"type": "string"
+				},
+				"domain": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"sic_version": {
+					"enum": ["original_sic", "latest_sec"],
+					"type": "string"
+				},
+				"minResults": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 20,
+					"default": 1
+				},
+				"maxResults": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 20,
+					"default": 20
+				},
+				"timeoutMS": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 60000,
+					"default": 60000
+				}
+			},
+			"required": ["taxonomy"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	},
+	{
+		"name": "context_transaction_identify",
+		"title": "Context.dev Transactions: identify messy bank/card transaction descriptors as real brands or companies.",
+		"description": "Context.dev Transactions: identify messy bank/card transaction descriptors as real brands or companies.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"transaction_info": {
+					"type": "string"
+				},
+				"country_gl": {
+					"type": "string"
+				},
+				"mcc": {
+					"type": "string"
+				},
+				"timeoutMS": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 60000,
+					"default": 60000
+				}
+			},
+			"required": ["transaction_info"],
+			"$schema": "http://json-schema.org/draft-07/schema#"
+		},
+		"annotations": {
+			"readOnlyHint": true,
+			"destructiveHint": false,
+			"idempotentHint": true,
+			"openWorldHint": true
+		}
+	}
+]

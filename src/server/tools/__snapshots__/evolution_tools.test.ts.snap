@@ -1,0 +1,348 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`P0 ai_search legacy contract > preserves authentication failure without leaking upstream body or switching provider 1`] = `
+{
+  "content": [
+    {
+      "text": "tavily_research error [API_ERROR]: Invalid API key (endpoint: https://api.tavily.com) Resume with ai_search provider="tavily_research", action="status", request_id="p0-research-request"; do not start a new research task.",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 ai_search legacy contract > propagates caller cancellation into the outstanding request 1`] = `
+{
+  "code": -32603,
+  "message": "Internal error",
+}
+`;
+
+exports[`P0 ai_search legacy contract > snapshots success and exact request options without fallback 1`] = `
+{
+  "requests": [
+    {
+      "body": null,
+      "method": "GET",
+      "path": "/research/p0-research-request",
+    },
+  ],
+  "response": {
+    "content": [
+      {
+        "text": "[
+  {
+    "title": "Research Report",
+    "url": "",
+    "snippet": "Fixture evidence [1], code \`array[2]\`, math [x+y].",
+    "score": 1,
+    "source_provider": "tavily_research",
+    "metadata": {
+      "type": "research_report",
+      "request_id": "p0-research-request",
+      "response_time": 0.25,
+      "sources_count": 1
+    }
+  },
+  {
+    "title": "Fixture report",
+    "url": "https://example.test/report?edition=2",
+    "snippet": "Source evidence",
+    "score": 0.9,
+    "source_provider": "tavily_research",
+    "metadata": {
+      "type": "source"
+    }
+  }
+]",
+        "type": "text",
+      },
+    ],
+  },
+}
+`;
+
+exports[`P0 firecrawl_agent legacy contract > preserves authentication failure without leaking upstream body or switching provider 1`] = `
+{
+  "content": [
+    {
+      "text": "firecrawl_agent error [API_ERROR]: Invalid API key (endpoint: https://api.firecrawl.dev)",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 firecrawl_agent legacy contract > propagates caller cancellation into the outstanding request 1`] = `
+{
+  "content": [
+    {
+      "text": "firecrawl_agent error [API_ERROR]: Operation cancelled",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 firecrawl_agent legacy contract > snapshots success and exact request options without fallback 1`] = `
+{
+  "requests": [
+    {
+      "body": null,
+      "method": "GET",
+      "path": "/v2/agent/12345678-1234-4234-8234-123456789abc",
+    },
+  ],
+  "response": {
+    "content": [
+      {
+        "text": "{
+  "content": "Fixture evidence [1], code \`array[2]\`, math [x+y].",
+  "metadata": {
+    "job_id": "12345678-1234-4234-8234-123456789abc",
+    "status": "completed",
+    "model": "spark-2",
+    "structured_data": "Fixture evidence [1], code \`array[2]\`, math [x+y].",
+    "credits_used": 0,
+    "title": "Firecrawl agent job 12345678-1234-4234-8234-123456789abc",
+    "word_count": 7
+  },
+  "source_provider": "firecrawl_agent"
+}",
+        "type": "text",
+      },
+    ],
+  },
+}
+`;
+
+exports[`P0 research and Agent lifecycle gaps > records cancellation acknowledgement followed by failed Firecrawl status without inventing normalization 1`] = `
+{
+  "cancelled": {
+    "content": [
+      {
+        "text": "{
+  "content": "{\\n  \\"job_id\\": \\"12345678-1234-4234-8234-123456789abc\\",\\n  \\"status\\": \\"cancelled\\",\\n  \\"title\\": \\"Firecrawl agent job 12345678-1234-4234-8234-123456789abc\\",\\n  \\"message\\": \\"Firecrawl agent job was cancelled.\\"\\n}",
+  "metadata": {
+    "job_id": "12345678-1234-4234-8234-123456789abc",
+    "status": "cancelled",
+    "title": "Firecrawl agent job 12345678-1234-4234-8234-123456789abc",
+    "word_count": 17
+  },
+  "source_provider": "firecrawl_agent"
+}",
+        "type": "text",
+      },
+    ],
+  },
+  "readback": {
+    "content": [
+      {
+        "text": "firecrawl_agent error [PROVIDER_ERROR]: Provider request failed job_id=12345678-1234-4234-8234-123456789abc. Use firecrawl_agent action="status" or action="cancel" with this job_id; do not start a new job.",
+        "type": "text",
+      },
+    ],
+    "isError": true,
+  },
+}
+`;
+
+exports[`P0 research and Agent lifecycle gaps > records discarded partial failure evidence for 'ai_search' 1`] = `
+{
+  "content": [
+    {
+      "text": "tavily_research error [PROVIDER_ERROR]: Provider request failed Resume with ai_search provider="tavily_research", action="status", request_id="p0-research-request"; do not start a new research task.",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 research and Agent lifecycle gaps > records discarded partial failure evidence for 'firecrawl_agent' 1`] = `
+{
+  "content": [
+    {
+      "text": "firecrawl_agent error [PROVIDER_ERROR]: Provider request failed job_id=12345678-1234-4234-8234-123456789abc. Use firecrawl_agent action="status" or action="cancel" with this job_id; do not start a new job.",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 research and Agent lifecycle gaps > reports unknown job IDs for 'ai_search' without creating a replacement 1`] = `
+{
+  "content": [
+    {
+      "text": "tavily_research error [API_ERROR]: Provider rejected the request (HTTP 404) (endpoint: https://api.tavily.com) Resume with ai_search provider="tavily_research", action="status", request_id="p0-research-request"; do not start a new research task.",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 research and Agent lifecycle gaps > reports unknown job IDs for 'firecrawl_agent' without creating a replacement 1`] = `
+{
+  "content": [
+    {
+      "text": "firecrawl_agent error [API_ERROR]: Provider rejected the request (HTTP 404) (endpoint: https://api.firecrawl.dev)",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 research and Agent lifecycle gaps > resumes Tavily pending to completion with GETs and keeps citation-like source text intact 1`] = `
+{
+  "content": [
+    {
+      "text": "[
+  {
+    "title": "Research pending",
+    "url": "",
+    "snippet": "Research is still pending. Resume with ai_search provider=\\"tavily_research\\", action=\\"status\\" and this request_id; do not start a new research task.",
+    "source_provider": "tavily_research",
+    "metadata": {
+      "type": "research_status",
+      "request_id": "p0-research-request",
+      "status": "in_progress",
+      "resumable": true
+    }
+  }
+]",
+      "type": "text",
+    },
+  ],
+}
+`;
+
+exports[`P0 web_extract legacy contract > preserves authentication failure without leaking upstream body or switching provider 1`] = `
+{
+  "content": [
+    {
+      "text": "tavily_extract error [API_ERROR]: Invalid API key (endpoint: https://api.tavily.com)",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 web_extract legacy contract > propagates caller cancellation into the outstanding request 1`] = `
+{
+  "content": [
+    {
+      "text": "Operation cancelled",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 web_extract legacy contract > snapshots success and exact request options without fallback 1`] = `
+{
+  "requests": [
+    {
+      "body": {
+        "extract_depth": "basic",
+        "include_images": false,
+        "query": "fixture evidence",
+        "urls": [
+          "https://example.test/report?edition=2",
+        ],
+      },
+      "method": "POST",
+      "path": "/extract",
+    },
+  ],
+  "response": {
+    "content": [
+      {
+        "text": "{
+  "content": "Fixture evidence [1], code \`array[2]\`, math [x+y].",
+  "raw_contents": [
+    {
+      "url": "https://example.test/report?edition=2",
+      "content": "Fixture evidence [1], code \`array[2]\`, math [x+y]."
+    }
+  ],
+  "metadata": {
+    "word_count": 7,
+    "urls_processed": 1,
+    "successful_extractions": 1,
+    "extract_depth": "basic"
+  },
+  "source_provider": "tavily_extract"
+}",
+        "type": "text",
+      },
+    ],
+  },
+}
+`;
+
+exports[`P0 web_search legacy contract > preserves authentication failure without leaking upstream body or switching provider 1`] = `
+{
+  "content": [
+    {
+      "text": "tavily error [API_ERROR]: Invalid API key (endpoint: https://api.tavily.com)",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 web_search legacy contract > propagates caller cancellation into the outstanding request 1`] = `
+{
+  "content": [
+    {
+      "text": "Operation cancelled",
+      "type": "text",
+    },
+  ],
+  "isError": true,
+}
+`;
+
+exports[`P0 web_search legacy contract > snapshots success and exact request options without fallback 1`] = `
+{
+  "requests": [
+    {
+      "body": {
+        "exclude_domains": [],
+        "include_domains": [],
+        "max_results": 5,
+        "query": "fixture evidence",
+        "search_depth": "basic",
+        "topic": "general",
+      },
+      "method": "POST",
+      "path": "/search",
+    },
+  ],
+  "response": {
+    "content": [
+      {
+        "text": "[
+  {
+    "title": "Fixture report",
+    "url": "https://example.test/report?edition=2",
+    "snippet": "Fixture evidence [1], code \`array[2]\`, math [x+y].",
+    "score": 0.8,
+    "source_provider": "tavily"
+  }
+]",
+        "type": "text",
+      },
+    ],
+  },
+}
+`;

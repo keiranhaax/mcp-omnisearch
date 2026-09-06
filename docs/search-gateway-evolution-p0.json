@@ -1,0 +1,137 @@
+{
+	"source_revision": "047a7e1e3fce8451753e0e8bcffef6dcd13b4554",
+	"baseline": {
+		"passed": 673,
+		"failed": 0,
+		"test_files": 61
+	},
+	"p0": {
+		"passed": 731,
+		"failed": 0,
+		"pending": 0,
+		"todo": 0,
+		"test_files": 65,
+		"new_tests": 58
+	},
+	"offline_smoke_groups": 12,
+	"live_provider_calls": "not authorized; not run",
+	"new_test_files": {
+		"evolution_corpus.test.ts": 12,
+		"evolution_results.test.ts": 3,
+		"evolution_discovery.test.ts": 8,
+		"evolution_tools.test.ts": 35
+	},
+	"payload_measurements": [
+		{
+			"fixture": "web_search",
+			"initial_rpc_bytes": 722,
+			"canonical_json_bytes": 132163,
+			"result_read_calls": 12
+		},
+		{
+			"fixture": "web_extract",
+			"initial_rpc_bytes": 826,
+			"canonical_json_bytes": 264302,
+			"result_read_calls": 35
+		},
+		{
+			"fixture": "ai_search",
+			"initial_rpc_bytes": 722,
+			"canonical_json_bytes": 132522,
+			"result_read_calls": 12
+		},
+		{
+			"fixture": "firecrawl_agent",
+			"initial_rpc_bytes": 837,
+			"canonical_json_bytes": 264332,
+			"result_read_calls": 46
+		}
+	],
+	"schema_profiles": [
+		{
+			"profile": "all-providers",
+			"tools": [
+				"result_read",
+				"web_search",
+				"github_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 14,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-providers",
+			"tools": ["result_read"],
+			"count": 1,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-github",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 13,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "tavily-only",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract"
+			],
+			"count": 4,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		}
+	],
+	"corpus": {
+		"original_html_documents": 8,
+		"queries": 11,
+		"extraction_exercised": false
+	},
+	"checks": {
+		"frozen_private_store_install": "passed",
+		"check": "passed",
+		"test": "passed",
+		"build": "passed",
+		"offline_mcp_smoke": "passed",
+		"built_stdio_schema_verification": "passed",
+		"shellcheck": "passed",
+		"production_integrity": "unchanged"
+	},
+	"scope": "P0 tests, fixtures, documentation only. Runtime, dependencies, lockfile, services and branding unchanged.",
+	"unverified": [
+		"Historical Context transaction identification live failure",
+		"Historical Firecrawl Agent live lifecycle and cancellation",
+		"Actual HTML extraction, latency, relevance and memory",
+		"Defuddle dependency/API/licensing/security/packaging",
+		"P1-P6 release and deployment gates"
+	]
+}

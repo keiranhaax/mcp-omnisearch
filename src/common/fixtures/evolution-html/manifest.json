@@ -1,0 +1,118 @@
+{
+	"version": 1,
+	"license": "MIT",
+	"origin": "Original synthetic fixtures; no fetched content",
+	"network": "forbidden",
+	"expected_values": "Human-authored anchors, not observed extraction output",
+	"cases": [
+		{
+			"id": "article-storage",
+			"file": "article.html.fixture",
+			"url": "https://example.test/guides/battery?edition=2",
+			"query": "storage temperature",
+			"disposition": "content",
+			"anchors": ["Storage temperature", "18 degrees Celsius"],
+			"sha256": "2c93f692959df97f2682a3aca5e03e9f00d456f5d7feeb5e06f7ecd81df64386"
+		},
+		{
+			"id": "article-no-query",
+			"file": "article.html.fixture",
+			"url": "https://example.test/guides/battery?edition=2",
+			"query": "",
+			"disposition": "preview",
+			"anchors": ["Battery maintenance"],
+			"sha256": "2c93f692959df97f2682a3aca5e03e9f00d456f5d7feeb5e06f7ecd81df64386"
+		},
+		{
+			"id": "article-no-hit",
+			"file": "article.html.fixture",
+			"url": "https://example.test/guides/battery?edition=2",
+			"query": "interstellar zeppelins",
+			"disposition": "no-hit-preview",
+			"anchors": [],
+			"sha256": "2c93f692959df97f2682a3aca5e03e9f00d456f5d7feeb5e06f7ecd81df64386"
+		},
+		{
+			"id": "docs-code",
+			"file": "documentation.html.fixture",
+			"url": "https://example.test/docs/client",
+			"query": "byte continuations",
+			"disposition": "content",
+			"anchors": [
+				"Join byte continuations directly.",
+				"const result = await client.read",
+				"[1]",
+				"```"
+			],
+			"sha256": "978046b6c1b7c6c0e323fd3d55ce52d6fa762f8c0fc9a08e503ffa2a9945b8fb"
+		},
+		{
+			"id": "docs-structure",
+			"file": "documentation.html.fixture",
+			"url": "https://example.test/docs/client",
+			"query": "offset unit",
+			"disposition": "content",
+			"anchors": ["UTF-8 bytes", "lines", "Reference version two"],
+			"sha256": "978046b6c1b7c6c0e323fd3d55ce52d6fa762f8c0fc9a08e503ffa2a9945b8fb"
+		},
+		{
+			"id": "cjk",
+			"file": "cjk.html.fixture",
+			"url": "https://example.test/ja/storage",
+			"query": "電池の保管",
+			"disposition": "content",
+			"anchors": [
+				"保管温度は摂氏十八度です。",
+				"中文资料",
+				"😀",
+				"café"
+			],
+			"sha256": "ddf1c74e164a24e26a0c1e0856e4aee72cbef15d5482a91d32a7a2e100f79bd6"
+		},
+		{
+			"id": "fragment",
+			"file": "fragment.html.fixture",
+			"url": "https://example.test/parts/start",
+			"query": "relevant identifier",
+			"disposition": "content",
+			"anchors": ["opaque-fragment-7", "Meaningful URL parameters"],
+			"sha256": "919a21da5a608fb8c3967bdc783cc5cbb83c22dc9409e3721d7e8e01a3804241"
+		},
+		{
+			"id": "malformed",
+			"file": "malformed.html.fixture",
+			"url": "https://example.test/recovery",
+			"query": "recoverable text",
+			"disposition": "content-or-warning",
+			"anchors": ["Keep recoverable text", "Second item"],
+			"sha256": "d7ba089585b9fa1aa0776142e01b0897cc7b165e66cc097205de352ccfd57109"
+		},
+		{
+			"id": "challenge",
+			"file": "challenge.html.fixture",
+			"url": "https://example.test/challenge",
+			"query": "article content",
+			"disposition": "blocked-or-thin",
+			"anchors": ["Verify you are human"],
+			"sha256": "dbff11ba7da83082fbc3e9f43b54e1f0a407bf3330db41b3443d50fe0a81e978"
+		},
+		{
+			"id": "empty",
+			"file": "empty.html.fixture",
+			"url": "https://example.test/empty",
+			"query": "article content",
+			"disposition": "empty",
+			"anchors": [],
+			"sha256": "c25367a8a61dae591bc052704ddca120004c59ffe271e0c4373c90a0c1177595"
+		},
+		{
+			"id": "untrusted",
+			"file": "untrusted.html.fixture",
+			"url": "https://example.test/untrusted",
+			"query": "sample identifier",
+			"disposition": "untrusted-content",
+			"anchors": ["inert-source-42"],
+			"sha256": "dfded85a79031e763b97311d835b5556413f761262bb408b5c5667b50572195c"
+		}
+	]
+}

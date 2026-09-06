@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Malformed fixture</title></head><body>
+<article><h1>Recovery sample<h2>Nested heading</h2>
+<p>Original synthetic malformed HTML.<div><p>Keep recoverable text without claiming exact source HTML offsets.
+<ul><li>First item<li>Second item</ul><b><i>Unclosed formatting
+</article>
