@@ -15,6 +15,11 @@ import {
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
+export const tavily_extract_format_schema = v.picklist([
+	'markdown',
+	'text',
+]);
+
 const tavily_extract_response_schema = v.object({
 	results: v.array(
 		v.object({
@@ -42,9 +47,25 @@ export class TavilyExtractProvider implements ProcessingProvider {
 	async process_content(
 		url: string | string[],
 		extract_depth: 'basic' | 'advanced' = 'basic',
-		options?: { query?: string; chunks_per_source?: number },
+		options?: {
+			query?: string;
+			chunks_per_source?: number;
+			format?: 'markdown' | 'text';
+		},
 	): Promise<ProcessingResult> {
 		const urls = validate_processing_urls(url, this.name);
+		if (
+			options?.format !== undefined &&
+			!v.safeParse(tavily_extract_format_schema, options.format)
+				.success
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'Tavily extraction format must be markdown or text',
+				this.name,
+				{ retryable: false },
+			);
+		}
 		if (
 			(options?.query !== undefined &&
 				(typeof options.query !== 'string' ||
@@ -85,6 +106,7 @@ export class TavilyExtractProvider implements ProcessingProvider {
 							extract_depth,
 							query: options?.query,
 							chunks_per_source: options?.chunks_per_source,
+							format: options?.format,
 						}),
 						signal: AbortSignal.timeout(
 							config.processing.tavily_extract.timeout,

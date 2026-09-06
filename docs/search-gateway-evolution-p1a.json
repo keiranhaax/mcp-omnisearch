@@ -1,0 +1,177 @@
+{
+	"phase": "P1A Tavily public controls",
+	"base_revision": "69e388a5f9a249a9ad48a8efff78059bb9dc3689",
+	"runtime": {
+		"node": "v22.23.2",
+		"package_manager": "pnpm@11.9.0",
+		"new_dependencies": false
+	},
+	"baseline_focused": {
+		"passed": 35,
+		"files": 5
+	},
+	"final": {
+		"success": true,
+		"passed": 777,
+		"failed": 0,
+		"pending": 0,
+		"todo": 0,
+		"files": 66,
+		"added_tests": 46
+	},
+	"focused_controls_and_discovery": {
+		"passed": 109,
+		"files": 5
+	},
+	"initial_red_runs": {
+		"red-search-validation": {
+			"failed": 11,
+			"passed": 0,
+			"filtered_out": 16
+		},
+		"red-search-tool": {
+			"failed": 9,
+			"passed": 0,
+			"filtered_out": 0
+		},
+		"red-extract-format": {
+			"failed": 5,
+			"passed": 0,
+			"filtered_out": 10
+		},
+		"red-extract-tool": {
+			"failed": 14,
+			"passed": 1,
+			"filtered_out": 9
+		},
+		"schema-additions-red": {
+			"failed": 4,
+			"passed": 4,
+			"filtered_out": 0
+		}
+	},
+	"offline_http_smoke_groups": 12,
+	"schema_profiles": [
+		{
+			"profile": "all-providers",
+			"tools": [
+				"result_read",
+				"web_search",
+				"github_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 14,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-providers",
+			"tools": ["result_read"],
+			"count": 1,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-github",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 13,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "tavily-only",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract"
+			],
+			"count": 4,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		}
+	],
+	"references": [
+		{
+			"url": "https://docs.tavily.com/documentation/api-reference/endpoint/search.md",
+			"sha256": "519714b649b85620e4ceed12d29bb24c47d76cb9a020d81cfa8a7c4987b21a51",
+			"bytes": 28417,
+			"status": 200,
+			"retrieved_at": "2026-09-06T19:58:37.494305+00:00"
+		},
+		{
+			"url": "https://docs.tavily.com/documentation/api-reference/endpoint/extract.md",
+			"sha256": "b5e2f4679e3e3da83044ae8f30c54215d2bcb0d4aeb9e46715e3b3cf9fe70a62",
+			"bytes": 15053,
+			"status": 200,
+			"retrieved_at": "2026-09-06T19:58:37.452400+00:00"
+		},
+		{
+			"url": "https://github.com/spences10/mcp-omnisearch/commit/33a1b9e049f07d27a851ffad9df1ce908952fc42.patch",
+			"sha256": "943c509f23ce9d1c370ed1018f99c970eeb18079e8e5a251dfb56ec96a9a3b95",
+			"bytes": 11651,
+			"status": 200,
+			"retrieved_at": "2026-09-06T19:58:37.479741+00:00"
+		},
+		{
+			"url": "https://github.com/spences10/mcp-omnisearch/commit/2f7774650199ee9c71fcdd078e4a4a4dd6f0eec1.patch",
+			"sha256": "7255371e2f9483e1ba7ffe7d0277e2e6ada422e9d996cad311d03691d7d64837",
+			"bytes": 12082,
+			"status": 200,
+			"retrieved_at": "2026-09-06T19:58:37.505516+00:00"
+		},
+		{
+			"url": "https://raw.githubusercontent.com/spences10/mcp-omnisearch/33a1b9e049f07d27a851ffad9df1ce908952fc42/LICENSE",
+			"sha256": "17f6d4adc5b2db8062009c211a3a10e4f7e750dc819c80101c03b912877ab321",
+			"bytes": 1069,
+			"status": 200,
+			"retrieved_at": "2026-09-06T19:58:37.490405+00:00"
+		},
+		{
+			"url": "https://raw.githubusercontent.com/spences10/mcp-omnisearch/2f7774650199ee9c71fcdd078e4a4a4dd6f0eec1/LICENSE",
+			"sha256": "17f6d4adc5b2db8062009c211a3a10e4f7e750dc819c80101c03b912877ab321",
+			"bytes": 1069,
+			"status": 200,
+			"retrieved_at": "2026-09-06T19:58:37.525631+00:00"
+		}
+	],
+	"production_state": "unchanged in before/after integrity comparison",
+	"p0_fixture_data": "unchanged",
+	"checks": {
+		"format_lint_types": "passed",
+		"build": "passed",
+		"shellcheck": "passed",
+		"diff_whitespace": "passed"
+	},
+	"live_provider_calls": "not authorized; not run",
+	"deferred": [
+		"Remaining P1 compact output, request metadata, privacy decision, passage selector",
+		"P2-P6 runtime work",
+		"Live provider and staging checks",
+		"Production deployment and push"
+	]
+}

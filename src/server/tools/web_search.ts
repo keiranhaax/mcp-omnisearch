@@ -19,7 +19,10 @@ import { tool_descriptions } from './descriptions.js';
 import { config } from '../../config/env.js';
 import { BraveSearchProvider } from '../../providers/search/brave/index.js';
 import { ExaSearchProvider } from '../../providers/search/exa/index.js';
-import { TavilySearchProvider } from '../../providers/search/tavily/index.js';
+import {
+	TavilySearchProvider,
+	tavily_search_controls_schema,
+} from '../../providers/search/tavily/index.js';
 import { YouSearchProvider } from '../../providers/search/you/index.js';
 
 export type WebSearchProviderName =
@@ -67,6 +70,7 @@ export const register_web_search = (
 				openWorldHint: true,
 			},
 			schema: v.object({
+				...tavily_search_controls_schema.entries,
 				query: v.pipe(
 					v.string(),
 					v.minLength(1),
@@ -189,8 +193,24 @@ export const register_web_search = (
 			output_schema,
 			system_prompt,
 			additional_queries,
+			search_depth,
+			topic,
+			time_range,
 		}) => {
 			try {
+				if (
+					provider !== 'tavily' &&
+					[search_depth, topic, time_range].some(
+						(value) => value !== undefined,
+					)
+				) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'Tavily search controls require provider=tavily',
+						'web_search',
+						{ retryable: false },
+					);
+				}
 				if (
 					provider === 'tavily' &&
 					limit !== undefined &&
@@ -224,6 +244,9 @@ export const register_web_search = (
 					output_schema,
 					system_prompt,
 					additional_queries,
+					...(provider === 'tavily'
+						? { search_depth, topic, time_range }
+						: {}),
 				});
 				const safe_results = handle_large_result(
 					results,

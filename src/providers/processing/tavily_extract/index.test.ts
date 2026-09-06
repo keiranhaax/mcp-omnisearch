@@ -13,6 +13,56 @@ const fetch_mock = vi.fn();
 const previous_api_key = config.processing.tavily_extract.api_key;
 
 describe('TavilyExtractProvider response validation', () => {
+	it.each(['markdown', 'text'] as const)(
+		'forwards explicit %s format without changing canonical mapping',
+		async (format) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						results: [
+							{
+								url: 'https://example.test',
+								raw_content: 'Evidence',
+							},
+						],
+						failed_results: [],
+					}),
+				),
+			);
+			const result =
+				await new TavilyExtractProvider().process_content(
+					'https://example.test',
+					'basic',
+					{ format },
+				);
+			expect(JSON.parse(fetch_mock.mock.calls[0][1].body)).toEqual({
+				urls: ['https://example.test'],
+				include_images: false,
+				extract_depth: 'basic',
+				format,
+			});
+			expect(result.content).toBe('Evidence');
+			expect(result.raw_contents).toEqual([
+				{ url: 'https://example.test', content: 'Evidence' },
+			]);
+		},
+	);
+	it.each(['html', null, 123])(
+		'rejects unsupported direct format %o before networking',
+		async (format) => {
+			await expect(
+				new TavilyExtractProvider().process_content(
+					'https://example.test',
+					'basic',
+					{ format } as any,
+				),
+			).rejects.toMatchObject({
+				type: 'INVALID_INPUT',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
 	it.each([
 		{ chunks_per_source: 3 },
 		{ query: 'test', chunks_per_source: 0 },

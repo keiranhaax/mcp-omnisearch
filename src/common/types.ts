@@ -14,6 +14,9 @@ export interface BaseSearchParams {
 	limit?: number;
 	include_domains?: string[];
 	exclude_domains?: string[];
+	search_depth?: 'basic' | 'advanced' | 'fast' | 'ultra-fast';
+	topic?: 'general' | 'news' | 'finance';
+	time_range?: 'day' | 'week' | 'month' | 'year';
 	output_schema?: Record<string, unknown>;
 	search_type?: string;
 	category?: string;

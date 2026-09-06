@@ -1,4 +1,5 @@
-// P0 fixture verification; --update explicitly refreshes captured schemas.
+// P0 fixture verification; --p1a allows only reviewed optional additions.
+// --update refreshes P0 snapshots and cannot be combined with --p1a.
 // Run only in an approved isolated worktree,
 // after building the exact source revision being recorded. No provider calls.
 import assert from 'node:assert/strict';
@@ -10,9 +11,27 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 assert(
-	process.argv.slice(2).every((argument) => argument === '--update'),
+	process.argv
+		.slice(2)
+		.every((argument) => ['--update', '--p1a'].includes(argument)),
 );
 const update = process.argv.includes('--update');
+const p1a = process.argv.includes('--p1a');
+assert(
+	!(update && p1a),
+	'P1A verification must not overwrite P0 fixtures',
+);
+const additions = p1a
+	? JSON.parse(
+			await readFile(
+				new URL(
+					'../evolution-p1a/schema-additions.json',
+					import.meta.url,
+				),
+				'utf8',
+			),
+		)
+	: {};
 const keys = [
 	'TAVILY_API_KEY',
 	'BRAVE_API_KEY',
@@ -136,11 +155,25 @@ for (const profile of profiles) {
 				target,
 				JSON.stringify(tools, null, '	') + '\n',
 			);
-		else
+		else {
+			const legacy = structuredClone(tools);
+			for (const tool of legacy) {
+				for (const [field, schema] of Object.entries(
+					additions[tool.name] ?? {},
+				)) {
+					assert.deepEqual(
+						tool.inputSchema.properties[field],
+						schema,
+					);
+					assert(!tool.inputSchema.required.includes(field));
+					delete tool.inputSchema.properties[field];
+				}
+			}
 			assert.deepEqual(
-				tools,
+				legacy,
 				JSON.parse(await readFile(target, 'utf8')),
 			);
+		}
 		console.log(
 			JSON.stringify({
 				profile: profile.name,

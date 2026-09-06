@@ -48,6 +48,15 @@ const configure = (enabled: (name: string) => boolean) => {
 };
 const make_server = () =>
 	create_server({ name: 'p0-offline-fixture', version: '1' });
+const p1a_additions = JSON.parse(
+	readFileSync(
+		new URL(
+			'./fixtures/evolution-p1a/schema-additions.json',
+			import.meta.url,
+		),
+		'utf8',
+	),
+) as Record<string, Record<string, unknown>>;
 const snapshot = (name: string) =>
 	JSON.parse(
 		readFileSync(
@@ -58,6 +67,28 @@ const snapshot = (name: string) =>
 			'utf8',
 		),
 	);
+// Preserve the captured P0 schemas byte-for-byte; permit only reviewed
+// optional P1A additions, checking their exact client-visible definitions.
+const expect_p0_compatibility = (
+	tools: Awaited<ReturnType<typeof discover>>,
+	profile: string,
+) => {
+	const legacy = structuredClone(tools);
+	for (const tool of legacy) {
+		const properties = tool.inputSchema.properties as Record<
+			string,
+			unknown
+		>;
+		for (const [field, schema] of Object.entries(
+			p1a_additions[tool.name] ?? {},
+		)) {
+			expect(properties[field]).toEqual(schema);
+			expect(tool.inputSchema.required).not.toContain(field);
+			delete properties[field];
+		}
+	}
+	expect(legacy).toEqual(snapshot(profile));
+};
 const discover = async () => {
 	const response: any = await make_server().receive({
 		jsonrpc: '2.0',
@@ -126,14 +157,14 @@ describe('P0 configured discovery contract', () => {
 					?.inputSchema,
 			).toEqual(converted);
 		}
-		expect(tools).toEqual(snapshot('all-providers'));
+		expect_p0_compatibility(tools, 'all-providers');
 	});
 
 	it('retains only result_read without any configured provider', async () => {
 		configure(() => false);
 		const tools = await discover();
 		expect(tools.map(({ name }) => name)).toEqual(['result_read']);
-		expect(tools).toEqual(snapshot('no-providers'));
+		expect_p0_compatibility(tools, 'no-providers');
 	});
 
 	it('removes only github_search when the GitHub key is missing', async () => {
@@ -142,7 +173,7 @@ describe('P0 configured discovery contract', () => {
 		expect(tools.map(({ name }) => name).sort()).toEqual(
 			all_tool_names.filter((name) => name !== 'github_search'),
 		);
-		expect(tools).toEqual(snapshot('no-github'));
+		expect_p0_compatibility(tools, 'no-github');
 	});
 
 	it('advertises the Tavily-only provider enums without unrelated tools', async () => {
@@ -154,10 +185,10 @@ describe('P0 configured discovery contract', () => {
 			'web_extract',
 			'web_search',
 		]);
-		expect(tools).toEqual(snapshot('tavily-only'));
+		expect_p0_compatibility(tools, 'tavily-only');
 	});
 
-	it('does not advertise compact mode, chunk count, or a local extractor yet', async () => {
+	it('adds P1A chunks while compact mode and a local extractor remain absent', async () => {
 		const tools = await discover();
 		for (const name of ['web_search', 'web_extract']) {
 			const schema = tools.find(
@@ -167,7 +198,7 @@ describe('P0 configured discovery contract', () => {
 		}
 		const extract = tools.find(({ name }) => name === 'web_extract')!;
 		expect(extract.inputSchema.properties).toHaveProperty('query');
-		expect(extract.inputSchema.properties).not.toHaveProperty(
+		expect(extract.inputSchema.properties).toHaveProperty(
 			'chunks_per_source',
 		);
 		expect(JSON.stringify(extract.inputSchema)).not.toContain(

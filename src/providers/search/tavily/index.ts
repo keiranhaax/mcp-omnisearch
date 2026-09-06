@@ -13,11 +13,40 @@ import {
 } from '../../../common/search_operators.js';
 import {
 	BaseSearchParams,
+	ErrorType,
+	ProviderError,
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
+
+export const tavily_search_controls_schema = v.object({
+	search_depth: v.optional(
+		v.pipe(
+			v.picklist(['basic', 'advanced', 'fast', 'ultra-fast']),
+			v.description(
+				'Tavily only. Default basic; advanced uses more provider credits. No automatic depth selection.',
+			),
+		),
+	),
+	topic: v.optional(
+		v.pipe(
+			v.picklist(['general', 'news', 'finance']),
+			v.description(
+				'Tavily only. Default general; news/finance cannot use a mapped country operator.',
+			),
+		),
+	),
+	time_range: v.optional(
+		v.pipe(
+			v.picklist(['day', 'week', 'month', 'year']),
+			v.description(
+				'Tavily only. Relative recency; cannot combine with before:/after: date operators.',
+			),
+		),
+	),
+});
 
 const tavily_search_response_schema = v.object({
 	results: v.optional(
@@ -58,6 +87,14 @@ export class TavilySearchProvider implements SearchProvider {
 		'Search the web using Tavily Search API. Best for factual queries requiring reliable sources and citations. Supports domain filtering through API parameters (include_domains/exclude_domains). Provides high-quality results for technical, scientific, and academic topics. Use when you need verified information with strong citation support.';
 
 	async search(params: BaseSearchParams): Promise<SearchResult[]> {
+		if (!v.safeParse(tavily_search_controls_schema, params).success) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'Invalid Tavily search controls',
+				this.name,
+				{ retryable: false },
+			);
+		}
 		const api_key = validate_api_key(
 			config.search.tavily.api_key,
 			this.name,
@@ -82,6 +119,32 @@ export class TavilySearchProvider implements SearchProvider {
 							).length === 1)),
 			)
 			.map((op) => op.type);
+
+		if (
+			params.time_range !== undefined &&
+			parsed_query.operators.some(
+				(op) => op.type === 'before' || op.type === 'after',
+			)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'Tavily time_range cannot be combined with before:/after: operators',
+				this.name,
+				{ retryable: false },
+			);
+		}
+		if (
+			params.topic !== undefined &&
+			params.topic !== 'general' &&
+			mapped_types.includes('location')
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'Tavily country operators require topic=general',
+				this.name,
+				{ retryable: false },
+			);
+		}
 
 		const search_request = async () => {
 			try {
@@ -113,8 +176,9 @@ export class TavilySearchProvider implements SearchProvider {
 						include_domains.length > 0 ? include_domains : [],
 					exclude_domains:
 						exclude_domains.length > 0 ? exclude_domains : [],
-					search_depth: 'basic',
-					topic: 'general',
+					search_depth: params.search_depth ?? 'basic',
+					topic: params.topic ?? 'general',
+					time_range: params.time_range,
 				};
 
 				// Map date operators to Tavily's start_date/end_date

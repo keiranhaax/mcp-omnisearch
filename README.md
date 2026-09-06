@@ -115,6 +115,62 @@ Tavily and Exa expose provider-aware domain and retrieval options
 through their tool schemas. Inspect MCP discovery for the current
 schema instead of assuming every provider accepts the same fields.
 
+### Tavily search and extraction controls
+
+`web_search` accepts these optional fields only with
+`provider: "tavily"`:
+
+- `search_depth`: `basic`, `advanced`, `fast`, or `ultra-fast`. The
+  default remains `basic`; advanced uses more provider credits. No
+  automatic depth selection is enabled.
+- `topic`: `general`, `news`, or `finance`. The default remains
+  `general`. A country operator mapped to Tavily's `country` field
+  requires `topic: "general"`.
+- `time_range`: `day`, `week`, `month`, or `year`. Omitted means no
+  additional recency filter. The gateway conservatively rejects a
+  combination with recognized `before:`/`after:` query operators
+  rather than silently choosing one date constraint.
+
+`web_extract` retains its existing Tavily `query` and `extract_depth`
+controls and adds:
+
+- `chunks_per_source`: an integer from 1 through 5, requiring a
+  non-empty query. This asks Tavily for selected chunks, not the full
+  page. `result_read` can recover all content the gateway received,
+  not page content the provider omitted.
+- `format`: `markdown` or `text`, with no query required. Omitted
+  preserves the existing provider default, Markdown.
+
+The new fields reject use with other providers before dispatch.
+Unspecified defaults, legacy response shapes, retries, pagination,
+provider selection, and Firecrawl's separate format options remain
+unchanged. No fallback provider or additional request is introduced.
+Query-conditioned provider extraction is not local compact mode.
+
+```json
+{
+	"provider": "tavily",
+	"query": "recent database releases",
+	"search_depth": "fast",
+	"topic": "news",
+	"time_range": "week"
+}
+```
+
+```json
+{
+	"provider": "tavily",
+	"url": "https://example.com/manual",
+	"query": "installation requirements",
+	"chunks_per_source": 3,
+	"format": "text"
+}
+```
+
+See [P1A provenance](docs/feature-provenance.md) for the exact donor
+revisions and verified documentation contracts. Live provider behavior
+and deployment require separate verification.
+
 ## Configuration
 
 ### Local stdio client

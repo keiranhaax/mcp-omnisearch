@@ -25,7 +25,10 @@ import { FirecrawlCrawlProvider } from '../../providers/processing/firecrawl_cra
 import { FirecrawlExtractProvider } from '../../providers/processing/firecrawl_extract/index.js';
 import { FirecrawlMapProvider } from '../../providers/processing/firecrawl_map/index.js';
 import { FirecrawlScrapeProvider } from '../../providers/processing/firecrawl_scrape/index.js';
-import { TavilyExtractProvider } from '../../providers/processing/tavily_extract/index.js';
+import {
+	TavilyExtractProvider,
+	tavily_extract_format_schema,
+} from '../../providers/processing/tavily_extract/index.js';
 import { FirecrawlSearchProvider } from '../../providers/processing/firecrawl_search/index.js';
 
 export type WebExtractProvider = 'tavily' | 'firecrawl' | 'exa';
@@ -361,6 +364,25 @@ export const register_web_extract = (
 				openWorldHint: true,
 			},
 			schema: v.object({
+				chunks_per_source: v.optional(
+					v.pipe(
+						v.number(),
+						v.integer(),
+						v.minValue(1),
+						v.maxValue(5),
+						v.description(
+							'Tavily extract only. Maximum 1-5 returned chunks per source; requires a non-empty query. This limits provider content, not local presentation.',
+						),
+					),
+				),
+				format: v.optional(
+					v.pipe(
+						tavily_extract_format_schema,
+						v.description(
+							'Tavily extract only. markdown or text; omitted preserves the provider default markdown.',
+						),
+					),
+				),
 				url: v.optional(
 					v.pipe(
 						v.union([
@@ -441,8 +463,21 @@ export const register_web_extract = (
 			extract_depth,
 			firecrawl_options,
 			firecrawl_search_options,
+			chunks_per_source,
+			format,
 		}) => {
 			try {
+				if (
+					provider !== 'tavily' &&
+					(chunks_per_source !== undefined || format !== undefined)
+				) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'Tavily extraction controls require provider=tavily',
+						'web_extract',
+						{ retryable: false },
+					);
+				}
 				const resolved_mode =
 					mode || default_modes[provider as WebExtractProvider];
 
@@ -530,7 +565,13 @@ export const register_web_extract = (
 							: provider === 'firecrawl' && resolved_mode === 'search'
 								? firecrawl_search_options
 								: provider === 'tavily'
-									? { query }
+									? {
+											query,
+											...(chunks_per_source !== undefined
+												? { chunks_per_source }
+												: {}),
+											...(format !== undefined ? { format } : {}),
+										}
 									: undefined;
 
 				const result = await selected.process_content(

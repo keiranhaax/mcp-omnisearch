@@ -13,6 +13,117 @@ const fetch_mock = vi.fn();
 const previous_api_key = config.search.tavily.api_key;
 
 describe('TavilySearchProvider', () => {
+	it.each([
+		{ search_depth: 'extreme' },
+		{ search_depth: null },
+		{ topic: 'unsupported' },
+		{ topic: 1 },
+		{ time_range: 'decade' },
+		{ time_range: '' },
+	])(
+		'rejects invalid direct search controls before networking: %o',
+		async (controls) => {
+			await expect(
+				new TavilySearchProvider().search({
+					query: 'report',
+					...controls,
+				} as any),
+			).rejects.toMatchObject({
+				type: 'INVALID_INPUT',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		{ query: 'report after:2024', time_range: 'week' },
+		{ query: 'report before:2024-01-01', time_range: 'day' },
+		{
+			query: 'report after:2024 OR before:2023',
+			time_range: 'month',
+		},
+		{ query: 'report loc:us', topic: 'news' },
+		{ query: 'report location:uk', topic: 'finance' },
+	])(
+		'rejects incompatible explicit controls without discarding query constraints: %o',
+		async (params) => {
+			await expect(
+				new TavilySearchProvider().search(params as any),
+			).rejects.toMatchObject({
+				type: 'INVALID_INPUT',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each(['basic', 'advanced', 'fast', 'ultra-fast'] as const)(
+		'accepts supported depth %s',
+		async (search_depth) => {
+			fetch_mock.mockResolvedValue(new Response('{"results":[]}'));
+			await new TavilySearchProvider().search({
+				query: 'report',
+				search_depth,
+			});
+			expect(
+				JSON.parse(fetch_mock.mock.calls[0][1].body).search_depth,
+			).toBe(search_depth);
+		},
+	);
+
+	it('retains unmapped quoted date text and Boolean country alternatives', async () => {
+		fetch_mock.mockResolvedValue(new Response('{"results":[]}'));
+		const query = '"after:2024" loc:us OR loc:uk';
+		await new TavilySearchProvider().search({
+			query,
+			topic: 'news',
+			time_range: 'week',
+		});
+		const request = JSON.parse(fetch_mock.mock.calls[0][1].body);
+		expect(request.query).toBe(query);
+		expect(request).not.toHaveProperty('country');
+		expect(request).not.toHaveProperty('start_date');
+	});
+	it('forwards explicit depth, topic, and recency without changing result shape', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: [
+						{
+							title: 'Report',
+							url: 'https://example.test/report',
+							content: 'Evidence',
+							score: 0.5,
+						},
+					],
+				}),
+			),
+		);
+		const result = await new TavilySearchProvider().search({
+			query: 'latest market report',
+			search_depth: 'advanced',
+			topic: 'finance',
+			time_range: 'week',
+		});
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body),
+		).toMatchObject({
+			search_depth: 'advanced',
+			topic: 'finance',
+			time_range: 'week',
+			max_results: 5,
+		});
+		expect(result).toEqual([
+			{
+				title: 'Report',
+				url: 'https://example.test/report',
+				snippet: 'Evidence',
+				score: 0.5,
+				source_provider: 'tavily',
+			},
+		]);
+	});
 	it('does not turn Boolean phrase alternatives into a global exact match requirement', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(JSON.stringify({ results: [] })),

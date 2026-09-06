@@ -1,0 +1,32 @@
+{
+	"web_search": {
+		"search_depth": {
+			"enum": ["basic", "advanced", "fast", "ultra-fast"],
+			"type": "string",
+			"description": "Tavily only. Default basic; advanced uses more provider credits. No automatic depth selection."
+		},
+		"topic": {
+			"enum": ["general", "news", "finance"],
+			"type": "string",
+			"description": "Tavily only. Default general; news/finance cannot use a mapped country operator."
+		},
+		"time_range": {
+			"enum": ["day", "week", "month", "year"],
+			"type": "string",
+			"description": "Tavily only. Relative recency; cannot combine with before:/after: date operators."
+		}
+	},
+	"web_extract": {
+		"chunks_per_source": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 5,
+			"description": "Tavily extract only. Maximum 1-5 returned chunks per source; requires a non-empty query. This limits provider content, not local presentation."
+		},
+		"format": {
+			"enum": ["markdown", "text"],
+			"type": "string",
+			"description": "Tavily extract only. markdown or text; omitted preserves the provider default markdown."
+		}
+	}
+}
