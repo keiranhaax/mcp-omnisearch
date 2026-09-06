@@ -57,8 +57,8 @@ const firecrawl_scrape_response_schema = v.object({
 			html: v.optional(v.string()),
 			rawHtml: v.optional(v.string()),
 			screenshot: v.optional(v.string()),
-			answer: v.optional(v.string()),
-			highlights: v.optional(v.string()),
+			answer: v.nullish(v.string()),
+			highlights: v.nullish(v.string()),
 			links: v.optional(v.array(v.string())),
 			metadata: v.optional(v.record(v.string(), v.unknown())),
 			llm_extraction: v.optional(v.unknown()),
@@ -81,6 +81,19 @@ const assert_valid_options = (
 	options: FirecrawlScrapeOptions,
 	provider_name: string,
 ) => {
+	for (const key of ['maxAge', 'minAge', 'wait_for_ms'] as const) {
+		const value = options[key];
+		if (
+			value !== undefined &&
+			(!Number.isSafeInteger(value) || value < 0)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				`${key} must be a nonnegative integer`,
+				provider_name,
+			);
+		}
+	}
 	validate_firecrawl_formats(options.formats, provider_name);
 	if (
 		options.formats &&
@@ -232,7 +245,11 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 
 						const content = extract_content(data.data);
 
-						if (!content) {
+						// A null answer/highlights is an explicit, valid "no match".
+						const no_match =
+							data.data.answer === null ||
+							data.data.highlights === null;
+						if (!content && !no_match) {
 							throw new ProviderError(
 								ErrorType.PROVIDER_ERROR,
 								'No content extracted from URL',

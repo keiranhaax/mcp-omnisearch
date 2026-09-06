@@ -2,11 +2,13 @@ import * as v from 'valibot';
 import { http_json } from './http.js';
 import { parse_provider_response } from './provider_response.js';
 import {
+	delay,
 	is_non_retryable_provider_error,
 	is_retryable_error,
 } from './retry.js';
 import { ErrorType, ProviderError } from './types.js';
 import {
+	combine_request_signal,
 	get_request_signal,
 	throw_if_aborted,
 	with_abort_signal,
@@ -150,27 +152,13 @@ export const create_firecrawl_budget = (timeout: number) => {
 	};
 };
 
-const wait_for_poll = async (ms: number, signal: AbortSignal) => {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	try {
-		await with_abort_signal(
-			() =>
-				new Promise<void>((resolve) => {
-					timer = setTimeout(resolve, ms);
-				}),
-			signal,
-		);
-	} finally {
-		clearTimeout(timer);
-	}
-};
-
 export interface PollingConfig {
 	provider_name: string;
 	status_url: string;
 	api_key: string;
 	max_attempts: number;
 	poll_interval: number;
+	/** Per-GET timeout; also the total budget if no signal is supplied. */
 	timeout: number;
 	/**
 	 * When true, exhausting max_attempts returns the last successfully
@@ -179,6 +167,7 @@ export interface PollingConfig {
 	 * (all transient failures), the timeout is still thrown.
 	 */
 	return_on_exhaustion?: boolean;
+	/** Overall operation budget, separate from each GET timeout. */
 	signal?: AbortSignal;
 }
 
@@ -199,7 +188,9 @@ export const poll_firecrawl_job = async <
 	const budget = config.signal
 		? undefined
 		: create_firecrawl_budget(config.timeout);
-	const signal = config.signal ?? budget!.signal;
+	const signal = combine_request_signal(
+		config.signal ?? budget!.signal,
+	)!;
 	let next_poll_delay = config.poll_interval;
 	try {
 		for (
@@ -207,11 +198,16 @@ export const poll_firecrawl_job = async <
 			attempts < config.max_attempts;
 			attempts++
 		) {
-			await wait_for_poll(next_poll_delay, signal);
+			await delay(next_poll_delay, signal);
 			next_poll_delay = config.poll_interval;
 
 			let status_result: v.InferOutput<TSchema> &
 				FirecrawlPollingResponse;
+			const attempt = create_firecrawl_budget(config.timeout);
+			const attempt_signal = AbortSignal.any([
+				signal,
+				attempt.signal,
+			]);
 			try {
 				const raw_status_result = await with_abort_signal(
 					() =>
@@ -222,9 +218,9 @@ export const poll_firecrawl_job = async <
 								Authorization: `Bearer ${config.api_key}`,
 								'Content-Type': 'application/json',
 							},
-							signal,
+							signal: attempt_signal,
 						}),
-					signal,
+					attempt_signal,
 				);
 				const polling_output = parse_provider_response(
 					config.provider_name,
@@ -245,7 +241,11 @@ export const poll_firecrawl_job = async <
 				);
 			} catch (error) {
 				throw_if_aborted(signal);
+				// Only this GET's own timer permits a retry of a timeout.
+				if (attempt.signal.aborted) continue;
 				if (
+					(error instanceof Error &&
+						['AbortError', 'TimeoutError'].includes(error.name)) ||
 					is_non_retryable_provider_error(error) ||
 					(error instanceof ProviderError &&
 						!is_retryable_error(error))
@@ -266,6 +266,8 @@ export const poll_firecrawl_job = async <
 					);
 				}
 				continue;
+			} finally {
+				attempt.dispose();
 			}
 
 			if (
@@ -298,8 +300,11 @@ export const poll_firecrawl_job = async <
 			config.provider_name,
 		);
 	} catch (error) {
+		// A caller timeout is cancellation, not provider wait exhaustion.
+		throw_if_aborted(get_request_signal());
 		if (
 			config.return_on_exhaustion &&
+			signal.aborted &&
 			last_pending &&
 			error instanceof Error &&
 			error.name === 'TimeoutError'

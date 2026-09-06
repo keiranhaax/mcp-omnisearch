@@ -91,6 +91,14 @@ export const mark_provider_error = (
 	provider: string,
 	error: unknown,
 ) => {
+	if (error instanceof Error && error.name === 'TimeoutError') {
+		error = new ProviderError(
+			ErrorType.API_ERROR,
+			'Operation timed out',
+			provider,
+			{ retryable: false, cause: 'timeout' },
+		);
+	}
 	if (!(error instanceof ProviderError)) return;
 	if (error.type === ErrorType.INVALID_INPUT) return;
 

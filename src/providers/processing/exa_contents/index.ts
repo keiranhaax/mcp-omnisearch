@@ -27,7 +27,7 @@ interface ExaContentsRequest {
 const exa_contents_response_schema = v.object({
 	results: v.array(
 		v.object({
-			id: v.string(),
+			id: v.optional(v.string()),
 			title: v.nullish(v.string()),
 			url: v.string(),
 			text: v.nullish(v.string()),
@@ -36,6 +36,21 @@ const exa_contents_response_schema = v.object({
 			publishedDate: v.nullish(v.string()),
 			author: v.nullish(v.string()),
 		}),
+	),
+	statuses: v.optional(
+		v.array(
+			v.object({
+				id: v.string(),
+				status: v.picklist(['success', 'error']),
+				source: v.optional(v.picklist(['cached', 'crawled'])),
+				error: v.nullish(
+					v.object({
+						tag: v.optional(v.string()),
+						httpStatusCode: v.nullish(v.number()),
+					}),
+				),
+			}),
+		),
 	),
 	requestId: v.optional(v.string()),
 	costDollars: v.optional(v.unknown()),
@@ -120,11 +135,33 @@ export class ExaContentsProvider implements ProcessingProvider {
 				const raw_contents: Array<{ url: string; content: string }> =
 					[];
 				let total_word_count = 0;
+				const failed_urls = new Set(
+					(data.statuses ?? [])
+						.filter((item) => item.status === 'error')
+						.map((item) => item.id),
+				);
 
 				for (const result of data.results) {
+					if (
+						failed_urls.has(result.id ?? result.url) ||
+						failed_urls.has(result.url)
+					)
+						continue;
 					const content =
-						result.text || result.summary || 'No content available';
-					const word_count = content.split(/\s+/).length;
+						[
+							result.text,
+							result.summary,
+							result.highlights
+								?.filter((text) => text.trim())
+								.join('\n\n'),
+						].find((text) => text?.trim()) ?? '';
+					if (!content) {
+						failed_urls.add(result.id ?? result.url);
+						continue;
+					}
+					const word_count = content
+						.split(/\s+/)
+						.filter(Boolean).length;
 					total_word_count += word_count;
 
 					// Add to combined content
@@ -161,14 +198,27 @@ export class ExaContentsProvider implements ProcessingProvider {
 					});
 				}
 
+				if (raw_contents.length === 0) {
+					throw new ProviderError(
+						ErrorType.PROVIDER_ERROR,
+						'No content returned from Exa contents',
+						this.name,
+						{ retryable: false },
+					);
+				}
+
 				return {
 					content: combined_content,
 					raw_contents,
 					metadata: {
-						title: `Content from ${data.results.length} Exa results`,
+						title: `Content from ${raw_contents.length} Exa results`,
 						word_count: total_word_count,
-						urls_processed: data.results.length,
-						successful_extractions: data.results.length,
+						urls_processed: items.length,
+						successful_extractions: raw_contents.length,
+						failed_urls: failed_urls.size
+							? [...failed_urls]
+							: undefined,
+						statuses: data.statuses,
 						extract_depth,
 						requestId: data.requestId,
 					},
@@ -179,6 +229,8 @@ export class ExaContentsProvider implements ProcessingProvider {
 			}
 		};
 
-		return retry_with_backoff(process_request);
+		return retry_with_backoff(process_request, {
+			timeout_ms: config.processing.exa_contents.timeout,
+		});
 	}
 }

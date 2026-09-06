@@ -2,6 +2,10 @@ import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
 import { create_error_response } from '../../common/errors.js';
+import {
+	get_request_signal,
+	throw_if_aborted,
+} from '../../common/request_context.js';
 import { handle_large_result } from '../../common/results.js';
 import {
 	ErrorType,
@@ -21,7 +25,10 @@ import { ExaAnswerProvider } from '../../providers/ai_response/exa_answer/index.
 import { ExaDeepResearchProvider } from '../../providers/ai_response/exa_deep_research/index.js';
 import { LinkupProvider } from '../../providers/ai_response/linkup/index.js';
 import { BraveAnswersProvider } from '../../providers/ai_response/brave_answers/index.js';
-import { TavilyResearchProvider } from '../../providers/ai_response/tavily_research/index.js';
+import {
+	TavilyResearchProvider,
+	tavily_request_id_schema,
+} from '../../providers/ai_response/tavily_research/index.js';
 
 export type AISearchProviderName =
 	| 'exa_answer'
@@ -91,11 +98,32 @@ export const register_ai_search = (
 				openWorldHint: true,
 			},
 			schema: v.object({
-				query: v.pipe(
-					v.string(),
-					v.minLength(1),
-					v.maxLength(10000),
-					v.description('Question or search query'),
+				query: v.optional(
+					v.pipe(
+						v.string(),
+						v.minLength(1),
+						v.maxLength(10000),
+						v.description(
+							'Question or search query; required except for Tavily action=status',
+						),
+					),
+				),
+				action: v.optional(
+					v.pipe(
+						v.picklist(['research', 'status']),
+						v.description(
+							'Default research. status is only for tavily_research and performs a read-only GET.',
+						),
+					),
+					'research',
+				),
+				request_id: v.optional(
+					v.pipe(
+						tavily_request_id_schema,
+						v.description(
+							'Existing Tavily task ID, required only for action=status',
+						),
+					),
 				),
 				provider: v.pipe(
 					v.picklist(provider_names),
@@ -140,12 +168,40 @@ export const register_ai_search = (
 		async ({
 			query,
 			provider,
+			action = 'research',
+			request_id,
 			limit,
 			output_schema,
 			exa_deep_search_type,
 			system_prompt,
 		}) => {
 			try {
+				throw_if_aborted(get_request_signal());
+				if (action === 'status') {
+					if (
+						provider !== 'tavily_research' ||
+						query !== undefined ||
+						!v.safeParse(tavily_request_id_schema, request_id).success
+					) {
+						throw new ProviderError(
+							ErrorType.INVALID_INPUT,
+							'Tavily status requires request_id only; research requires query only',
+							'ai_search',
+						);
+					}
+				} else if (
+					action !== 'research' ||
+					request_id !== undefined ||
+					typeof query !== 'string' ||
+					!query.trim() ||
+					query.length > 10000
+				) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'Tavily status requires request_id only; research requires query only',
+						'ai_search',
+					);
+				}
 				const selected = providers.get(provider);
 				if (!selected) {
 					throw new ProviderError(
@@ -155,13 +211,20 @@ export const register_ai_search = (
 					);
 				}
 
-				const results = await selected.search({
-					query,
-					limit,
-					output_schema,
-					search_type: exa_deep_search_type,
-					system_prompt,
-				} as any);
+				const results =
+					action === 'status'
+						? await (selected as TavilyResearchProvider).status({
+								request_id: request_id!,
+								limit,
+							})
+						: await selected.search({
+								query,
+								limit,
+								output_schema,
+								search_type: exa_deep_search_type,
+								system_prompt,
+							} as any);
+				throw_if_aborted(get_request_signal());
 				const safe_results = handle_large_result(
 					results,
 					'ai_search',
@@ -176,6 +239,7 @@ export const register_ai_search = (
 					],
 				};
 			} catch (error) {
+				throw_if_aborted(get_request_signal());
 				mark_provider_error('ai_response', provider, error);
 				const error_response = create_error_response(error as Error);
 				return {

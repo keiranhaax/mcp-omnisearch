@@ -1,3 +1,5 @@
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import {
 	handle_provider_error,
 	sanitize_query,
@@ -20,26 +22,39 @@ interface ExaDeepResearchRequest {
 	systemPrompt?: string;
 }
 
-interface ExaDeepResearchResult {
-	id?: string;
-	title?: string;
-	url?: string;
-	text?: string;
-	summary?: string;
-	publishedDate?: string;
-	author?: string;
-	score?: number;
-}
-
-interface ExaDeepResearchResponse {
-	requestId?: string;
-	output?: {
-		content?: unknown;
-		grounding?: unknown;
-	};
-	results?: ExaDeepResearchResult[];
-	costDollars?: unknown;
-}
+const exa_deep_response_schema = v.object({
+	requestId: v.optional(v.string()),
+	output: v.object({
+		content: v.pipe(
+			v.unknown(),
+			v.check(
+				(value) =>
+					value !== undefined &&
+					value !== null &&
+					(typeof value !== 'string' || value.trim().length > 0),
+			),
+		),
+		grounding: v.optional(v.unknown()),
+	}),
+	results: v.optional(
+		v.array(
+			v.object({
+				id: v.optional(v.string()),
+				url: v.pipe(
+					v.string(),
+					v.check((value) => value.trim().length > 0),
+				),
+				title: v.nullish(v.string()),
+				text: v.nullish(v.string()),
+				summary: v.nullish(v.string()),
+				publishedDate: v.nullish(v.string()),
+				author: v.nullish(v.string()),
+				score: v.nullish(v.number()),
+			}),
+		),
+	),
+	costDollars: v.optional(v.unknown()),
+});
 
 const default_output_schema = {
 	type: 'text',
@@ -78,7 +93,7 @@ export class ExaDeepResearchProvider implements SearchProvider {
 					request_body.systemPrompt = params.system_prompt;
 				}
 
-				const data = await http_json<ExaDeepResearchResponse>(
+				const raw_data = await http_json(
 					this.name,
 					`${config.ai_response.exa_deep_research.base_url}/search`,
 					{
@@ -95,12 +110,17 @@ export class ExaDeepResearchProvider implements SearchProvider {
 					},
 				);
 
-				const answer = stringify_content(data.output?.content);
+				const data = parse_provider_response(
+					this.name,
+					exa_deep_response_schema,
+					raw_data,
+				);
+				const answer = stringify_content(data.output.content);
 				const results: SearchResult[] = [
 					{
 						title: 'Exa Deep Research',
 						url: '',
-						snippet: answer || 'No synthesized output returned',
+						snippet: answer,
 						score: 1.0,
 						source_provider: this.name,
 						metadata: {

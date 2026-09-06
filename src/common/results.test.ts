@@ -24,6 +24,36 @@ afterEach(() => {
 });
 
 describe('handle_large_result', () => {
+	it('skips optional readable formatting when canonical JSON needs compression', () => {
+		process.env.OMNISEARCH_RESULT_MAX_BYTES = '10000';
+		let raw_reads = 0;
+		const original = {
+			content: 'body'.repeat(30000),
+			get raw_contents() {
+				raw_reads++;
+				return [];
+			},
+			citations: ['preserved'],
+		};
+		try {
+			const pointer = handle_large_result(original, 'fixture') as {
+				result_id: string;
+				sections: Array<{ title: string; line: number }>;
+			};
+			expect(raw_reads).toBe(1);
+			expect(
+				statSync(join(result_dir, `${pointer.result_id}.omr`)).size,
+			).toBeLessThan(10000);
+			expect(pointer.sections).toEqual([
+				{ title: 'FULL RESULT JSON', line: 1 },
+			]);
+			expect(
+				read_result_chunk(pointer.result_id).content.startsWith('{'),
+			).toBe(true);
+		} finally {
+			delete process.env.OMNISEARCH_RESULT_MAX_BYTES;
+		}
+	});
 	it.each([
 		'OMNISEARCH_RESULT_MAX_BYTES',
 		'OMNISEARCH_RESULT_STORE_MAX_BYTES',

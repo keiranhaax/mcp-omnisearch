@@ -25,6 +25,56 @@ describe('ExaDeepResearchProvider', () => {
 		vi.restoreAllMocks();
 	});
 
+	it.each([
+		{},
+		{ output: null },
+		{ output: {} },
+		{ output: { content: null } },
+		{ output: { content: '  ' } },
+		{ output: { content: 'Answer' }, results: [{}] },
+	])(
+		'rejects missing synthesis or malformed sources once: %o',
+		async (body) => {
+			fetch_mock.mockImplementation(
+				async () => new Response(JSON.stringify(body)),
+			);
+			await expect(
+				new ExaDeepResearchProvider().search({ query: 'test' }),
+			).rejects.toMatchObject({
+				type: 'PROVIDER_ERROR',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it('accepts nullable Exa source metadata', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					output: { content: 'Answer' },
+					results: [
+						{
+							url: 'https://example.com',
+							title: null,
+							text: null,
+							summary: null,
+							author: null,
+							publishedDate: null,
+							score: null,
+						},
+					],
+					costDollars: { total: 0.1 },
+				}),
+			),
+		);
+		const results = await new ExaDeepResearchProvider().search({
+			query: 'test',
+		});
+		expect(results[0].snippet).toBe('Answer');
+		expect(results[1].url).toBe('https://example.com');
+	});
+
 	it('calls Exa search with deep-reasoning and default text output schema', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(

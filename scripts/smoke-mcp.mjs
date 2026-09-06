@@ -136,11 +136,21 @@ try {
 	}
 	assert(ready, 'guard readiness deadline');
 	checks.push('ping');
+	const readiness = await fetch(`${url}/ready`, {
+		signal: AbortSignal.timeout(3000),
+	});
+	assert.equal(readiness.status, 200);
+	assert.equal((await readiness.json()).status, 'ready');
+	checks.push('upstream-readiness');
 	for (const wrong of ['', 'invalid']) {
 		const { response } = await rpc('tools/list', {}, false, {
 			'X-API-Key': wrong,
 		});
 		assert.equal(response.status, 401);
+		assert.equal(
+			response.headers.get('www-authenticate'),
+			'ApiKey realm="omnisearch"',
+		);
 	}
 	checks.push('authentication');
 	for (const headers of [
@@ -185,6 +195,36 @@ try {
 	);
 	assert.equal(new Set(legacy.map((t) => t.name)).size, 14);
 	checks.push('legacy-and-modern-14-tools');
+	for (const modern of [false, true]) {
+		const unknown = await rpc(
+			'tools/call',
+			{ name: 'missing-fixture-tool', arguments: {} },
+			modern,
+		);
+		assert.equal(unknown.data.error.code, -32602);
+		const missing = await rpc(
+			'resources/read',
+			{ uri: 'fixture://missing' },
+			modern,
+		);
+		assert.equal(missing.data.error.code, -32602);
+		const invalid = await rpc(
+			'tools/call',
+			{
+				name: 'web_search',
+				arguments: {
+					query: 'PRIVATE_FIXTURE_SENTINEL'.repeat(10000),
+					provider: 'brave',
+				},
+			},
+			modern,
+		);
+		const serialized = JSON.stringify(invalid.data);
+		assert.equal(invalid.data.result.isError, true);
+		assert(Buffer.byteLength(serialized) < 12000);
+		assert(!serialized.includes('PRIVATE_FIXTURE_SENTINEL'));
+	}
+	checks.push('bounded-validation-and-protocol-errors');
 	assert.equal(
 		(await rpc('server/discover', {}, true)).data.result.resultType,
 		'complete',

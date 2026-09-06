@@ -46,11 +46,15 @@ const free_port = async () => {
 	return port;
 };
 
-const start_fixture = async () => {
+const start_fixture = async (max_inflight = 16) => {
 	const transport = new StdioClientTransport({
 		command: process.execPath,
 		args: ['--input-type=module', '-e', fixture_code],
 		stderr: 'pipe',
+		env: {
+			PATH: process.env.PATH ?? '',
+			OMNISEARCH_MAX_INFLIGHT: String(max_inflight),
+		},
 	});
 	let stderr = '';
 	transport.stderr?.on('data', (data: Buffer) => {
@@ -143,6 +147,39 @@ const modern = (
 	});
 
 describe('installed stateless proxy lifecycle', () => {
+	it('retains backend admission after a legacy HTTP disconnect', async () => {
+		const fixture = await start_fixture(1);
+		const controller = new AbortController();
+		try {
+			const first = fixture
+				.send(
+					message(101, 'tools/call', { name: 'blocked' }),
+					{},
+					controller.signal,
+				)
+				.then((response) => response.text())
+				.catch(() => undefined);
+			await expect.poll(fixture.stderr).toContain('started');
+			controller.abort();
+			await first;
+			const second = await fixture.send(
+				message(102, 'tools/call', { name: 'blocked' }),
+			);
+			const raw = await second.text();
+			expect(raw).toContain('"code":-32000');
+			expect(raw).toContain('Server busy');
+			expect(fixture.stderr().split('started').length - 1).toBe(1);
+			expect(fixture.stderr()).not.toContain('aborted');
+			await expect.poll(() => fixture.counts.closed).toBe(2);
+			const next = await fixture.send(
+				message(103, 'tools/call', { name: 'blocked' }),
+			);
+			expect(await next.text()).toContain('done');
+		} finally {
+			controller.abort();
+			await fixture.close();
+		}
+	});
 	it('validates modern subscription headers before contacting upstream', async () => {
 		const fixture = await start_fixture();
 		try {

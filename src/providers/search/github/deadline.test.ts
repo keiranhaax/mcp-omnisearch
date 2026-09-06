@@ -32,6 +32,37 @@ afterEach(() => {
 });
 
 describe('GitHub actual SDK requests', () => {
+	it.each([
+		['retry-after', '8640000000001'],
+		['retry-after', '9'.repeat(400)],
+		['x-ratelimit-reset', '8640000000001'],
+		['x-ratelimit-reset', '9'.repeat(400)],
+	])(
+		'fails closed for unrepresentable %s=%s',
+		async (header, value) => {
+			vi.useFakeTimers();
+			vi.spyOn(Math, 'random').mockReturnValue(1);
+			fetch_mock.mockImplementation(
+				async () =>
+					new Response('{}', {
+						status: 429,
+						headers: {
+							'content-type': 'application/json',
+							[header]: value,
+						},
+					}),
+			);
+			const pending = new GitHubSearchProvider()
+				.search_code({ query: 'test' })
+				.catch((error) => error);
+			await vi.advanceTimersByTimeAsync(500);
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+			expect(await pending).toMatchObject({
+				type: 'RATE_LIMIT',
+				details: { status: 429, retryable: false },
+			});
+		},
+	);
 	it.each([403, 429])(
 		'honors Retry-After for HTTP %s without SDK retries',
 		async (status) => {

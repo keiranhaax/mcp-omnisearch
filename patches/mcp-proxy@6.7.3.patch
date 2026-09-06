@@ -1,5 +1,110 @@
+diff --git a/dist/bin/mcp-proxy.mjs b/dist/bin/mcp-proxy.mjs
+index 364006db2a5f41a58fcda6d95a83233c34e2ff94..9d5db0668953dc279789a4b58a431605bf12e6d2 100755
+--- a/dist/bin/mcp-proxy.mjs
++++ b/dist/bin/mcp-proxy.mjs
+@@ -14,6 +14,7 @@ import { fileURLToPath } from "url";
+ import { readFileSync as readFileSync$1, readdirSync as readdirSync$1 } from "node:fs";
+ import { spawn } from "node:child_process";
+ import { PassThrough, Transform } from "node:stream";
++import { StringDecoder } from "node:string_decoder";
+ 
+ //#region node_modules/.pnpm/eventsource-parser@3.0.2/node_modules/eventsource-parser/dist/index.js
+ var ParseError = class extends Error {
+@@ -4855,16 +4856,33 @@ var yargs_default = Yargs;
+ */
+ var JSONFilterTransform = class extends Transform {
+ 	buffer = "";
++	decoder = new StringDecoder("utf8");
++	pendingBytes = 0;
+ 	constructor() {
+ 		super({ objectMode: false });
+ 	}
+ 	_flush(callback) {
+-		const json = extractJson(this.buffer);
+-		if (json !== null) callback(null, Buffer.from(json));
++		const json = extractJson(this.buffer + this.decoder.end());
++		if (json !== null) callback(null, Buffer.from(json + "\n"));
+ 		else callback(null, null);
+ 	}
+ 	_transform(chunk, _encoding, callback) {
+-		this.buffer += chunk.toString();
++		// Bound each wire line, including incomplete UTF-8 bytes, before decoding.
++		let offset = 0;
++		while (offset < chunk.length) {
++		  const newline = chunk.indexOf(10, offset);
++		  const end = newline === -1 ? chunk.length : newline;
++		  this.pendingBytes += end - offset;
++		  if (this.pendingBytes > 10 * 1024 * 1024) {
++		    this.buffer = "";
++		    callback(new Error("Upstream stdio line exceeds 10485760 bytes"), null);
++		    return;
++		  }
++		  if (newline === -1) break;
++		  this.pendingBytes = 0;
++		  offset = newline + 1;
++		}
++		this.buffer += this.decoder.write(chunk);
+ 		const lines = this.buffer.split("\n");
+ 		this.buffer = lines.pop() || "";
+ 		const jsonLines = [];
+@@ -5025,6 +5043,8 @@ var StdioClientTransport = class {
+ 				this.processReadBuffer();
+ 			});
+ 			jsonFilterTransform.on("error", (error) => {
++				// Framing is no longer recoverable; close instead of hanging requests.
++				void this.close();
+ 				this.onEvent?.({
+ 					error,
+ 					type: "error"
+@@ -5247,6 +5267,14 @@ const proxy = async () => {
+ 		capabilities: {},
+ 		versionNegotiation: resolveVersionNegotiation(argv.upstreamProtocol)
+ 	});
++	let closing = false;
++	// A proxy without its sole upstream must be restarted by its supervisor.
++	client.onclose = () => {
++		if (!closing) {
++			console.error("[mcp-proxy] upstream connection closed unexpectedly");
++			process.exit(1);
++		}
++	};
+ 	await connect(client, argv.connectionTimeout);
+ 	const serverVersion = client.getServerVersion();
+ 	const serverCapabilities = client.getServerCapabilities();
+@@ -5271,6 +5299,23 @@ const proxy = async () => {
+ 		keepAliveTimeout: argv.keepAliveTimeout,
+ 		maxBodySize: argv.maxBodySize === 0 ? false : argv.maxBodySize,
+ 		modern: argv.modern,
++    onUnhandledRequest: async (req, res) => {
++      if (req.method !== "GET" || req.url !== "/ready") return;
++      let ready = false;
++      try {
++        if (!closing) {
++          await client.ping({ timeout: 1000 });
++          ready = !closing;
++        }
++      } catch {
++        // Readiness exposes only reachability, never upstream error details.
++      }
++      res.setHeader("Content-Type", "application/json");
++      res.setHeader("Cache-Control", "no-store");
++      res.writeHead(ready ? 200 : 503).end(
++        JSON.stringify({ status: ready ? "ready" : "unavailable" }),
++      );
++    },
+ 		onListenSubscriptions: (uris) => acquireListenSubscriptions({
+ 			client,
+ 			requestTimeout: argv.requestTimeout,
+@@ -5305,6 +5350,7 @@ const proxy = async () => {
+ 		console.info("tunnel established at %s", tunnel.url);
+ 	}
+ 	return { close: async () => {
++		closing = true;
+ 		await server.close();
+ 		await getUpstreamBridge({ client }).close();
+ 		await client.close();
 diff --git a/dist/startStdioServer-BomI-BJR.mjs b/dist/startStdioServer-BomI-BJR.mjs
-index d40cc2ee8df447d9a633e940ef59c9b4a8053925..33492c1af6e7d907d55603da117424aed3658399 100644
+index d40cc2ee8df447d9a633e940ef59c9b4a8053925..664398997680c4fb35889b899a5c1d94a1833635 100644
 --- a/dist/startStdioServer-BomI-BJR.mjs
 +++ b/dist/startStdioServer-BomI-BJR.mjs
 @@ -19128,10 +19128,7 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
@@ -14,32 +119,40 @@ index d40cc2ee8df447d9a633e940ef59c9b4a8053925..33492c1af6e7d907d55603da117424ae
  			if (authResult && typeof server === "object" && server !== null && "updateAuth" in server && typeof server.updateAuth === "function") server.updateAuth(authResult);
  			if (onConnect) await onConnect(server);
  		} catch (error) {
-@@ -19141,8 +19138,14 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
+@@ -19141,8 +19138,21 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
  		}
  		return {
  			server,
 -			teardown
 -		};
 +      teardown,
-+      acquireSubscriptions: async () => {
-+        if (onListenSubscriptions) {
-+          const listenUris = readListenSubscriptions(body);
-+          if (listenUris.length > 0) releaseSubscriptions = await onListenSubscriptions(listenUris);
++      acquireSubscriptions: async (signal) => {
++        if (!onListenSubscriptions || target.getCapabilities().resources?.subscribe !== true || signal.aborted || toreDown) return;
++        const listenUris = readListenSubscriptions(body);
++        if (listenUris.length === 0) return;
++        signal.addEventListener("abort", teardown, { once: true });
++        try {
++          const release = await onListenSubscriptions(listenUris);
++          if (toreDown || signal.aborted) release();
++          else releaseSubscriptions = release;
++        } finally {
++          signal.removeEventListener("abort", teardown);
 +        }
 +      }
 +    };
  	};
  	const handler = createMcpHandler(() => {
  		const instance = requestContext.getStore();
-@@ -19154,7 +19157,14 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
+@@ -19154,7 +19164,15 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
  			console.error("[mcp-proxy] modern handler error", error);
  		}
  	});
 -	const nodeHandler = toNodeHandler({ fetch: (request, options) => handler.fetch(request, options) });
 +	const nodeHandler = toNodeHandler({ fetch: async (request, options) => {
 +    const response = await handler.fetch(request, options);
-+    if (response.ok) {
-+      try { await requestContext.getStore()?.acquireSubscriptions(); }
++    // HTTP 200 JSON-RPC errors are not accepted listen streams.
++    if (response.ok && response.headers.get("content-type")?.split(";")[0] === "text/event-stream") {
++      try { await requestContext.getStore()?.acquireSubscriptions(request.signal); }
 +      catch (error) { await response.body?.cancel(); throw error; }
 +    }
 +    return response;
@@ -47,7 +160,7 @@ index d40cc2ee8df447d9a633e940ef59c9b4a8053925..33492c1af6e7d907d55603da117424ae
  	return {
  		close: () => handler.close(),
  		createInstance,
-@@ -19210,6 +19220,59 @@ const reapIdleSessions = async (sessions, idleTimeout) => {
+@@ -19210,6 +19228,59 @@ const reapIdleSessions = async (sessions, idleTimeout) => {
  		await session.transport.close();
  	}
  };
@@ -107,7 +220,7 @@ index d40cc2ee8df447d9a633e940ef59c9b4a8053925..33492c1af6e7d907d55603da117424ae
  const handleStreamRequest = async ({ activeTransports, authenticate, authMiddleware, createServer, enableJsonResponse, endpoint, eventStore, eventStoreMaxEvents, maxBodySize, modernHandler, oauth, onClose, onConnect, req, res, stateless }) => {
  	if (req.method === "POST" && new URL(req.url, "http://localhost").pathname === endpoint) {
  		let body;
-@@ -19292,6 +19355,20 @@ const handleStreamRequest = async ({ activeTransports, authenticate, authMiddlew
+@@ -19292,6 +19363,20 @@ const handleStreamRequest = async ({ activeTransports, authenticate, authMiddlew
  					return true;
  				}
  			}
@@ -128,15 +241,136 @@ index d40cc2ee8df447d9a633e940ef59c9b4a8053925..33492c1af6e7d907d55603da117424ae
  			if (sessionId) {
  				const activeTransport = activeTransports[sessionId];
  				if (!activeTransport) {
+diff --git a/src/JSONFilterTransform.ts b/src/JSONFilterTransform.ts
+index 151098ab3028f07d3c5320c1a18b5325b27ecb68..23f02b2b3caee856e2389b1d5806d68cb9a41269 100644
+--- a/src/JSONFilterTransform.ts
++++ b/src/JSONFilterTransform.ts
+@@ -1,4 +1,5 @@
+ import { Transform } from "node:stream";
++import { StringDecoder } from "node:string_decoder";
+ 
+ /**
+  * Extracts JSON-RPC messages from a stream that may contain non-JSON output.
+@@ -10,6 +11,8 @@ import { Transform } from "node:stream";
+  */
+ export class JSONFilterTransform extends Transform {
+   private buffer = "";
++  private decoder = new StringDecoder("utf8");
++  private pendingBytes = 0;
+ 
+   constructor() {
+     super({ objectMode: false });
+@@ -17,9 +20,9 @@ export class JSONFilterTransform extends Transform {
+ 
+   _flush(callback: (error: Error | null, chunk: Buffer | null) => void) {
+     // Handle any remaining data in buffer
+-    const json = extractJson(this.buffer);
++    const json = extractJson(this.buffer + this.decoder.end());
+     if (json !== null) {
+-      callback(null, Buffer.from(json));
++      callback(null, Buffer.from(json + "\n"));
+     } else {
+       callback(null, null);
+     }
+@@ -30,7 +33,22 @@ export class JSONFilterTransform extends Transform {
+     _encoding: string,
+     callback: (error: Error | null, chunk: Buffer | null) => void,
+   ) {
+-    this.buffer += chunk.toString();
++    // Bound each wire line, including incomplete UTF-8 bytes, before decoding.
++    let offset = 0;
++    while (offset < chunk.length) {
++      const newline = chunk.indexOf(10, offset);
++      const end = newline === -1 ? chunk.length : newline;
++      this.pendingBytes += end - offset;
++      if (this.pendingBytes > 10 * 1024 * 1024) {
++        this.buffer = "";
++        callback(new Error("Upstream stdio line exceeds 10485760 bytes"), null);
++        return;
++      }
++      if (newline === -1) break;
++      this.pendingBytes = 0;
++      offset = newline + 1;
++    }
++    this.buffer += this.decoder.write(chunk);
+     const lines = this.buffer.split("\n");
+ 
+     // Keep the last incomplete line in the buffer
+diff --git a/src/StdioClientTransport.ts b/src/StdioClientTransport.ts
+index 557f2cfe7ef3b91213efcc59af7489789ba50910..e0777c6c03eef959bae44dffad86d3c4a5a211a0 100644
+--- a/src/StdioClientTransport.ts
++++ b/src/StdioClientTransport.ts
+@@ -252,6 +252,8 @@ export class StdioClientTransport implements Transport {
+       });
+ 
+       jsonFilterTransform.on("error", (error) => {
++        // Framing is no longer recoverable; close instead of hanging requests.
++        void this.close();
+         this.onEvent?.({
+           error,
+           type: "error",
+diff --git a/src/bin/mcp-proxy.ts b/src/bin/mcp-proxy.ts
+index 9ac84cf0a3c736dcdfea4a1b1a3f5f8cdfaa3101..622f2a5e36d3c12140a73e57ad4ce9455bc6888b 100644
+--- a/src/bin/mcp-proxy.ts
++++ b/src/bin/mcp-proxy.ts
+@@ -278,6 +278,16 @@ const proxy = async () => {
+     },
+   );
+ 
++  let closing = false;
++  // The HTTP listener is useless once its sole upstream is gone. Let the
++  // supervisor restart the complete chain, including clean unexpected exits.
++  client.onclose = () => {
++    if (!closing) {
++      console.error("[mcp-proxy] upstream connection closed unexpectedly");
++      process.exit(1);
++    }
++  };
++
+   await connect(client, argv.connectionTimeout);
+ 
+   const serverVersion = client.getServerVersion() as {
+@@ -314,6 +324,23 @@ const proxy = async () => {
+     keepAliveTimeout: argv.keepAliveTimeout,
+     maxBodySize: argv.maxBodySize === 0 ? false : argv.maxBodySize,
+     modern: argv.modern,
++    onUnhandledRequest: async (req, res) => {
++      if (req.method !== "GET" || req.url !== "/ready") return;
++      let ready = false;
++      try {
++        if (!closing) {
++          await client.ping({ timeout: 1000 });
++          ready = !closing;
++        }
++      } catch {
++        // Readiness exposes only reachability, never upstream error details.
++      }
++      res.setHeader("Content-Type", "application/json");
++      res.setHeader("Cache-Control", "no-store");
++      res.writeHead(ready ? 200 : 503).end(
++        JSON.stringify({ status: ready ? "ready" : "unavailable" }),
++      );
++    },
+     // A 2026-07-28 client asks for resource updates through its listen filter,
+     // not `resources/subscribe`, so this is the only place those URIs surface.
+     onListenSubscriptions: (uris) =>
+@@ -363,6 +390,7 @@ const proxy = async () => {
+ 
+   return {
+     close: async () => {
++      closing = true;
+       await server.close();
+ 
+       // Tear the upstream subscription stream down before the client, so a
 diff --git a/src/startHTTPServer.ts b/src/startHTTPServer.ts
-index d28248b372c66bfd9c68cdbc294861d48af1afc0..f43dca9a590bb2d04cb2e92195d8f6832ee13386 100644
+index d28248b372c66bfd9c68cdbc294861d48af1afc0..93dfca678b5966ea1ab2e86a603ac00779559162 100644
 --- a/src/startHTTPServer.ts
 +++ b/src/startHTTPServer.ts
 @@ -700,6 +700,7 @@ export type ListenSubscriptionsHandler = (
  type ModernInstance<T> = {
    server: T;
    teardown: () => void;
-+  acquireSubscriptions: () => Promise<void>;
++  acquireSubscriptions: (signal: AbortSignal) => Promise<void>;
  };
  
  type ModernLeg<T> = {
@@ -154,29 +388,48 @@ index d28248b372c66bfd9c68cdbc294861d48af1afc0..f43dca9a590bb2d04cb2e92195d8f683
  
        // Same convention the 2025-era leg uses for a session's auth context;
        // `authResult` is the consumer's own value, not an SDK `AuthInfo`.
-@@ -821,7 +815,12 @@ const createModernLeg = <T extends ServerLike>({
+@@ -821,7 +815,28 @@ const createModernLeg = <T extends ServerLike>({
        throw error;
      }
  
 -    return { server, teardown };
-+    return { server, teardown, acquireSubscriptions: async () => {
-+      if (onListenSubscriptions) {
++    return {
++      server,
++      teardown,
++      acquireSubscriptions: async (signal) => {
++        // The SDK honors resource URIs only with this exact capability bit.
++        if (!onListenSubscriptions ||
++            target.getCapabilities().resources?.subscribe !== true ||
++            signal.aborted || toreDown) return;
 +        const listenUris = readListenSubscriptions(body);
-+        if (listenUris.length > 0) releaseSubscriptions = await onListenSubscriptions(listenUris);
-+      }
-+    } };
++        if (listenUris.length === 0) return;
++        signal.addEventListener("abort", teardown, { once: true });
++        try {
++          const release = await onListenSubscriptions(listenUris);
++          // A disconnect while upstream subscribe was pending must not leak
++          // the lease when that operation eventually finishes.
++          if (toreDown || signal.aborted) release();
++          else releaseSubscriptions = release;
++        } finally {
++          signal.removeEventListener("abort", teardown);
++        }
++      },
++    };
    };
  
    const handler: McpHttpHandler = createMcpHandler(
-@@ -849,7 +848,14 @@ const createModernLeg = <T extends ServerLike>({
+@@ -849,7 +864,17 @@ const createModernLeg = <T extends ServerLike>({
    );
  
    const nodeHandler = toNodeHandler({
 -    fetch: (request, options) => handler.fetch(request, options),
 +    fetch: async (request, options) => {
 +      const response = await handler.fetch(request, options);
-+      if (response.ok) {
-+        try { await requestContext.getStore()?.acquireSubscriptions(); }
++      // Listen validation/capacity failures are HTTP 200 JSON-RPC errors,
++      // not accepted streams. Only the SDK's validated SSE response admits
++      // upstream subscription work.
++      if (response.ok && response.headers.get("content-type")?.split(";")[0] === "text/event-stream") {
++        try { await requestContext.getStore()?.acquireSubscriptions(request.signal); }
 +        catch (error) { await response.body?.cancel(); throw error; }
 +      }
 +      return response;
@@ -184,7 +437,7 @@ index d28248b372c66bfd9c68cdbc294861d48af1afc0..f43dca9a590bb2d04cb2e92195d8f683
    });
  
    return {
-@@ -977,6 +983,70 @@ const reapIdleSessions = async <T>(
+@@ -977,6 +1002,70 @@ const reapIdleSessions = async <T>(
    }
  };
  
@@ -255,7 +508,7 @@ index d28248b372c66bfd9c68cdbc294861d48af1afc0..f43dca9a590bb2d04cb2e92195d8f683
  const handleStreamRequest = async <T extends ServerLike>({
    activeTransports,
    authenticate,
-@@ -1178,6 +1248,21 @@ const handleStreamRequest = async <T extends ServerLike>({
+@@ -1178,6 +1267,21 @@ const handleStreamRequest = async <T extends ServerLike>({
          }
        }
  

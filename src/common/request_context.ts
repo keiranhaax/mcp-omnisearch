@@ -1,13 +1,38 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { ErrorType, ProviderError } from './types.js';
+
+export const MAX_REQUEST_RESPONSE_BYTES = 25 * 1024 * 1024;
 
 const request_context = new AsyncLocalStorage<{
 	signal: AbortSignal | undefined;
+	response_budget: { bytes: number };
 }>();
 
 export const run_with_request_context = <T>(
 	signal: AbortSignal | undefined,
 	fn: () => T,
-): T => request_context.run({ signal }, fn);
+): T =>
+	request_context.run(
+		{
+			signal,
+			response_budget: request_context.getStore()
+				?.response_budget ?? { bytes: 0 },
+		},
+		fn,
+	);
+
+export const consume_response_bytes = (bytes: number): void => {
+	const budget = request_context.getStore()?.response_budget;
+	if (!budget) return;
+	budget.bytes += bytes;
+	if (budget.bytes > MAX_REQUEST_RESPONSE_BYTES)
+		throw new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'Aggregate provider response exceeds byte limit',
+			'resource_limits',
+			{ retryable: false },
+		);
+};
 
 export const get_request_signal = (): AbortSignal | undefined =>
 	request_context.getStore()?.signal;

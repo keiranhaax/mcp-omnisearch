@@ -129,6 +129,8 @@ export class LinkupProvider implements SearchProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return retry_with_backoff(search_request, {
+			timeout_ms: config.ai_response.linkup.timeout,
+		});
 	}
 }

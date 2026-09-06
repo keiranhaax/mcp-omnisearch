@@ -67,6 +67,13 @@ export class FirecrawlActionsProvider implements ProcessingProvider {
 	): Promise<ProcessingResult> {
 		// Actions works with a single URL
 		const urls = validate_processing_urls(url, this.name);
+		if (urls.length !== 1) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'This mode requires exactly one URL',
+				this.name,
+			);
+		}
 		const actions_url = urls[0];
 
 		const actions_request = async () => {

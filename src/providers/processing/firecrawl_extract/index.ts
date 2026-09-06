@@ -46,6 +46,13 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 	): Promise<ProcessingResult> {
 		// Extract works with a single URL at a time
 		const urls = validate_processing_urls(url, this.name);
+		if (urls.length !== 1) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'This mode requires exactly one URL',
+				this.name,
+			);
+		}
 		const extract_url = urls[0];
 
 		const extract_request = async () => {

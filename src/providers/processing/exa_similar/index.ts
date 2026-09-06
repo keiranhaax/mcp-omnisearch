@@ -59,6 +59,13 @@ export class ExaSimilarProvider implements ProcessingProvider {
 			this.name,
 		);
 
+		if (Array.isArray(url) && url.length !== 1) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'This mode requires exactly one URL',
+				this.name,
+			);
+		}
 		// This provider only accepts a single URL
 		const target_url = Array.isArray(url) ? url[0] : url;
 
@@ -187,6 +194,8 @@ export class ExaSimilarProvider implements ProcessingProvider {
 			}
 		};
 
-		return retry_with_backoff(process_request);
+		return retry_with_backoff(process_request, {
+			timeout_ms: config.processing.exa_similar.timeout,
+		});
 	}
 }

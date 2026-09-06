@@ -10,15 +10,26 @@ export const delay = async (
 	ms: number,
 	signal?: AbortSignal,
 ): Promise<void> => {
+	if (!Number.isFinite(ms) || ms < 0) {
+		throw new RangeError('delay must be finite and non-negative');
+	}
+	// Node turns waits above this limit into 1ms timers. Chunk instead
+	// of clamping: an upstream minimum delay must never become shorter.
+	const max_timer_ms = 2_147_483_647;
+	const combined_signal = combine_request_signal(signal);
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
-		await with_abort_signal(
-			() =>
-				new Promise<void>((resolve) => {
-					timer = setTimeout(resolve, ms);
-				}),
-			combine_request_signal(signal),
-		);
+		do {
+			const chunk = Math.min(ms, max_timer_ms);
+			await with_abort_signal(
+				() =>
+					new Promise<void>((resolve) => {
+						timer = setTimeout(resolve, chunk);
+					}),
+				combined_signal,
+			);
+			ms -= chunk;
+		} while (ms > 0);
 	} finally {
 		clearTimeout(timer);
 	}
@@ -29,6 +40,8 @@ export interface RetryOptions {
 	initial_delay?: number;
 	retry_if?: (error: unknown) => boolean;
 	signal?: AbortSignal;
+	/** Total wall-clock budget across attempts and backoff, in ms. */
+	timeout_ms?: number;
 }
 
 // Never turn an upstream Retry-After into an earlier paid retry.
@@ -116,44 +129,88 @@ export const retry_with_backoff = async <T>(
 			'max_retries must be an integer from 0 to 5',
 		);
 	}
-	const signal = combine_request_signal(
+	if (
+		!Number.isFinite(options.initial_delay) ||
+		options.initial_delay < 0
+	) {
+		throw new RangeError(
+			'initial_delay must be finite and non-negative',
+		);
+	}
+	const timeout_ms =
+		typeof options_or_max_retries === 'number'
+			? undefined
+			: options_or_max_retries.timeout_ms;
+	if (
+		timeout_ms !== undefined &&
+		(!Number.isSafeInteger(timeout_ms) ||
+			timeout_ms < 1 ||
+			timeout_ms > 2_147_483_647)
+	) {
+		throw new RangeError(
+			'timeout_ms must be an integer from 1 to 2147483647',
+		);
+	}
+	const timeout = new AbortController();
+	const timer =
+		timeout_ms === undefined
+			? undefined
+			: setTimeout(
+					() =>
+						timeout.abort(
+							new DOMException('Operation timed out', 'TimeoutError'),
+						),
+					timeout_ms,
+				);
+	timer?.unref?.();
+	const caller_signal = combine_request_signal(
 		typeof options_or_max_retries === 'number'
 			? undefined
 			: options_or_max_retries.signal,
 	);
+	const signal =
+		timeout_ms === undefined
+			? caller_signal
+			: caller_signal
+				? AbortSignal.any([caller_signal, timeout.signal])
+				: timeout.signal;
 
 	let retries = 0;
 	let wait_remaining = MAX_RETRY_WAIT_MS;
-	while (true) {
-		throw_if_aborted(signal);
-		try {
-			return await run_with_request_context(signal, () =>
-				with_abort_signal(fn, signal),
-			);
-		} catch (error) {
+	try {
+		while (true) {
 			throw_if_aborted(signal);
-			if (
-				retries >= options.max_retries ||
-				!options.retry_if(error)
-			) {
-				throw error;
+			try {
+				return await run_with_request_context(signal, () =>
+					with_abort_signal(fn, signal),
+				);
+			} catch (error) {
+				throw_if_aborted(signal);
+				if (
+					retries >= options.max_retries ||
+					!options.retry_if(error)
+				) {
+					throw error;
+				}
+				// Full jitter: random delay in [0, exponential backoff]
+				const ceiling = options.initial_delay * Math.pow(2, retries);
+				const reset_time =
+					error instanceof ProviderError
+						? error.details?.reset_time
+						: undefined;
+				const retry_after =
+					reset_time instanceof Date &&
+					Number.isFinite(reset_time.getTime())
+						? Math.max(0, reset_time.getTime() - Date.now())
+						: 0;
+				const wait = Math.max(retry_after, Math.random() * ceiling);
+				if (wait > wait_remaining) throw error;
+				wait_remaining -= wait;
+				await delay(wait, signal);
+				retries++;
 			}
-			// Full jitter: random delay in [0, exponential backoff]
-			const ceiling = options.initial_delay * Math.pow(2, retries);
-			const reset_time =
-				error instanceof ProviderError
-					? error.details?.reset_time
-					: undefined;
-			const retry_after =
-				reset_time instanceof Date &&
-				Number.isFinite(reset_time.getTime())
-					? Math.max(0, reset_time.getTime() - Date.now())
-					: 0;
-			const wait = Math.max(retry_after, Math.random() * ceiling);
-			if (wait > wait_remaining) throw error;
-			wait_remaining -= wait;
-			await delay(wait, signal);
-			retries++;
 		}
+	} finally {
+		clearTimeout(timer);
 	}
 };

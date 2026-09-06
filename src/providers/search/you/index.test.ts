@@ -21,6 +21,32 @@ afterEach(() => {
 });
 
 describe('You response contract', () => {
+	it('applies the requested limit to combined web and news results', async () => {
+		const hit = (title: string) => ({
+			title,
+			url: `https://example.com/${title}`,
+		});
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: {
+						web: [hit('one'), hit('two')],
+						news: [hit('three'), hit('four')],
+					},
+				}),
+			),
+		);
+		const result = await new YouSearchProvider().search({
+			query: 'test',
+			limit: 3,
+		});
+		expect(result.map((item) => item.title)).toEqual([
+			'one',
+			'two',
+			'three',
+		]);
+	});
+
 	it.each([
 		{ results: { web: 'not an array' } },
 		{ results: { news: [{ title: 'Broken' }] } },

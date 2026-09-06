@@ -51,11 +51,22 @@ export const register_brave_media_search = (
 					v.description('Media type'),
 				),
 				count: v.optional(
-					v.pipe(v.number(), v.description('Number of results')),
+					v.pipe(
+						v.number(),
+						v.integer(),
+						v.minValue(1),
+						v.maxValue(200),
+						v.description(
+							'Number of results (images 1-200; videos 1-50)',
+						),
+					),
 				),
 				offset: v.optional(
 					v.pipe(
 						v.number(),
+						v.integer(),
+						v.minValue(0),
+						v.maxValue(9),
 						v.description('Page offset for pagination'),
 					),
 				),

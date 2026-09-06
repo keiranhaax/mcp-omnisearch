@@ -46,12 +46,18 @@ export const register_brave_news_search = (
 				count: v.optional(
 					v.pipe(
 						v.number(),
+						v.integer(),
+						v.minValue(1),
+						v.maxValue(50),
 						v.description('Number of results (1-50)'),
 					),
 				),
 				offset: v.optional(
 					v.pipe(
 						v.number(),
+						v.integer(),
+						v.minValue(0),
+						v.maxValue(9),
 						v.description('Page offset for pagination'),
 					),
 				),

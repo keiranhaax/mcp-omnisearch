@@ -42,6 +42,13 @@ export class FirecrawlMapProvider implements ProcessingProvider {
 	): Promise<ProcessingResult> {
 		// Map only works with a single URL (the starting point)
 		const urls = validate_processing_urls(url, this.name);
+		if (urls.length !== 1) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'This mode requires exactly one URL',
+				this.name,
+			);
+		}
 		const map_url = urls[0];
 
 		const map_request = async () => {

@@ -1,73 +1,48 @@
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { http_json } from '../../../common/http.js';
-import { SearchResult } from '../../../common/types.js';
+import {
+	ErrorType,
+	ProviderError,
+	SearchResult,
+} from '../../../common/types.js';
 import { handle_provider_error } from '../../../common/errors.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface BraveImageResult {
-	type: string;
-	title?: string;
-	url?: string;
-	source?: string;
-	page_fetched?: string;
-	thumbnail?: {
-		src?: string;
-		width?: number;
-		height?: number;
-	};
-	properties?: {
-		url?: string;
-		placeholder?: string;
-		width?: number;
-		height?: number;
-	};
-	meta_url?: {
-		scheme: string;
-		netloc: string;
-		hostname: string;
-		favicon: string;
-		path: string;
-	};
-	confidence?: string;
-}
-
-interface BraveVideoResult {
-	type: string;
-	title?: string;
-	url?: string;
-	description?: string;
-	age?: string;
-	page_age?: string;
-	page_fetched?: string;
-	meta_url?: {
-		scheme: string;
-		netloc: string;
-		hostname: string;
-		favicon: string;
-		path: string;
-	};
-	thumbnail?: {
-		src?: string;
-		original?: string;
-	};
-}
-
-interface BraveImageSearchResponse {
-	type: string;
-	query: {
-		original: string;
-	};
-	results: BraveImageResult[];
-}
-
-interface BraveVideoSearchResponse {
-	type: string;
-	query: {
-		original: string;
-	};
-	results: BraveVideoResult[];
-}
+const brave_media_response_schema = v.object({
+	results: v.array(
+		v.object({
+			title: v.optional(v.string()),
+			url: v.pipe(
+				v.string(),
+				v.check((value) => value.trim().length > 0),
+			),
+			description: v.optional(v.string()),
+			age: v.optional(v.string()),
+			page_age: v.optional(v.string()),
+			meta_url: v.optional(
+				v.object({
+					hostname: v.optional(v.string()),
+					favicon: v.optional(v.string()),
+				}),
+			),
+			thumbnail: v.optional(
+				v.object({ src: v.optional(v.string()) }),
+			),
+			source: v.optional(v.string()),
+			confidence: v.optional(v.string()),
+			properties: v.optional(
+				v.object({
+					url: v.optional(v.string()),
+					width: v.optional(v.number()),
+					height: v.optional(v.number()),
+				}),
+			),
+		}),
+	),
+});
 
 export type BraveMediaType = 'images' | 'videos';
 
@@ -90,6 +65,31 @@ export class BraveMediaSearchProvider {
 	async search(
 		options: BraveMediaSearchOptions,
 	): Promise<SearchResult[]> {
+		const max_count = options.type === 'images' ? 200 : 50;
+		if (
+			options.count !== undefined &&
+			(!Number.isInteger(options.count) ||
+				options.count < 1 ||
+				options.count > max_count)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				`count must be an integer between 1 and ${max_count}`,
+				this.name,
+			);
+		}
+		if (
+			options.offset !== undefined &&
+			(!Number.isInteger(options.offset) ||
+				options.offset < 0 ||
+				options.offset > 9)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'offset must be an integer between 0 and 9',
+				this.name,
+			);
+		}
 		if (options.type === 'images') {
 			return this.search_images(options);
 		}
@@ -131,7 +131,7 @@ export class BraveMediaSearchProvider {
 					params.set('safesearch', safe);
 				}
 
-				const response = await http_json<BraveImageSearchResponse>(
+				const raw_response = await http_json(
 					this.name,
 					`${config.search.brave.base_url}/images/search?${params}`,
 					{
@@ -146,7 +146,12 @@ export class BraveMediaSearchProvider {
 					},
 				);
 
-				const results = response.results || [];
+				const response = parse_provider_response(
+					this.name,
+					brave_media_response_schema,
+					raw_response,
+				);
+				const results = response.results;
 
 				return results.map((result) => ({
 					title: result.title || 'Untitled Image',
@@ -184,7 +189,9 @@ export class BraveMediaSearchProvider {
 			}
 		};
 
-		return retry_with_backoff(image_request);
+		return retry_with_backoff(image_request, {
+			timeout_ms: config.search.brave_media.timeout,
+		});
 	}
 
 	private async search_videos(
@@ -231,7 +238,7 @@ export class BraveMediaSearchProvider {
 					params.set('freshness', options.freshness);
 				}
 
-				const response = await http_json<BraveVideoSearchResponse>(
+				const raw_response = await http_json(
 					this.name,
 					`${config.search.brave.base_url}/videos/search?${params}`,
 					{
@@ -246,7 +253,12 @@ export class BraveMediaSearchProvider {
 					},
 				);
 
-				const results = response.results || [];
+				const response = parse_provider_response(
+					this.name,
+					brave_media_response_schema,
+					raw_response,
+				);
+				const results = response.results;
 
 				return results.map((result) => ({
 					title: result.title || 'Untitled Video',
@@ -274,6 +286,8 @@ export class BraveMediaSearchProvider {
 			}
 		};
 
-		return retry_with_backoff(video_request);
+		return retry_with_backoff(video_request, {
+			timeout_ms: config.search.brave_media.timeout,
+		});
 	}
 }

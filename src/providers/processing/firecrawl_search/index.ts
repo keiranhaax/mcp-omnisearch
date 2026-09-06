@@ -218,6 +218,18 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 		}
 
 		const search_options = normalize_options(options);
+		if (
+			search_options.limit !== undefined &&
+			(!Number.isInteger(search_options.limit) ||
+				search_options.limit < 1 ||
+				search_options.limit > 100)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'limit must be an integer between 1 and 100',
+				this.name,
+			);
+		}
 		assert_domain_filters(search_options, this.name);
 		if (search_options.scrapeOptions?.formats?.length !== 0)
 			validate_firecrawl_formats(

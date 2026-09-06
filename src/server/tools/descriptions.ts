@@ -48,7 +48,9 @@ export const describe_ai_search = (
 		hints.push('Brave Answers for plain-text grounded answers');
 	}
 	if (available.has('tavily_research')) {
-		hints.push('Tavily for research');
+		hints.push(
+			'Tavily for research; use action=status with request_id to resume without creating another paid job',
+		);
 	}
 	if (available.has('linkup')) {
 		hints.push('Linkup for sourced answers');

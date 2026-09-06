@@ -1,6 +1,7 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import { available_providers } from './tools/index.js';
+import { get_resource_snapshot } from '../common/resource_limits.js';
 import {
 	get_provider_health_snapshot,
 	get_provider_health_summary,
@@ -38,6 +39,7 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 								},
 								provider_health: get_provider_health_snapshot(),
 								health_summary,
+								resource_usage: get_resource_snapshot(),
 								available_count: {
 									search: available_providers.search.size,
 									ai_response: available_providers.ai_response.size,

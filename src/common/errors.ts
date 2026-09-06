@@ -5,6 +5,10 @@ export const handle_rate_limit = (
 	reset_time?: Date,
 	details: Record<string, unknown> = {},
 ): never => {
+	if (reset_time && !Number.isFinite(reset_time.getTime())) {
+		reset_time = undefined;
+		details = { ...details, retryable: false };
+	}
 	throw new ProviderError(
 		ErrorType.RATE_LIMIT,
 		`Rate limit exceeded for ${provider}${
@@ -68,6 +72,7 @@ const safe_messages = new Set([
 	'Operation timed out',
 	'Operation cancelled',
 	'Provider response exceeds byte limit',
+	'Aggregate provider response exceeds byte limit',
 	'Provider returned invalid JSON',
 ]);
 
@@ -75,6 +80,7 @@ const safe_validation_messages = new Set([
 	'Invalid URL provided; use a public HTTP(S) URL without credentials',
 	'Invalid public domain provided',
 	'At least one URL is required',
+	'This mode requires exactly one URL',
 	'A maximum of 20 URLs is allowed per request',
 	'Result not found or expired',
 	'Invalid result ID',
@@ -94,6 +100,8 @@ const safe_validation_messages = new Set([
 	'minResults must not exceed maxResults',
 	'Unsupported Firecrawl formats',
 	'A valid job_id is required',
+	'A valid request_id is required',
+	'Tavily status requires request_id only; research requires query only',
 	'Prompt must contain 1 to 10000 characters',
 	'max_credits must be a positive safe integer',
 	'start requires prompt only; status/cancel require job_id only',
@@ -150,6 +158,10 @@ export const public_error_message = (
 export const create_error_response = (
 	error: unknown,
 ): { error: string } => {
+	if (error instanceof Error && error.name === 'TimeoutError')
+		return { error: 'Operation timed out' };
+	if (error instanceof Error && error.name === 'AbortError')
+		return { error: 'Operation cancelled' };
 	if (error instanceof ProviderError) {
 		const detail_suffix =
 			typeof error.details?.url === 'string'
@@ -164,9 +176,16 @@ export const create_error_response = (
 		const provider = /^[a-z0-9_-]{1,64}$/i.test(error.provider)
 			? error.provider
 			: 'provider';
+		const request_id = error.details?.request_id;
+		const recovery =
+			provider === 'tavily_research' &&
+			typeof request_id === 'string' &&
+			/^[a-zA-Z0-9_-]{1,200}$/.test(request_id)
+				? ` Resume with ai_search provider="tavily_research", action="status", request_id="${request_id}"; do not start a new research task.`
+				: '';
 		return {
 			error:
-				`${provider} error [${error.type}]: ${public_error_message(error)}${detail_suffix}${guidance}`.slice(
+				`${provider} error [${error.type}]: ${public_error_message(error)}${detail_suffix}${guidance}${recovery}`.slice(
 					0,
 					MAX_PUBLIC_ERROR_LENGTH,
 				),

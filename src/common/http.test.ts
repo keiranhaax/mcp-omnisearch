@@ -52,6 +52,10 @@ describe('http_json', () => {
 				name: 'AbortError',
 				message: 'Operation cancelled',
 			});
+			// Provider-slot acquisition is asynchronous; cancel an in-flight
+			// fetch here rather than a request that has not acquired a slot.
+			await Promise.resolve();
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
 			(source === 'request' ? request : call).abort(
 				new Error('private signed URL reason'),
 			);

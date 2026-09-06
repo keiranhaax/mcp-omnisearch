@@ -10,6 +10,7 @@ import {
 	reset_provider_health,
 } from './provider_health.js';
 import { available_providers } from './tools/index.js';
+import { with_provider_slot } from '../common/resource_limits.js';
 
 interface RegisteredResource {
 	definition: { name: string; uri: string };
@@ -45,6 +46,25 @@ const reset_available_providers = () => {
 };
 
 describe('setup_handlers', () => {
+	it('includes bounded operational counters without request contents', async () => {
+		await with_provider_slot(
+			'metric-fixture',
+			undefined,
+			async () => 'PRIVATE_QUERY_FIXTURE',
+		);
+		const { resources, server } = create_mock_server();
+		setup_handlers(server as any);
+		const status = await resources
+			.find((item) => item.definition.name === 'provider-status')!
+			.handler();
+		const body = JSON.parse(status.contents[0].text);
+		expect(
+			body.resource_usage.providers['metric-fixture'],
+		).toMatchObject({ active: 0, queued: 0, completed: 1 });
+		expect(status.contents[0].text).not.toContain(
+			'PRIVATE_QUERY_FIXTURE',
+		);
+	});
 	it('discovers and dispatches provider-info through the real resource template API', async () => {
 		reset_available_providers();
 		available_providers.search.add('fixture');
@@ -113,7 +133,7 @@ describe('setup_handlers', () => {
 		const status_response = await provider_status.handler();
 		const status_body = JSON.parse(status_response.contents[0].text);
 
-		expect(status_body).toEqual({
+		expect(status_body).toMatchObject({
 			status: 'operational',
 			providers: {
 				search: ['brave'],

@@ -13,9 +13,9 @@ overrides:
   vite@>=8.0.0 <8.0.16: 8.0.16
 
 patchedDependencies:
-  '@tmcp/transport-stdio@0.4.3': 683d294ff3725b5e82f6d447bbcbd1c9fdfb0f807cfd2b67568b53e291a37fcc
-  mcp-proxy@6.7.3: 54f87afbedd35b5bfaceb4b7b4c9aa0293f2f052f8a46ac8ad4ffa0701ee88c8
-  tmcp@1.19.4: d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047
+  '@tmcp/transport-stdio@0.4.3': fed5c51fe47d7febaa2ae1433feabd3668c0009789e8d53627e60273038857a0
+  mcp-proxy@6.7.3: c5c76bd9429a83f335291a97f1fb78ed20465f28dfcb872d0e0418da55b44f5e
+  tmcp@1.19.4: cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1
 
 importers:
 
@@ -23,19 +23,19 @@ importers:
     dependencies:
       '@tmcp/adapter-valibot':
         specifier: ^0.1.6
-        version: 0.1.6(tmcp@1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2))(valibot@1.4.2(typescript@6.0.2))
+        version: 0.1.6(tmcp@1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2))(valibot@1.4.2(typescript@6.0.2))
       '@tmcp/transport-stdio':
         specifier: ^0.4.3
-        version: 0.4.3(patch_hash=683d294ff3725b5e82f6d447bbcbd1c9fdfb0f807cfd2b67568b53e291a37fcc)(tmcp@1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2))
+        version: 0.4.3(patch_hash=fed5c51fe47d7febaa2ae1433feabd3668c0009789e8d53627e60273038857a0)(tmcp@1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2))
       mcp-proxy:
         specifier: 6.7.3
-        version: 6.7.3(patch_hash=54f87afbedd35b5bfaceb4b7b4c9aa0293f2f052f8a46ac8ad4ffa0701ee88c8)
+        version: 6.7.3(patch_hash=c5c76bd9429a83f335291a97f1fb78ed20465f28dfcb872d0e0418da55b44f5e)
       octokit:
         specifier: ^5.0.5
         version: 5.0.5
       tmcp:
         specifier: ^1.19.4
-        version: 1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2)
+        version: 1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2)
       valibot:
         specifier: ^1.4.2
         version: 1.4.2(typescript@6.0.2)
@@ -2541,16 +2541,16 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.1
 
-  '@tmcp/adapter-valibot@0.1.6(tmcp@1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2))(valibot@1.4.2(typescript@6.0.2))':
+  '@tmcp/adapter-valibot@0.1.6(tmcp@1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2))(valibot@1.4.2(typescript@6.0.2))':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@valibot/to-json-schema': 1.7.1(valibot@1.4.2(typescript@6.0.2))
-      tmcp: 1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2)
+      tmcp: 1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2)
       valibot: 1.4.2(typescript@6.0.2)
 
-  '@tmcp/transport-stdio@0.4.3(patch_hash=683d294ff3725b5e82f6d447bbcbd1c9fdfb0f807cfd2b67568b53e291a37fcc)(tmcp@1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2))':
+  '@tmcp/transport-stdio@0.4.3(patch_hash=fed5c51fe47d7febaa2ae1433feabd3668c0009789e8d53627e60273038857a0)(tmcp@1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2))':
     dependencies:
-      tmcp: 1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2)
+      tmcp: 1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2)
 
   '@tybys/wasm-util@0.10.3':
     dependencies:
@@ -3157,7 +3157,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mcp-proxy@6.7.3(patch_hash=54f87afbedd35b5bfaceb4b7b4c9aa0293f2f052f8a46ac8ad4ffa0701ee88c8):
+  mcp-proxy@6.7.3(patch_hash=c5c76bd9429a83f335291a97f1fb78ed20465f28dfcb872d0e0418da55b44f5e):
     dependencies:
       '@modelcontextprotocol/client': 2.0.0
       '@modelcontextprotocol/server': 2.0.0
@@ -3492,7 +3492,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  tmcp@1.19.4(patch_hash=d5f8882311e6249be03b6177147c2c1279f7f2d61cba312a73b02c8c3bdbd047)(typescript@6.0.2):
+  tmcp@1.19.4(patch_hash=cacb5fe5995acf4f2f888ebc2ce94fb0a5b9dc4740ed0db5d52deff5009163a1)(typescript@6.0.2):
     dependencies:
       '@standard-schema/spec': 1.1.0
       json-rpc-2.0: 1.7.1

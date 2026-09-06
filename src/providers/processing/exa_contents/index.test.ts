@@ -25,6 +25,93 @@ describe('ExaContentsProvider', () => {
 		vi.restoreAllMocks();
 	});
 
+	it.each([
+		{
+			results: [],
+			statuses: [
+				{
+					id: 'doc-1',
+					status: 'error',
+					error: { tag: 'CRAWL_NOT_FOUND', httpStatusCode: 404 },
+				},
+			],
+		},
+		{
+			results: [
+				{
+					id: 'doc-1',
+					url: 'https://example.com',
+					text: null,
+					summary: null,
+					highlights: [],
+				},
+			],
+		},
+	])(
+		'rejects all-failed or contentless responses without retrying: %o',
+		async (body) => {
+			fetch_mock.mockImplementation(
+				async () => new Response(JSON.stringify(body)),
+			);
+			await expect(
+				new ExaContentsProvider().process_content('doc-1'),
+			).rejects.toMatchObject({
+				type: 'PROVIDER_ERROR',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it('counts only real extractions and preserves per-ID failures', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: [
+						{
+							id: 'doc-1',
+							url: 'https://example.com/1',
+							highlights: ['Real highlight'],
+						},
+						{
+							id: 'doc-2',
+							url: 'https://example.com/2',
+							text: 'Do not use failed content',
+						},
+					],
+					statuses: [
+						{
+							id: 'doc-1',
+							status: 'success',
+							source: 'cached',
+							error: null,
+						},
+						{
+							id: 'doc-2',
+							status: 'error',
+							error: { tag: 'CRAWL_NOT_FOUND', httpStatusCode: null },
+						},
+					],
+				}),
+			),
+		);
+		const result = await new ExaContentsProvider().process_content([
+			'doc-1',
+			'doc-2',
+		]);
+		expect(result.raw_contents).toEqual([
+			{ url: 'https://example.com/1', content: 'Real highlight' },
+		]);
+		expect(result.metadata).toMatchObject({
+			urls_processed: 2,
+			successful_extractions: 1,
+			failed_urls: ['doc-2'],
+			word_count: 2,
+		});
+		expect(result.content).not.toContain('No content available');
+		expect(result.content).not.toContain('Do not use failed content');
+	});
+
 	it('applies the configured abort timeout to contents requests', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(

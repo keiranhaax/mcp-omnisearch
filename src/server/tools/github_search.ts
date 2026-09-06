@@ -50,6 +50,9 @@ export const register_github_search = (
 				limit: v.optional(
 					v.pipe(
 						v.number(),
+						v.integer(),
+						v.minValue(1),
+						v.maxValue(100),
 						v.description('Maximum number of results (default: 10)'),
 					),
 				),

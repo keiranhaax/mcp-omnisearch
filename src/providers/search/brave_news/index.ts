@@ -1,44 +1,40 @@
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { http_json } from '../../../common/http.js';
-import { SearchResult } from '../../../common/types.js';
+import {
+	ErrorType,
+	ProviderError,
+	SearchResult,
+} from '../../../common/types.js';
 import { handle_provider_error } from '../../../common/errors.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface BraveNewsMetaUrl {
-	scheme: string;
-	netloc: string;
-	hostname: string;
-	favicon: string;
-	path: string;
-}
-
-interface BraveNewsThumbnail {
-	src?: string;
-	original?: string;
-}
-
-interface BraveNewsResult {
-	type: string;
-	title: string;
-	url: string;
-	description?: string;
-	age?: string;
-	page_age?: string;
-	page_fetched?: string;
-	meta_url?: BraveNewsMetaUrl;
-	thumbnail?: BraveNewsThumbnail;
-	extra_snippets?: string[];
-}
-
-interface BraveNewsResponse {
-	type: string;
-	query: {
-		original: string;
-		altered?: string;
-	};
-	results: BraveNewsResult[];
-}
+const brave_news_response_schema = v.object({
+	results: v.array(
+		v.object({
+			title: v.optional(v.string()),
+			url: v.pipe(
+				v.string(),
+				v.check((value) => value.trim().length > 0),
+			),
+			description: v.optional(v.string()),
+			age: v.optional(v.string()),
+			page_age: v.optional(v.string()),
+			meta_url: v.optional(
+				v.object({
+					hostname: v.optional(v.string()),
+					favicon: v.optional(v.string()),
+				}),
+			),
+			thumbnail: v.optional(
+				v.object({ src: v.optional(v.string()) }),
+			),
+			extra_snippets: v.optional(v.array(v.string())),
+		}),
+	),
+});
 
 export interface BraveNewsSearchOptions {
 	query: string;
@@ -59,6 +55,31 @@ export class BraveNewsSearchProvider {
 	async search(
 		options: BraveNewsSearchOptions,
 	): Promise<SearchResult[]> {
+		const max_count = 50;
+		if (
+			options.count !== undefined &&
+			(!Number.isInteger(options.count) ||
+				options.count < 1 ||
+				options.count > max_count)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				`count must be an integer between 1 and ${max_count}`,
+				this.name,
+			);
+		}
+		if (
+			options.offset !== undefined &&
+			(!Number.isInteger(options.offset) ||
+				options.offset < 0 ||
+				options.offset > 9)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'offset must be an integer between 0 and 9',
+				this.name,
+			);
+		}
 		const news_request = async () => {
 			const api_key = validate_api_key(
 				config.search.brave_news.api_key,
@@ -104,7 +125,7 @@ export class BraveNewsSearchProvider {
 					params.set('extra_snippets', 'true');
 				}
 
-				const response = await http_json<BraveNewsResponse>(
+				const raw_response = await http_json(
 					this.name,
 					`${config.search.brave.base_url}/news/search?${params}`,
 					{
@@ -119,7 +140,12 @@ export class BraveNewsSearchProvider {
 					},
 				);
 
-				const results = response.results || [];
+				const response = parse_provider_response(
+					this.name,
+					brave_news_response_schema,
+					raw_response,
+				);
+				const results = response.results;
 
 				if (results.length === 0) {
 					return [];
@@ -131,7 +157,7 @@ export class BraveNewsSearchProvider {
 						: '';
 
 					return {
-						title: result.title,
+						title: result.title || result.url,
 						url: result.url,
 						snippet: (result.description || '') + snippets_text,
 						source_provider: this.name,
@@ -149,6 +175,8 @@ export class BraveNewsSearchProvider {
 			}
 		};
 
-		return retry_with_backoff(news_request);
+		return retry_with_backoff(news_request, {
+			timeout_ms: config.search.brave_news.timeout,
+		});
 	}
 }

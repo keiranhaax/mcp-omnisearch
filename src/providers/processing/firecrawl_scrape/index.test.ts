@@ -29,6 +29,30 @@ describe('FirecrawlScrapeProvider', () => {
 		vi.restoreAllMocks();
 	});
 
+	it.each(['answer', 'highlights'])(
+		'preserves nullable %s without fabricating page content',
+		async (field) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({ success: true, data: { [field]: null } }),
+				),
+			);
+			const result =
+				await new FirecrawlScrapeProvider().process_content(
+					'https://example.com',
+					'basic',
+					field === 'answer'
+						? { question: 'Why?' }
+						: { highlights_query: 'pricing' },
+				);
+			expect(result.content).toBe('');
+			expect(result.metadata.documents).toEqual([
+				{ url: 'https://example.com', [field]: null },
+			]);
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+		},
+	);
+
 	it('keeps the default markdown scrape body', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(

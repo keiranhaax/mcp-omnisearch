@@ -6,6 +6,7 @@ import {
 	with_abort_signal,
 } from '../../../common/request_context.js';
 import { retry_with_backoff } from '../../../common/retry.js';
+import { retry_after_details } from '../../../common/http.js';
 import {
 	BaseSearchParams,
 	ErrorType,
@@ -309,14 +310,12 @@ export class GitHubSearchProvider implements SearchProvider {
 				: {};
 		const retry_after = headers['retry-after'];
 		const reset = headers['x-ratelimit-reset'];
-		const reset_ms =
+		const reset_details =
 			typeof retry_after === 'string'
-				? /^\d+$/.test(retry_after)
-					? Date.now() + Number(retry_after) * 1000
-					: Date.parse(retry_after)
+				? retry_after_details(retry_after)
 				: typeof reset === 'string' && /^\d+$/.test(reset)
-					? Number(reset) * 1000
-					: NaN;
+					? retry_after_details(reset, 0)
+					: {};
 		if (
 			status === 429 ||
 			(status === 403 &&
@@ -329,9 +328,7 @@ export class GitHubSearchProvider implements SearchProvider {
 				this.name,
 				{
 					status,
-					reset_time: Number.isFinite(reset_ms)
-						? new Date(reset_ms)
-						: undefined,
+					...reset_details,
 				},
 			);
 		}

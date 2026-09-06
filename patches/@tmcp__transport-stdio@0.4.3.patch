@@ -1,43 +1,154 @@
+diff --git a/src/index.js b/src/index.js
+index 571c1366cd9f68d76402d8070b191ad3c61628ba..0984660e213d0a40e5a5e528c0978aee08a7a6b1 100644
 --- a/src/index.js
 +++ b/src/index.js
-@@ -16,6 +16,9 @@
- 	 * @type {Set<() => void>}
+@@ -3,6 +3,22 @@
+  */
+ import process from 'node:process';
+ 
++/** @param {string} name @param {number} fallback @param {number} maximum */
++function limit(name, fallback, maximum) {
++	const raw = process.env[name];
++	if (raw === undefined) return fallback;
++	const value = Number(raw);
++	if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(value) || value > maximum) {
++		throw new Error(`Invalid ${name}`);
++	}
++	return value;
++}
++
++const CONTROL_METHODS = new Set([
++	'initialize', 'ping', 'notifications/initialized',
++	'logging/setLevel', 'resources/subscribe', 'resources/unsubscribe',
++]);
++
+ /**
+  * @template {Record<string, unknown> | undefined} [TCustom=undefined]
+  */
+@@ -17,6 +33,19 @@ export class StdioTransport {
  	 */
  	#cleaners = new Set();
-+
+ 
 +	/** @type {Map<string | number, AbortController>} */
 +	#inflight = new Map();
- 
++	#active = 0;
++	#closed = false;
++	#initialized = false;
++	#max_output_bytes = limit('OMNISEARCH_STDIO_MAX_OUTPUT_BYTES', 1024 * 1024, 16 * 1024 * 1024);
++	/** @type {Buffer[]} */
++	#output = [];
++	#output_bytes = 0;
++	#backpressured = false;
++	#max_frame_bytes = limit('OMNISEARCH_STDIO_MAX_FRAME_BYTES', 4 * 1024 * 1024, 16 * 1024 * 1024);
++	#max_inflight = limit('OMNISEARCH_MAX_INFLIGHT', 16, 256);
++
  	/**
  	 * @type {NonNullable<Partial<Context["sessionInfo"]>>}
-@@ -83,10 +86,44 @@
+ 	 */
+@@ -39,9 +68,11 @@ export class StdioTransport {
+ 			this.#server.on('initialize', ({ capabilities, clientInfo }) => {
+ 				this.#session_info.clientCapabilities = capabilities;
+ 				this.#session_info.clientInfo = clientInfo;
++				if (this.#initialized) return;
++				this.#initialized = true;
+ 				this.#cleaners.add(
+ 					this.#server.on('send', ({ request }) => {
+-						process.stdout.write(JSON.stringify(request) + '\n');
++						this.#send(request);
+ 					}),
+ 				);
+ 				this.#cleaners.add(
+@@ -55,7 +86,7 @@ export class StdioTransport {
+ 						) {
+ 							return;
+ 						}
+-						process.stdout.write(JSON.stringify(request) + '\n');
++						this.#send(request);
+ 					}),
+ 				);
+ 				this.#cleaners.add(
+@@ -82,58 +113,141 @@ export class StdioTransport {
+ 		);
  	}
  
- 	#close() {
+-	#close() {
++	/** @param {unknown} message */
++	#send(message) {
++		if (this.#closed) return;
++		try {
++			const text = JSON.stringify(message) + '\n';
++			const bytes = Buffer.byteLength(text);
++			if (bytes + this.#output_bytes + process.stdout.writableLength > this.#max_output_bytes) {
++				this.#close(1);
++				return;
++			}
++			const frame = Buffer.from(text);
++			if (this.#backpressured) {
++				this.#output.push(frame);
++				this.#output_bytes += bytes;
++			} else {
++				this.#backpressured = !process.stdout.write(frame);
++			}
++		} catch {
++			this.#close(1);
++		}
++	}
++
++	#drain() {
++		if (this.#closed) return;
++		this.#backpressured = false;
++		try {
++			while (this.#output.length && !this.#backpressured) {
++				const frame = this.#output.shift();
++				this.#output_bytes -= frame.length;
++				this.#backpressured = !process.stdout.write(frame);
++			}
++		} catch {
++			this.#close(1);
++		}
++	}
++
++	#close(code = 0) {
++		if (this.#closed) return;
++		this.#closed = true;
++		this.#output = [];
++		this.#output_bytes = 0;
++		process.stdin.pause();
 +		for (const controller of this.#inflight.values()) controller.abort();
 +		this.#inflight.clear();
  		for (const cleaner of this.#cleaners) {
  			cleaner();
  		}
 -		process.exit(0);
-+		setImmediate(() => process.exit(0));
++		setImmediate(() => process.exit(code));
 +	}
 +
 +	/** @param {string} line @param {TCustom} [ctx] */
 +	async #dispatch(line, ctx) {
++		if (this.#closed) return;
 +		let id;
 +		let controller;
++		let admitted = false;
 +		try {
 +			const message = JSON.parse(line);
 +			if (message?.jsonrpc === '2.0' && message.method === 'notifications/cancelled' && message.id === undefined) {
 +				this.#inflight.get(message.params?.requestId)?.abort();
 +				return;
 +			}
-+			if (message && typeof message.method === 'string' && (typeof message.id === 'string' || typeof message.id === 'number')) {
-+				id = message.id;
-+				if (this.#inflight.has(id)) return;
++			const is_request = message && typeof message.method === 'string';
++			id = is_request && (typeof message.id === 'string' || typeof message.id === 'number') ? message.id : undefined;
++			if (id !== undefined && this.#inflight.has(id)) return;
++			if (is_request && !CONTROL_METHODS.has(message.method)) {
++				if (this.#active >= this.#max_inflight) {
++					if (id !== undefined) this.#send({
++						jsonrpc: '2.0', id, error: {code: -32000, message: 'Server busy'},
++					});
++					return;
++				}
++				this.#active++;
++				admitted = true;
 +				controller = new AbortController();
-+				this.#inflight.set(id, controller);
++				if (id !== undefined) this.#inflight.set(id, controller);
 +			}
 +			const session_info = message.method === 'initialize'
 +				? {clientCapabilities: message.params?.capabilities, clientInfo: message.params?.clientInfo}
@@ -47,28 +158,34 @@
 +				signal: controller?.signal,
 +				sessionInfo: session_info,
 +			});
-+			if (response && !controller?.signal.aborted) process.stdout.write(JSON.stringify(response) + '\n');
++			if (response && !this.#closed && !controller?.signal.aborted) this.#send(response);
 +		} catch {
 +			// Invalid input must not crash the shared transport.
 +		} finally {
++			// Abort/disconnect suppresses the response, not the underlying work.
++			// Keep the slot until receive() and its handler really settle.
++			if (admitted) this.#active--;
 +			if (id !== undefined && this.#inflight.get(id) === controller) this.#inflight.delete(id);
 +		}
  	}
  
  	/**
-@@ -98,7 +135,7 @@
- 
- 		let buffer = '';
- 
+ 	 * @param {TCustom} [ctx]
+ 	 */
+ 	listen(ctx) {
+-		// Handle stdio communication
+-		process.stdin.setEncoding('utf8');
+-
+-		let buffer = '';
+-
 -		process.stdin.on('data', async (chunk) => {
-+		process.stdin.on('data', (chunk) => {
- 			buffer += chunk;
- 
- 			// Process complete JSON-RPC messages
-@@ -106,34 +143,7 @@
- 			buffer = lines.pop() || ''; // Keep the incomplete line in buffer
- 
- 			for (const line of lines) {
+-			buffer += chunk;
+-
+-			// Process complete JSON-RPC messages
+-			const lines = buffer.split('\n');
+-			buffer = lines.pop() || ''; // Keep the incomplete line in buffer
+-
+-			for (const line of lines) {
 -				if (line.trim()) {
 -					try {
 -						const message = JSON.parse(line);
@@ -96,8 +213,41 @@
 -					} catch {
 -						/** empty */
 -					}
--				}
-+				if (line.trim()) void this.#dispatch(line, ctx);
++		// Never pause input for output backpressure: cancellations must still run.
++		process.stdout.on('drain', () => this.#drain());
++		process.stdout.on('error', () => this.#close(1));
++		process.stdout.on('close', () => this.#close(1));
++		process.stdin.on('error', () => this.#close(1));
++		// Bound bytes before decoding or retaining a partial JSON-RPC frame.
++		// Geometric growth avoids quadratic copying for tiny input chunks.
++		let frame = Buffer.alloc(Math.min(4096, this.#max_frame_bytes));
++		let used = 0;
++		process.stdin.on('data', (chunk) => {
++			if (this.#closed) return;
++			const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
++			let offset = 0;
++			while (offset < bytes.length && !this.#closed) {
++				const newline = bytes.indexOf(10, offset);
++				const end = newline === -1 ? bytes.length : newline;
++				const length = used + end - offset;
++				if (length > this.#max_frame_bytes) {
++					frame = Buffer.alloc(0);
++					this.#close(1);
++					return;
++				}
++				if (length > frame.length) {
++					const grown = Buffer.alloc(Math.min(this.#max_frame_bytes, Math.max(length, frame.length * 2)));
++					frame.copy(grown, 0, 0, used);
++					frame = grown;
++				}
++				bytes.copy(frame, used, offset, end);
++				used = length;
++				if (newline !== -1) {
++					const line = frame.toString('utf8', 0, used);
++					used = 0;
++					if (line.trim()) void this.#dispatch(line, ctx);
+ 				}
++				offset = end + 1;
  			}
  		});
  

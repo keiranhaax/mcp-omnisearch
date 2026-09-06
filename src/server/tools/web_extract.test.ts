@@ -8,6 +8,8 @@ import {
 } from 'vitest';
 import * as v from 'valibot';
 import { ValibotJsonSchemaAdapter } from '@tmcp/adapter-valibot';
+import { FirecrawlMapProvider } from '../../providers/processing/firecrawl_map/index.js';
+import { ExaSimilarProvider } from '../../providers/processing/exa_similar/index.js';
 import { TavilyExtractProvider } from '../../providers/processing/tavily_extract/index.js';
 import { config } from '../../config/env.js';
 import {
@@ -82,6 +84,30 @@ describe('web_extract Firecrawl summarize', () => {
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
 	});
+
+	it.each(['firecrawl', 'exa'])(
+		'rejects multiple single-target inputs before %s dispatch',
+		async (provider) => {
+			config.processing.exa_contents.api_key = 'exa-test-key';
+			const process = vi.spyOn(
+				provider === 'exa'
+					? ExaSimilarProvider.prototype
+					: FirecrawlMapProvider.prototype,
+				'process_content',
+			);
+			const { server, tools } = create_server();
+			initialize_web_extract();
+			register_web_extract(server as any);
+			const response = await tools[0].handler({
+				provider,
+				mode: provider === 'exa' ? 'similar' : 'map',
+				url: ['https://example.com/a', 'https://example.com/b'],
+			});
+			expect(response.isError).toBe(true);
+			expect(process).not.toHaveBeenCalled();
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
 
 	it('forwards the Tavily reranking query through provider options', async () => {
 		config.processing.tavily_extract.api_key = 'tvly-test-key';

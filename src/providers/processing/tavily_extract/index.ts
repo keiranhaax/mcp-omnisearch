@@ -145,6 +145,8 @@ export class TavilyExtractProvider implements ProcessingProvider {
 			}
 		};
 
-		return retry_with_backoff(extract_request);
+		return retry_with_backoff(extract_request, {
+			timeout_ms: config.processing.tavily_extract.timeout,
+		});
 	}
 }

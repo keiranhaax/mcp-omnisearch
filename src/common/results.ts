@@ -138,11 +138,22 @@ export const handle_large_result = <T>(
 		return result;
 	}
 
-	let { text, sections, sections_truncated } = format_as_text(
-		result as Record<string, unknown>,
-		json,
-	);
-	if (Buffer.byteLength(text) > get_result_storage_limit()) {
+	// Do not construct a second, optional view for already-oversized JSON.
+	// Compression stores the exact canonical JSON, not a lossy projection.
+	const storage_limit = get_result_storage_limit();
+	const canonical_bytes = Buffer.byteLength(json);
+	let { text, sections, sections_truncated } =
+		canonical_bytes > storage_limit
+			? {
+					text: json,
+					sections: [{ title: 'FULL RESULT JSON', line: 1 }],
+					sections_truncated: true,
+				}
+			: format_as_text(result as Record<string, unknown>, json);
+	if (
+		canonical_bytes <= storage_limit &&
+		Buffer.byteLength(text) > storage_limit
+	) {
 		// The readable view is optional; never reject a canonical result
 		// that fits simply because its content was repeated for navigation.
 		text = `\nFULL RESULT JSON\n${json}`;

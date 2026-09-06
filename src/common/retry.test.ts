@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { is_retryable_error, retry_with_backoff } from './retry.js';
+import {
+	delay,
+	is_retryable_error,
+	retry_with_backoff,
+} from './retry.js';
 import { handle_provider_error } from './errors.js';
 import { http_json } from './http.js';
 import { run_with_request_context } from './request_context.js';
@@ -20,6 +24,96 @@ afterEach(() => {
 });
 
 describe('retry_with_backoff', () => {
+	it.each([0, -1, 1.5, NaN, Infinity, 2_147_483_648])(
+		'rejects unsafe total timeout_ms %s before work',
+		async (timeout_ms) => {
+			const fn = vi.fn();
+			await expect(
+				retry_with_backoff(fn, { timeout_ms }),
+			).rejects.toThrow(RangeError);
+			expect(fn).not.toHaveBeenCalled();
+		},
+	);
+	it('keeps caller cancellation terminal with its own total budget', async () => {
+		vi.useFakeTimers();
+		const caller = new AbortController();
+		const pending = run_with_request_context(caller.signal, () =>
+			retry_with_backoff(() => new Promise(() => {}), {
+				timeout_ms: 100,
+			}),
+		).catch((error) => error);
+		caller.abort();
+		expect(await pending).toMatchObject({ name: 'AbortError' });
+		expect(vi.getTimerCount()).toBe(0);
+	});
+	it.each(['hung attempt', 'backoff'])(
+		'honors optional total timeout_ms during %s',
+		async (phase) => {
+			vi.useFakeTimers();
+			vi.spyOn(Math, 'random').mockReturnValue(1);
+			const fn = vi.fn(() =>
+				phase === 'hung attempt'
+					? new Promise(() => {})
+					: Promise.reject(network_error()),
+			);
+			let settled = false;
+			const pending = retry_with_backoff(fn, {
+				timeout_ms: 100,
+			}).catch((error) => {
+				settled = true;
+				return error;
+			});
+			await vi.advanceTimersByTimeAsync(100);
+			expect(settled).toBe(true);
+			expect(await pending).toMatchObject({ name: 'TimeoutError' });
+			expect(fn).toHaveBeenCalledTimes(1);
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
+	it('disposes a total budget when the first attempt succeeds', async () => {
+		vi.useFakeTimers();
+		await expect(
+			retry_with_backoff(async () => 'ok', { timeout_ms: 100 }),
+		).resolves.toBe('ok');
+		expect(vi.getTimerCount()).toBe(0);
+	});
+	it.each([Infinity, NaN, -1])(
+		'rejects unsafe delay %s',
+		async (ms) => {
+			vi.useFakeTimers();
+			const result = delay(ms).catch((error) => error);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(vi.getTimerCount()).toBe(0);
+			await expect(result).resolves.toBeInstanceOf(RangeError);
+		},
+	);
+	it('chunks a large delay without shortening it and cleans up on abort', async () => {
+		vi.useFakeTimers();
+		const caller = new AbortController();
+		let settled = false;
+		const pending = delay(2_147_483_647 + 100, caller.signal).then(
+			() => {
+				settled = true;
+			},
+			(error) => error,
+		);
+		await vi.advanceTimersByTimeAsync(2_147_483_647 + 99);
+		expect(settled).toBe(false);
+		expect(vi.getTimerCount()).toBe(1);
+		caller.abort();
+		expect(await pending).toMatchObject({ name: 'AbortError' });
+		expect(vi.getTimerCount()).toBe(0);
+	});
+	it.each([Infinity, NaN, -1])(
+		'rejects unsafe initial_delay %s before work',
+		async (initial_delay) => {
+			const fn = vi.fn().mockResolvedValue('ok');
+			await expect(
+				retry_with_backoff(fn, { initial_delay }),
+			).rejects.toThrow(RangeError);
+			expect(fn).not.toHaveBeenCalled();
+		},
+	);
 	it('does not retry unclassified application TypeErrors', () => {
 		expect(is_retryable_error(new TypeError('mapping failed'))).toBe(
 			false,
@@ -131,6 +225,8 @@ describe('retry_with_backoff', () => {
 			).catch((error: unknown) => {
 				outcome = error;
 			});
+			await vi.advanceTimersByTimeAsync(0);
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
 			(source === 'request' ? request : call).abort('PRIVATE_REASON');
 			await vi.advanceTimersByTimeAsync(0);
 			expect(fetch_signal?.aborted).toBe(true);

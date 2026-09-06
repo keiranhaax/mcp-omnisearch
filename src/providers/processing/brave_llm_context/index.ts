@@ -1,3 +1,5 @@
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { http_json } from '../../../common/http.js';
 import {
 	ErrorType,
@@ -9,27 +11,29 @@ import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface BraveLlmContextSource {
-	title?: string;
-	hostname?: string;
-	age?: string[];
-}
-
-interface BraveLlmContextGenericResult {
-	url: string;
-	title: string;
-	snippets: string[];
-}
-
-interface BraveLlmContextGrounding {
-	generic?: BraveLlmContextGenericResult[];
-	map?: any[];
-}
-
-interface BraveLlmContextResponse {
-	grounding: BraveLlmContextGrounding;
-	sources: Record<string, BraveLlmContextSource>;
-}
+const context_result_schema = v.object({
+	url: v.pipe(v.string(), v.trim(), v.minLength(1)),
+	title: v.optional(v.string()),
+	name: v.optional(v.string()),
+	snippets: v.array(v.string()),
+});
+const context_response_schema = v.object({
+	grounding: v.object({
+		generic: v.optional(v.array(context_result_schema)),
+		poi: v.nullish(context_result_schema),
+		map: v.optional(v.array(context_result_schema)),
+	}),
+	sources: v.optional(
+		v.record(
+			v.string(),
+			v.object({
+				title: v.optional(v.string()),
+				hostname: v.optional(v.string()),
+				age: v.optional(v.array(v.string())),
+			}),
+		),
+	),
+});
 
 export interface BraveLlmContextOptions {
 	count?: number;
@@ -62,7 +66,9 @@ const validate_location = (
 ) => {
 	if (
 		options?.loc_lat !== undefined &&
-		(options.loc_lat < -90 || options.loc_lat > 90)
+		(!Number.isFinite(options.loc_lat) ||
+			options.loc_lat < -90 ||
+			options.loc_lat > 90)
 	) {
 		throw new ProviderError(
 			ErrorType.INVALID_INPUT,
@@ -72,7 +78,9 @@ const validate_location = (
 	}
 	if (
 		options?.loc_long !== undefined &&
-		(options.loc_long < -180 || options.loc_long > 180)
+		(!Number.isFinite(options.loc_long) ||
+			options.loc_long < -180 ||
+			options.loc_long > 180)
 	) {
 		throw new ProviderError(
 			ErrorType.INVALID_INPUT,
@@ -102,8 +110,16 @@ const build_location_headers = (
 	return headers;
 };
 
-const clamp_integer = (value: number, min: number, max: number) =>
-	Math.min(Math.max(Math.trunc(value), min), max);
+const bounded_integer = (value: number, min: number, max: number) => {
+	if (!Number.isInteger(value) || value < min || value > max) {
+		throw new ProviderError(
+			ErrorType.INVALID_INPUT,
+			`Value must be an integer between ${min} and ${max}`,
+			'brave_llm_context',
+		);
+	}
+	return value;
+};
 
 export class BraveLlmContextProvider {
 	name = 'brave_llm_context';
@@ -123,6 +139,17 @@ export class BraveLlmContextProvider {
 		}
 
 		validate_location(options);
+		for (const [key, min, max] of [
+			['count', 1, 50],
+			['maximum_number_of_urls', 1, 50],
+			['maximum_number_of_tokens', 1024, 32768],
+			['maximum_number_of_snippets', 1, 256],
+			['maximum_number_of_tokens_per_url', 512, 8192],
+			['maximum_number_of_snippets_per_url', 1, 100],
+		] as const) {
+			if (options?.[key] !== undefined)
+				bounded_integer(options[key], min, max);
+		}
 
 		const context_request = async () => {
 			const api_key = validate_api_key(
@@ -136,11 +163,11 @@ export class BraveLlmContextProvider {
 				};
 
 				if (options?.count !== undefined) {
-					request_body.count = clamp_integer(options.count, 1, 50);
+					request_body.count = bounded_integer(options.count, 1, 50);
 				}
 
 				if (options?.maximum_number_of_urls !== undefined) {
-					request_body.maximum_number_of_urls = clamp_integer(
+					request_body.maximum_number_of_urls = bounded_integer(
 						options.maximum_number_of_urls,
 						1,
 						50,
@@ -148,7 +175,7 @@ export class BraveLlmContextProvider {
 				}
 
 				if (options?.maximum_number_of_tokens !== undefined) {
-					request_body.maximum_number_of_tokens = clamp_integer(
+					request_body.maximum_number_of_tokens = bounded_integer(
 						options.maximum_number_of_tokens,
 						1024,
 						32768,
@@ -156,10 +183,10 @@ export class BraveLlmContextProvider {
 				}
 
 				if (options?.maximum_number_of_snippets !== undefined) {
-					request_body.maximum_number_of_snippets = clamp_integer(
+					request_body.maximum_number_of_snippets = bounded_integer(
 						options.maximum_number_of_snippets,
 						1,
-						100,
+						256,
 					);
 				}
 
@@ -170,7 +197,7 @@ export class BraveLlmContextProvider {
 
 				if (options?.maximum_number_of_tokens_per_url !== undefined) {
 					request_body.maximum_number_of_tokens_per_url =
-						clamp_integer(
+						bounded_integer(
 							options.maximum_number_of_tokens_per_url,
 							512,
 							8192,
@@ -181,7 +208,7 @@ export class BraveLlmContextProvider {
 					options?.maximum_number_of_snippets_per_url !== undefined
 				) {
 					request_body.maximum_number_of_snippets_per_url =
-						clamp_integer(
+						bounded_integer(
 							options.maximum_number_of_snippets_per_url,
 							1,
 							100,
@@ -210,7 +237,7 @@ export class BraveLlmContextProvider {
 
 				const location_headers = build_location_headers(options);
 
-				const response = await http_json<BraveLlmContextResponse>(
+				const raw_response = await http_json(
 					this.name,
 					config.processing.brave_llm_context.base_url,
 					{
@@ -228,14 +255,26 @@ export class BraveLlmContextProvider {
 					},
 				);
 
-				const results = response.grounding?.generic || [];
-				const sources = response.sources || {};
+				const response = parse_provider_response(
+					this.name,
+					context_response_schema,
+					raw_response,
+				);
+				const results = [
+					...(response.grounding.generic ?? []),
+					...(response.grounding.poi ? [response.grounding.poi] : []),
+					...(response.grounding.map ?? []),
+				].filter((result) =>
+					result.snippets.some((snippet) => snippet.trim()),
+				);
+				const sources = response.sources ?? {};
 
 				if (results.length === 0) {
 					throw new ProviderError(
 						ErrorType.PROVIDER_ERROR,
 						'No context returned for query',
 						this.name,
+						{ retryable: false },
 					);
 				}
 
@@ -244,7 +283,11 @@ export class BraveLlmContextProvider {
 
 				for (const result of results) {
 					const source = sources[result.url];
-					const title = result.title || source?.title || result.url;
+					const title =
+						result.title ||
+						result.name ||
+						source?.title ||
+						result.url;
 					const header = `## ${title}\nSource: ${result.url}\n`;
 					const body = result.snippets.join('\n\n');
 					raw_contents.push({
@@ -279,7 +322,9 @@ export class BraveLlmContextProvider {
 			}
 		};
 
-		return retry_with_backoff(context_request);
+		return retry_with_backoff(context_request, {
+			timeout_ms: config.processing.brave_llm_context.timeout,
+		});
 	}
 }
 

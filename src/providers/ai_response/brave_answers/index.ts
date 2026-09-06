@@ -1,3 +1,5 @@
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { http_json } from '../../../common/http.js';
 import {
 	BaseSearchParams,
@@ -9,29 +11,29 @@ import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface BraveAnswersChoice {
-	index: number;
-	message: {
-		role: string;
-		content: string;
-	};
-	finish_reason: string;
-}
-
-interface BraveAnswersUsage {
-	completion_tokens: number;
-	prompt_tokens: number;
-	total_tokens: number;
-}
-
-interface BraveAnswersResponse {
-	id: string;
-	object: string;
-	created: number;
-	model: string;
-	choices: BraveAnswersChoice[];
-	usage: BraveAnswersUsage;
-}
+const brave_answers_response_schema = v.object({
+	choices: v.pipe(
+		v.array(
+			v.object({
+				message: v.object({
+					content: v.pipe(
+						v.string(),
+						v.check((value) => value.trim().length > 0),
+					),
+				}),
+			}),
+		),
+		v.minLength(1),
+	),
+	model: v.optional(v.string()),
+	usage: v.optional(
+		v.object({
+			completion_tokens: v.optional(v.number()),
+			prompt_tokens: v.optional(v.number()),
+			total_tokens: v.optional(v.number()),
+		}),
+	),
+});
 
 export class BraveAnswersProvider implements SearchProvider {
 	name = 'brave_answers';
@@ -46,7 +48,7 @@ export class BraveAnswersProvider implements SearchProvider {
 			);
 
 			try {
-				const response = await http_json<BraveAnswersResponse>(
+				const raw_response = await http_json(
 					this.name,
 					config.ai_response.brave_answers.base_url,
 					{
@@ -71,6 +73,11 @@ export class BraveAnswersProvider implements SearchProvider {
 					},
 				);
 
+				const response = parse_provider_response(
+					this.name,
+					brave_answers_response_schema,
+					raw_response,
+				);
 				const results: SearchResult[] = [];
 
 				if (response.choices?.length > 0) {
@@ -103,6 +110,8 @@ export class BraveAnswersProvider implements SearchProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return retry_with_backoff(search_request, {
+			timeout_ms: config.ai_response.brave_answers.timeout,
+		});
 	}
 }

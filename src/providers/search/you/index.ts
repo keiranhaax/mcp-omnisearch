@@ -8,6 +8,8 @@ import { http_json } from '../../../common/http.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
+	ErrorType,
+	ProviderError,
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
@@ -37,6 +39,18 @@ export class YouSearchProvider implements SearchProvider {
 		'You.com web search with LLM-optimized snippets. Returns web + news results. Supports domain filtering and search operators (site:, filetype:, OR, -keyword, "exact phrase"). Fast fallback when other search providers fail.';
 
 	async search(params: BaseSearchParams): Promise<SearchResult[]> {
+		if (
+			params.limit !== undefined &&
+			(!Number.isInteger(params.limit) ||
+				params.limit < 1 ||
+				params.limit > 100)
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'limit must be an integer between 1 and 100',
+				this.name,
+			);
+		}
 		const api_key = validate_api_key(
 			config.search.you.api_key,
 			this.name,
@@ -108,7 +122,7 @@ export class YouSearchProvider implements SearchProvider {
 					}
 				}
 
-				return results;
+				return results.slice(0, params.limit ?? 20);
 			} catch (error) {
 				handle_provider_error(
 					error,
@@ -118,6 +132,8 @@ export class YouSearchProvider implements SearchProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return retry_with_backoff(search_request, {
+			timeout_ms: config.search.you.timeout,
+		});
 	}
 }

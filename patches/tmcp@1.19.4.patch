@@ -1,6 +1,21 @@
+diff --git a/src/index.js b/src/index.js
+index adaa79ac2be33b20ddd5986a51a0c4b7593b0574..ea3266fd5fd9d670ec1561b4b9d9969b69a9094c 100644
 --- a/src/index.js
 +++ b/src/index.js
-@@ -50,6 +50,7 @@
+@@ -28,11 +28,10 @@ import {
+ 	JSONRPCErrorSchema,
+ } from './validation/index.js';
+ import {
+-	get_supported_versions,
+ 	negotiate_protocol_version,
+ } from './validation/version.js';
+ import { should_version_negotiation_fail } from './validation/version.js';
+-import { event } from './internal/utils.js';
++import { event, summarize_issues } from './internal/utils.js';
+ 
+ /**
+  * Information about a validated access token, provided to request handlers.
+@@ -50,6 +49,7 @@ import { event } from './internal/utils.js';
  /**
   * @template {Record<string, unknown> | undefined} [TCustom=undefined]
   * @typedef {Object} Context
@@ -8,9 +23,178 @@
   * @property {string} [sessionId]
   * @property {{ clientCapabilities?: ClientCapabilitiesType, clientInfo?: ClientInfoType, logLevel?: LoggingLevel }} [sessionInfo]
   * @property {AuthInfo} [auth]
+@@ -177,7 +177,10 @@ async function safe_enabled(enabled) {
+  * @template {Record<string, unknown> | undefined} [CustomContext=undefined]
+  */
+ export class McpServer {
+-	#server = new JSONRPCServer();
++	#server = new JSONRPCServer({
++		// The default listener prints thrown errors, including raw validation inputs.
++		errorListener: () => {},
++	});
+ 	/**
+ 	 * @type {JSONRPCClient<"broadcast" | "standalone"> | undefined}
+ 	 */
+@@ -221,6 +224,12 @@ export class McpServer {
+ 	 */
+ 	constructor(server_info, options) {
+ 		this.#options = options;
++		this.#server.mapErrorToJSONRPCErrorResponse = (id, error) => ({
++			jsonrpc: '2.0', id,
++			error: error instanceof McpError
++				? { code: error.code, message: error.message }
++				: { code: -32603, message: 'Internal error' },
++		});
+ 		this.#server.addMethod('initialize', (initialize_request) => {
+ 			try {
+ 				// Validate basic request format
+@@ -266,24 +275,11 @@ export class McpServer {
+ 					throw error;
+ 				}
+ 
+-				if (
+-					/** @type {Error} */ (error).message?.includes(
+-						'Protocol version',
+-					)
+-				) {
+-					const rpc_error = new McpError(
+-						-32602,
+-						`Protocol version validation failed: ${/** @type {Error} */ (error).message}. Server supports: ${get_supported_versions().join(', ')}`,
+-					);
+-					throw rpc_error;
++				if (v.isValiError(error)) {
++					throw new McpError(-32602,
++						`Invalid initialization parameters: ${summarize_issues(error.issues, InitializeRequestParamsSchema)}`);
+ 				}
+-
+-				// General initialization error
+-				const rpc_error = new McpError(
+-					-32603,
+-					`Initialization failed: ${/** @type {Error} */ (error).message}`,
+-				);
+-				throw rpc_error;
++				throw new McpError(-32603, 'Initialization failed');
+ 			}
+ 		});
+ 		this.#server.addMethod('ping', () => {
+@@ -467,15 +463,7 @@ export class McpServer {
+ 			async ({ name, arguments: args }) => {
+ 				const tool = this.#tools.get(name);
+ 				if (!tool) {
+-					return /** @type {CallToolResult<any>} */ ({
+-						isError: true,
+-						content: [
+-							{
+-								type: 'text',
+-								text: `Tool ${name} not found`,
+-							},
+-						],
+-					});
++					throw new McpError(-32602, 'Unknown tool');
+ 				}
+ 
+ 				// Validate input arguments if schema is provided
+@@ -491,7 +479,7 @@ export class McpServer {
+ 							content: [
+ 								{
+ 									type: 'text',
+-									text: `Invalid arguments for tool ${name}: ${JSON.stringify(validation_result.issues)}`,
++									text: `Invalid arguments: ${summarize_issues(validation_result.issues, tool.schema)}`,
+ 								},
+ 							],
+ 						});
+@@ -526,7 +514,7 @@ export class McpServer {
+ 							content: [
+ 								{
+ 									type: 'text',
+-									text: `Tool ${name} returned invalid structured content: ${JSON.stringify(output_validation.issues)}`,
++									text: `Invalid structured content: ${summarize_issues(output_validation.issues, tool.outputSchema)}`,
+ 								},
+ 							],
+ 						});
+@@ -631,7 +619,7 @@ export class McpServer {
+ 				if (validated_args.issues) {
+ 					throw new McpError(
+ 						-32602,
+-						`Invalid arguments for prompt ${name}: ${JSON.stringify(validated_args.issues)}`,
++						`Invalid prompt arguments: ${summarize_issues(validated_args.issues, prompt.schema)}`,
+ 					);
+ 				}
+ 				return v.parse(
+@@ -747,7 +735,7 @@ export class McpServer {
+ 					params = match.params;
+ 				}
+ 				if (!resource) {
+-					throw new McpError(-32601, `Resource ${uri} not found`);
++					throw new McpError(-32602, 'Unknown resource');
+ 				}
+ 			}
+ 			if (resource.template) {
+@@ -1217,7 +1205,7 @@ export class McpServer {
+ 		if (validated_result.issues) {
+ 			throw new McpError(
+ 				-32603,
+-				`Invalid elicitation result: ${JSON.stringify(validated_result.issues)}`,
++				`Invalid elicitation result: ${summarize_issues(validated_result.issues, schema)}`,
+ 			);
+ 		}
+ 		return { ...elicit_result, content: validated_result.value };
+diff --git a/src/internal/utils.js b/src/internal/utils.js
+index 4842cc9ee5e63f18839233659f974aa51344e726..f7eead5b618a489043356d3d2d5b85c124f671dc 100644
+--- a/src/internal/utils.js
++++ b/src/internal/utils.js
+@@ -10,3 +10,46 @@
+ export function event(type, detail) {
+ 	return new CustomEvent(type, { detail });
+ }
++
++/**
++ * Only report schema-owned field names and known constraints. Standard Schema
++ * issues can contain raw inputs, parent objects and value-bearing messages.
++ * @param {ReadonlyArray<import('@standard-schema/spec').StandardSchemaV1.Issue>} issues
++ * @param {any} schema
++ */
++export function summarize_issues(issues, schema) {
++	const constraints = new Set([
++		'array', 'object', 'string', 'number', 'boolean', 'null', 'undefined',
++		'literal', 'picklist', 'union', 'integer', 'finite', 'url', 'email',
++		'min_length', 'max_length', 'length', 'min_value', 'max_value',
++		'min_size', 'max_size', 'size', 'regex', 'check', 'custom',
++	]);
++	const summaries = issues.slice(0, 8).map((issue) => {
++		let current = schema;
++		const path = (issue.path ?? []).slice(0, 6).map((segment) => {
++			// Valibot wraps schema nodes in optional/nullable/pipe schemas.
++			for (let depth = 0; depth < 8; depth++) {
++				const inner = current?.wrapped ?? current?.pipe?.[0];
++				if (!inner || inner === current) break;
++				current = inner;
++			}
++			const key = typeof segment === 'object' ? segment.key : segment;
++			if (typeof key === 'string' && current?.entries && Object.hasOwn(current.entries, key)) {
++				current = current.entries[key];
++				return key.slice(0, 32).replace(/[^a-zA-Z0-9_-]/g, '_');
++			}
++			if (typeof key === 'number' && Number.isSafeInteger(key) && key >= 0 && current?.item) {
++				current = current.item;
++				return key <= 999999 ? key : '*';
++			}
++			current = undefined;
++			return '*';
++		});
++		const detail = /** @type {{type?: string, requirement?: unknown}} */ (issue);
++		const constraint = constraints.has(detail.type ?? '') ? detail.type : 'invalid_value';
++		const requirement = typeof detail.requirement === 'number' && Number.isFinite(detail.requirement)
++			? detail.requirement : undefined;
++		return { path, constraint, ...(requirement !== undefined && { requirement }) };
++	});
++	return JSON.stringify({ issues: summaries, truncated: issues.length > summaries.length });
++}
+diff --git a/src/types/index.d.ts b/src/types/index.d.ts
+index 1a5aac8b0041a83fedc29d70e33c839c81dd198d..500f6e03f1d3fceb9246e0db91dd4fcfc6b5c2a1 100644
 --- a/src/types/index.d.ts
 +++ b/src/types/index.d.ts
-@@ -214,6 +214,7 @@
+@@ -214,6 +214,7 @@ declare module 'tmcp' {
  		extra?: Record<string, unknown> | undefined;
  	};
  	export type Context<TCustom extends Record<string, unknown> | undefined = undefined> = {
@@ -18,3 +202,15 @@
  		sessionId?: string | undefined;
  		sessionInfo?: {
  			clientCapabilities?: ClientCapabilities_1;
+diff --git a/src/validation/index.js b/src/validation/index.js
+index 9567636d7480c634e0065e851a2459b12aa6e982..7fd369da456597f779d153955fffd5d2fab63839 100644
+--- a/src/validation/index.js
++++ b/src/validation/index.js
+@@ -18,6 +18,7 @@ export class McpError extends Error {
+ 	constructor(code, message) {
+ 		super(`MCP error ${code}: ${message}`);
+ 		this.name = 'McpError';
++		this.code = code;
+ 	}
+ }
+ 

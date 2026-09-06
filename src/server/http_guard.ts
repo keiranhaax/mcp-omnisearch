@@ -43,6 +43,7 @@ export interface GuardConfig {
 	body_read_timeout_ms: number;
 	mcp_path: string;
 	ping_path: string;
+	ready_path: string;
 }
 
 export const default_guard_config = (
@@ -60,6 +61,7 @@ export const default_guard_config = (
 	body_read_timeout_ms: 30_000,
 	mcp_path: '/mcp',
 	ping_path: '/ping',
+	ready_path: '/ready',
 	...overrides,
 });
 
@@ -286,6 +288,8 @@ const reject = (
 	status: number,
 	message: string,
 ): void => {
+	if (status === 401)
+		res.setHeader('www-authenticate', 'ApiKey realm="omnisearch"');
 	send_json(res, status, json_rpc_error(null, -32000, message));
 };
 
@@ -323,10 +327,12 @@ const forward_to_upstream = (
 			headers,
 		},
 		(upstream_res) => {
-			res.writeHead(
-				upstream_res.statusCode ?? 502,
-				upstream_res.headers,
-			);
+			const response_headers = { ...upstream_res.headers };
+			for (const name of Object.keys(response_headers)) {
+				if (name.startsWith('access-control-'))
+					delete response_headers[name];
+			}
+			res.writeHead(upstream_res.statusCode ?? 502, response_headers);
 			upstream_res.pipe(res);
 			upstream_res.on('error', () => {
 				upstream_res.destroy();
@@ -349,6 +355,11 @@ const forward_to_upstream = (
 			),
 		);
 	});
+	if (req.method === 'GET') {
+		upstream.setTimeout(5000, () =>
+			upstream.destroy(new Error('Health probe deadline')),
+		);
+	}
 	// Propagate client-close cancellation to the upstream request.
 	res.on('close', () => {
 		if (!res.writableEnded) upstream.destroy();
@@ -356,10 +367,43 @@ const forward_to_upstream = (
 	upstream.end(body);
 };
 
+const has_api_key = (
+	config: GuardConfig,
+	req: IncomingMessage,
+): boolean => {
+	const supplied = req.headers['x-api-key'];
+	const expected = Buffer.from(config.api_key);
+	const actual = Buffer.from(
+		typeof supplied === 'string' ? supplied : '',
+	);
+	return (
+		expected.length > 0 &&
+		actual.length === expected.length &&
+		timingSafeEqual(actual, expected)
+	);
+};
+
+const is_cancellation = (body: Buffer): boolean => {
+	if (body.length > 8192) return false;
+	try {
+		const message = JSON.parse(body.toString('utf8'));
+		return (
+			message?.jsonrpc === '2.0' &&
+			message.method === 'notifications/cancelled' &&
+			message.id === undefined &&
+			(typeof message.params?.requestId === 'string' ||
+				typeof message.params?.requestId === 'number')
+		);
+	} catch {
+		return false;
+	}
+};
+
 const handle_request = async (
 	config: GuardConfig,
 	req: IncomingMessage,
 	res: ServerResponse,
+	admit_body: (body: Buffer) => boolean = () => true,
 ): Promise<void> => {
 	const host_check = check_host(
 		req.headers.host,
@@ -395,7 +439,10 @@ const handle_request = async (
 		return;
 	}
 
-	if (pathname === config.ping_path) {
+	if (
+		pathname === config.ping_path ||
+		pathname === config.ready_path
+	) {
 		if (req.method !== 'GET') {
 			res.setHeader('allow', 'GET');
 			reject(res, 405, 'Method Not Allowed');
@@ -422,16 +469,7 @@ const handle_request = async (
 		return;
 	}
 
-	const supplied_key = req.headers['x-api-key'];
-	const expected = Buffer.from(config.api_key);
-	const actual = Buffer.from(
-		typeof supplied_key === 'string' ? supplied_key : '',
-	);
-	if (
-		!expected.length ||
-		actual.length !== expected.length ||
-		!timingSafeEqual(actual, expected)
-	) {
+	if (!has_api_key(config, req)) {
 		reject(res, 401, 'Unauthorized: Invalid or missing API key');
 		return;
 	}
@@ -483,7 +521,8 @@ const handle_request = async (
 		return;
 	}
 
-	forward_to_upstream(config, req, res, read.body);
+	if (admit_body(read.body))
+		forward_to_upstream(config, req, res, read.body);
 };
 
 export const create_guard_server = (config: GuardConfig): Server => {
@@ -499,41 +538,111 @@ export const create_guard_server = (config: GuardConfig): Server => {
 		),
 	};
 	let inflight = 0;
+	let control_inflight = 0;
+	let health_inflight = 0;
 	let window_started = Date.now();
-	let accepted = 0;
+	const accepted = { rejected: 0, work: 0, control: 0, health: 0 };
+	const throttle = (res: ServerResponse, seconds: number) => {
+		res.setHeader('retry-after', String(Math.max(1, seconds)));
+		reject(res, 429, 'Too Many Requests');
+	};
+	const take_rate = (
+		lane: keyof typeof accepted,
+		res: ServerResponse,
+	): boolean => {
+		const limit =
+			lane === 'health' || lane === 'control'
+				? Math.min(120, config.rate_limit_requests)
+				: config.rate_limit_requests;
+		if (accepted[lane] >= limit) {
+			throttle(
+				res,
+				Math.ceil(
+					(window_started +
+						config.rate_limit_window_ms -
+						Date.now()) /
+						1000,
+				),
+			);
+			return false;
+		}
+		accepted[lane]++;
+		return true;
+	};
 	const server = createServer((req, res) => {
 		const now = Date.now();
 		if (now - window_started >= config.rate_limit_window_ms) {
 			window_started = now;
-			accepted = 0;
+			for (const lane of Object.keys(
+				accepted,
+			) as (keyof typeof accepted)[])
+				accepted[lane] = 0;
 		}
-		if (accepted >= config.rate_limit_requests) {
-			res.setHeader(
-				'retry-after',
-				String(
-					Math.max(
-						1,
-						Math.ceil(
-							(window_started + config.rate_limit_window_ms - now) /
-								1000,
-						),
+		let pathname = '';
+		try {
+			pathname = new URL(req.url ?? '/', 'http://guard.local')
+				.pathname;
+		} catch {
+			/* Rejected by the normal route validation. */
+		}
+		const valid_edge =
+			check_host(req.headers.host, normalized.allowed_hosts).ok &&
+			check_origin(req.headers.origin, normalized.allowed_hosts).ok;
+		const health =
+			valid_edge &&
+			req.method === 'GET' &&
+			(pathname === config.ping_path ||
+				pathname === config.ready_path);
+		const authenticated =
+			valid_edge &&
+			pathname === config.mcp_path &&
+			req.method === 'POST' &&
+			has_api_key(config, req);
+		let request_config = normalized;
+		let admit_body = (_body: Buffer) => true;
+		if (health) {
+			if (!take_rate('health', res)) return;
+			if (health_inflight >= 4) {
+				throttle(res, 1);
+				return;
+			}
+			health_inflight++;
+			res.once('close', () => health_inflight--);
+		} else if (!authenticated) {
+			if (!take_rate('rejected', res)) return;
+		} else {
+			const reserved_control =
+				inflight >= config.max_inflight_requests ||
+				accepted.work >= config.rate_limit_requests;
+			if (reserved_control) {
+				if (control_inflight >= 4) {
+					throttle(res, 1);
+					return;
+				}
+				control_inflight++;
+				res.once('close', () => control_inflight--);
+				request_config = {
+					...normalized,
+					max_body_bytes: Math.min(config.max_body_bytes, 8192),
+					body_read_timeout_ms: Math.min(
+						config.body_read_timeout_ms,
+						1000,
 					),
-				),
-			);
-			reject(res, 429, 'Too Many Requests');
-			return;
+				};
+			} else {
+				inflight++;
+				res.once('close', () => inflight--);
+			}
+			admit_body = (body) => {
+				if (is_cancellation(body)) return take_rate('control', res);
+				if (reserved_control) {
+					throttle(res, 1);
+					return false;
+				}
+				return take_rate('work', res);
+			};
 		}
-		accepted++;
-		if (inflight >= config.max_inflight_requests) {
-			res.setHeader('retry-after', '1');
-			reject(res, 429, 'Too Many Requests');
-			return;
-		}
-		inflight++;
-		res.once('close', () => {
-			inflight--;
-		});
-		handle_request(normalized, req, res).catch(() => {
+		handle_request(request_config, req, res, admit_body).catch(() => {
 			if (res.headersSent) {
 				res.destroy();
 				return;

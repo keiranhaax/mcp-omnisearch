@@ -2,9 +2,11 @@ import { handle_rate_limit, safe_endpoint } from './errors.js';
 export { safe_endpoint } from './errors.js';
 import {
 	combine_request_signal,
+	consume_response_bytes,
 	throw_if_aborted,
 	with_abort_signal,
 } from './request_context.js';
+import { with_provider_slot } from './resource_limits.js';
 import { ErrorType, ProviderError } from './types.js';
 
 export interface HttpJsonOptions extends RequestInit {
@@ -45,6 +47,7 @@ const read_bounded_body = async (
 					},
 				);
 			}
+			consume_response_bytes(value.byteLength);
 			chunks.push(decoder.decode(value, { stream: true }));
 		}
 		chunks.push(decoder.decode());
@@ -71,14 +74,14 @@ const entitlement_pattern =
 const endpoint_missing_pattern =
 	/(cannot (get|post|put|patch|delete)\s+\/|endpoint not found|route not found|unknown endpoint)/i;
 
-const retry_after_details = (
+export const retry_after_details = (
 	value: string | null,
+	now = Date.now(),
 ): { reset_time?: Date; retryable?: false } => {
 	if (!value) return {};
 	const text = value.trim();
 	if (/^\d+$/.test(text)) {
 		const seconds = Number(text);
-		const now = Date.now();
 		// An unrepresentable but valid delay must disable retry, not
 		// disappear or overflow into an immediate timer.
 		if (
@@ -115,16 +118,25 @@ export const http_json = async <T = any>(
 	let res: Response;
 	let raw: string;
 	try {
-		res = await with_abort_signal(
-			() => fetch(url, { ...options, signal }),
+		({ res, raw } = await with_abort_signal(
+			() =>
+				with_provider_slot(provider, signal, async () => {
+					// Keep the permit until fetch itself settles, not just its abort race.
+					const res = await fetch(url, { ...options, signal });
+					if (signal?.aborted) {
+						void res.body?.cancel().catch(() => {});
+						throw_if_aborted(signal);
+					}
+					const raw = await read_bounded_body(
+						res,
+						provider,
+						max_response_bytes,
+						signal,
+					);
+					return { res, raw };
+				}),
 			signal,
-		);
-		raw = await read_bounded_body(
-			res,
-			provider,
-			max_response_bytes,
-			signal,
-		);
+		));
 	} catch (error) {
 		throw_if_aborted(signal);
 		if (error instanceof TypeError) {

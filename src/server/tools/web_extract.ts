@@ -189,6 +189,7 @@ const firecrawl_options_schema = v.object({
 			v.number(),
 			v.integer(),
 			v.minValue(0),
+			v.maxValue(Number.MAX_SAFE_INTEGER),
 			v.description('Maximum cache age in milliseconds.'),
 		),
 	),
@@ -197,6 +198,7 @@ const firecrawl_options_schema = v.object({
 			v.number(),
 			v.integer(),
 			v.minValue(0),
+			v.maxValue(Number.MAX_SAFE_INTEGER),
 			v.description('Minimum cache age in milliseconds.'),
 		),
 	),
@@ -464,6 +466,24 @@ export const register_web_extract = (
 						resolved_mode === 'search'
 							? 'Query is required for search mode'
 							: 'URL is required',
+						'web_extract',
+					);
+				}
+
+				const single_target =
+					(provider === 'firecrawl' &&
+						['map', 'crawl', 'extract', 'actions'].includes(
+							resolved_mode,
+						)) ||
+					(provider === 'exa' && resolved_mode === 'similar');
+				if (
+					single_target &&
+					Array.isArray(input) &&
+					input.length !== 1
+				) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'This mode requires exactly one URL',
 						'web_extract',
 					);
 				}

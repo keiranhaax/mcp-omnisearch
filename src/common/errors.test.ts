@@ -9,6 +9,23 @@ import { ErrorType, ProviderError } from './types.js';
 import { is_retryable_error } from './retry.js';
 
 describe('handle_rate_limit', () => {
+	it('preserves a safe timeout message from an outer operation deadline', () => {
+		expect(
+			create_error_response(
+				new DOMException('private reason', 'TimeoutError'),
+			),
+		).toEqual({ error: 'Operation timed out' });
+	});
+	it('keeps an invalid reset Date typed and disables retry', () => {
+		expect(() =>
+			handle_rate_limit('test_provider', new Date(NaN)),
+		).toThrowError(
+			expect.objectContaining({
+				type: ErrorType.RATE_LIMIT,
+				details: { retryable: false, reset_time: undefined },
+			}),
+		);
+	});
 	it('throws a provider error with the reset time in details', () => {
 		const reset_time = new Date('2026-04-15T12:00:00.000Z');
 
@@ -103,6 +120,34 @@ describe('sanitize_query', () => {
 });
 
 describe('create_error_response', () => {
+	it('preserves only a validated Tavily task ID in safe recovery guidance', () => {
+		const error = new ProviderError(
+			ErrorType.RATE_LIMIT,
+			'PRIVATE_PROMPT',
+			'tavily_research',
+			{ request_id: 'job-1' },
+		);
+		const message = create_error_response(error).error;
+		expect(message).toContain('job-1');
+		expect(message).toContain('action="status"');
+		expect(message).not.toContain('PRIVATE_PROMPT');
+		for (const request_id of [
+			'../PRIVATE_PATH',
+			'PRIVATE_QUERY with spaces',
+			'a'.repeat(201),
+		]) {
+			expect(
+				create_error_response(
+					new ProviderError(
+						ErrorType.API_ERROR,
+						'private',
+						'tavily_research',
+						{ request_id },
+					),
+				).error,
+			).not.toContain(request_id);
+		}
+	});
 	it.each([
 		'Invalid URL provided: file:///PRIVATE_PATH?SECRET',
 		'Invalid URL provided: /PRIVATE_PATH?SECRET',

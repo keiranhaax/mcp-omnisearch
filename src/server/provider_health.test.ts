@@ -22,6 +22,23 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('provider health privacy', () => {
+	it('records outer deadline timeouts without exposing their reason', () => {
+		mark_provider_error(
+			'search',
+			'fixture',
+			new DOMException('private deadline', 'TimeoutError'),
+		);
+		expect(
+			get_provider_health_snapshot().search.fixture,
+		).toMatchObject({
+			last_runtime_status: 'provider_error',
+			last_error: 'Operation timed out',
+			active_error: true,
+		});
+		expect(
+			JSON.stringify(get_provider_health_snapshot()),
+		).not.toContain('private deadline');
+	});
 	it.each([
 		'Invalid URL provided: file:///PRIVATE_PATH?SECRET',
 		'Invalid URL provided: /PRIVATE_PATH?SECRET',

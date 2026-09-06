@@ -25,7 +25,91 @@ describe('BraveLlmContextProvider', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('clamps numeric options to Brave LLM Context API bounds', async () => {
+	it.each(['poi', 'map', 'mixed'])(
+		'preserves %s grounding without requiring generic results',
+		async (kind) => {
+			const poi = {
+				name: 'Coffee shop',
+				url: 'https://example.com/poi',
+				title: 'Cafe',
+				snippets: ['Fresh coffee'],
+			};
+			const map = {
+				name: 'Bakery',
+				url: 'https://example.com/map',
+				title: 'Bakery',
+				snippets: ['Fresh bread'],
+			};
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						grounding: {
+							generic:
+								kind === 'mixed'
+									? [
+											{
+												url: 'https://example.com/web',
+												title: 'Guide',
+												snippets: ['City guide'],
+											},
+										]
+									: [],
+							poi: kind === 'map' ? null : poi,
+							map: kind === 'poi' ? [] : [map],
+						},
+						sources: {},
+					}),
+				),
+			);
+			const result = await new BraveLlmContextProvider().get_context(
+				'coffee',
+				{ enable_local: true },
+			);
+			expect(result.raw_contents).toHaveLength(
+				kind === 'mixed' ? 3 : 1,
+			);
+			expect(result.content).toContain(
+				kind === 'map' ? 'Fresh bread' : 'Fresh coffee',
+			);
+			if (kind === 'mixed') {
+				expect(result.content).toContain('City guide');
+				expect(result.content).toContain('Fresh bread');
+			}
+		},
+	);
+
+	it.each([
+		{},
+		{ grounding: { generic: [{}] } },
+		{ grounding: { map: 'invalid' } },
+		{
+			grounding: {
+				generic: [
+					{
+						url: 'https://example.com',
+						title: 'Empty',
+						snippets: [],
+					},
+				],
+			},
+		},
+	])(
+		'rejects malformed or unusable grounding once: %o',
+		async (body) => {
+			fetch_mock.mockImplementation(
+				async () => new Response(JSON.stringify(body)),
+			);
+			await expect(
+				new BraveLlmContextProvider().get_context('query'),
+			).rejects.toMatchObject({
+				type: 'PROVIDER_ERROR',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it('forwards valid numeric boundary options without changing them', async () => {
 		fetch_mock.mockResolvedValue(
 			new Response(
 				JSON.stringify({
@@ -49,12 +133,12 @@ describe('BraveLlmContextProvider', () => {
 
 		const provider = new BraveLlmContextProvider();
 		await provider.get_context('best docs', {
-			count: 3.5,
-			maximum_number_of_urls: 0,
-			maximum_number_of_tokens: 1000,
-			maximum_number_of_snippets: 0,
-			maximum_number_of_tokens_per_url: 500,
-			maximum_number_of_snippets_per_url: 0,
+			count: 3,
+			maximum_number_of_urls: 1,
+			maximum_number_of_tokens: 1024,
+			maximum_number_of_snippets: 1,
+			maximum_number_of_tokens_per_url: 512,
+			maximum_number_of_snippets_per_url: 1,
 		});
 
 		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);

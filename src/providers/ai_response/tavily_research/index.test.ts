@@ -11,6 +11,18 @@ import { TavilyResearchProvider } from './index.js';
 import { run_with_request_context } from '../../../common/request_context.js';
 
 const fetch_mock = vi.fn();
+const pending_fetch = (
+	_url: unknown,
+	options: RequestInit,
+): Promise<Response> =>
+	new Promise((_resolve, reject) => {
+		const signal = options.signal!;
+		if (signal.aborted) reject(signal.reason);
+		else
+			signal.addEventListener('abort', () => reject(signal.reason), {
+				once: true,
+			});
+	});
 const previous = { ...config.ai_response.tavily_research };
 const json_response = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), {
@@ -33,6 +45,43 @@ afterEach(() => {
 });
 
 describe('Tavily research polling', () => {
+	it('rejects a mismatched status ID without exposing another task report', async () => {
+		fetch_mock.mockResolvedValueOnce(
+			json_response({
+				request_id: 'other-job',
+				status: 'completed',
+				content: 'PRIVATE_OTHER_REPORT',
+			}),
+		);
+		const error = await new TavilyResearchProvider()
+			.status({ request_id: 'job-1' })
+			.catch((error) => error);
+		expect(error).toMatchObject({
+			type: 'PROVIDER_ERROR',
+			details: { retryable: false, request_id: 'job-1' },
+		});
+		expect(JSON.stringify(error)).not.toContain(
+			'PRIVATE_OTHER_REPORT',
+		);
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
+	});
+	it.each(['failed', 'error'])(
+		'stops an accepted %s creation status immediately',
+		async (status) => {
+			fetch_mock.mockResolvedValueOnce(
+				json_response({ status, request_id: 'job-1' }),
+			);
+			const pending = new TavilyResearchProvider()
+				.search({ query: 'test' })
+				.catch((error) => error);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(await pending).toMatchObject({
+				type: 'PROVIDER_ERROR',
+				details: { retryable: false, request_id: 'job-1' },
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+		},
+	);
 	describe('per-poll timeouts', () => {
 		beforeEach(() => {
 			config.ai_response.tavily_research.timeout = 60000;
@@ -57,8 +106,9 @@ describe('Tavily research polling', () => {
 					.mockResolvedValueOnce(
 						json_response({ status: 'pending', request_id: 'job-1' }),
 					)
-					.mockImplementationOnce(() => {
-						if (phase === 'request') return new Promise(() => {});
+					.mockImplementationOnce((url, options) => {
+						if (phase === 'request')
+							return pending_fetch(url, options);
 						return Promise.resolve(
 							new Response(new ReadableStream()),
 						);
@@ -121,23 +171,35 @@ describe('Tavily research polling', () => {
 				.mockResolvedValueOnce(
 					json_response({ status: 'pending', request_id: 'job-1' }),
 				)
-				.mockImplementation(() => new Promise(() => {}));
+				.mockImplementation(pending_fetch);
 			let settled = false;
 			const pending = new TavilyResearchProvider()
 				.search({ query: 'test' })
-				.catch((error) => {
-					settled = true;
-					return error;
-				});
+				.then(
+					(result) => {
+						settled = true;
+						return result;
+					},
+					(error) => {
+						settled = true;
+						return error;
+					},
+				);
 			await vi.advanceTimersByTimeAsync(34999);
 			expect(settled).toBe(false);
 			expect(fetch_mock).toHaveBeenCalledTimes(3);
 			expect(fetch_mock.mock.calls[2][1].signal.aborted).toBe(false);
 			await vi.advanceTimersByTimeAsync(1);
 			expect(settled).toBe(true);
-			await expect(pending).resolves.toMatchObject({
-				name: 'TimeoutError',
-			});
+			await expect(pending).resolves.toMatchObject([
+				{
+					metadata: {
+						request_id: 'job-1',
+						status: 'pending',
+						resumable: true,
+					},
+				},
+			]);
 			expect(fetch_mock.mock.calls[2][1].signal.aborted).toBe(true);
 			await vi.advanceTimersByTimeAsync(60000);
 			expect(fetch_mock).toHaveBeenCalledTimes(3);
@@ -158,7 +220,7 @@ describe('Tavily research polling', () => {
 					.mockResolvedValueOnce(
 						json_response({ status: 'pending', request_id: 'job-1' }),
 					)
-					.mockImplementation(() => new Promise(() => {}));
+					.mockImplementation(pending_fetch);
 				const caller = new AbortController();
 				setTimeout(
 					() =>
@@ -178,7 +240,7 @@ describe('Tavily research polling', () => {
 		);
 
 		it('does not retry a timed-out paid start request', async () => {
-			fetch_mock.mockImplementation(() => new Promise(() => {}));
+			fetch_mock.mockImplementation(pending_fetch);
 			const pending = new TavilyResearchProvider()
 				.search({ query: 'test' })
 				.catch((error) => error);
@@ -216,7 +278,7 @@ describe('Tavily research polling', () => {
 				.mockResolvedValueOnce(
 					json_response({ status: 'pending', request_id: 'job-1' }),
 				)
-				.mockImplementationOnce(() => new Promise(() => {}))
+				.mockImplementationOnce(pending_fetch)
 				.mockResolvedValueOnce(
 					new Response('{}', {
 						status: 429,
@@ -266,6 +328,7 @@ describe('Tavily research polling', () => {
 			});
 		await vi.advanceTimersByTimeAsync(6000);
 		expect(error?.type).toBe('RATE_LIMIT');
+		expect(error?.details?.request_id).toBe('job-1');
 		await pending;
 		expect(fetch_mock).toHaveBeenCalledTimes(2);
 	});
@@ -401,16 +464,16 @@ describe('Tavily research polling', () => {
 				);
 				return controller.signal;
 			});
-			fetch_mock.mockImplementation(() => {
-				if (phase === 'start request') return new Promise(() => {});
+			fetch_mock.mockImplementation((url, options) => {
+				if (phase === 'start request')
+					return pending_fetch(url, options);
+				if (phase === 'response body')
+					return Promise.resolve(new Response(new ReadableStream()));
 				const response = json_response({
 					status: 'pending',
 					request_id: 'job-1',
 				});
-				if (phase === 'response body')
-					vi.spyOn(response, 'text').mockReturnValue(
-						new Promise(() => {}),
-					);
+
 				return Promise.resolve(response);
 			});
 			let settled = false;
@@ -421,8 +484,16 @@ describe('Tavily research polling', () => {
 					return error;
 				});
 			await vi.advanceTimersByTimeAsync(110);
-			expect(settled).toBe(true);
-			await pending;
+			if (phase === 'poll wait') {
+				expect(await pending).toMatchObject([
+					{ metadata: { request_id: 'job-1', resumable: true } },
+				]);
+			} else {
+				expect(settled).toBe(true);
+				expect(await pending).toMatchObject({
+					details: { cause: 'timeout' },
+				});
+			}
 			expect(fetch_mock).toHaveBeenCalledTimes(1);
 		},
 	);
