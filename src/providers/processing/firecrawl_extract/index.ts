@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import {
 	firecrawl_poll_status_schema,
+	create_firecrawl_budget,
 	make_firecrawl_request,
 	poll_firecrawl_job,
 	validate_firecrawl_response,
@@ -21,7 +22,8 @@ import { config } from '../../../config/env.js';
 
 const firecrawl_extract_start_schema = v.object({
 	success: v.boolean(),
-	id: v.string(),
+	// A job ID is one opaque route segment, never a URL to repair.
+	id: v.pipe(v.string(), v.regex(/^[a-z0-9_-]+$/i)),
 	error: v.optional(v.string()),
 });
 
@@ -29,7 +31,7 @@ const firecrawl_extract_status_schema = v.object({
 	success: v.optional(v.boolean()),
 	id: v.optional(v.string()),
 	status: firecrawl_poll_status_schema,
-	data: v.optional(v.record(v.string(), v.unknown())),
+	data: v.optional(v.unknown()),
 	error: v.optional(v.string()),
 });
 
@@ -52,6 +54,9 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 				this.name,
 			);
 
+			const budget = create_firecrawl_budget(
+				config.processing.firecrawl_extract.timeout,
+			);
 			try {
 				// Define extraction instructions based on extract_depth
 				const extraction_prompt =
@@ -75,6 +80,7 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 					},
 					config.processing.firecrawl_extract.timeout,
 					firecrawl_extract_start_schema,
+					budget.signal,
 				);
 
 				validate_firecrawl_response(
@@ -92,12 +98,13 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 						max_attempts: 15,
 						poll_interval: 3000,
 						timeout: 30000,
+						signal: budget.signal,
 					},
 					firecrawl_extract_status_schema,
 				);
 
 				// Verify we have data
-				if (!status_data.data) {
+				if (status_data.data === undefined) {
 					throw new ProviderError(
 						ErrorType.PROVIDER_ERROR,
 						'No data extracted from URL',
@@ -105,38 +112,7 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 					);
 				}
 
-				// Format the extracted data as markdown
-				let formatted_content = `# Extracted Data from ${extract_url}\n\n`;
-
-				// Add each extracted field
-				for (const [key, value] of Object.entries(status_data.data)) {
-					if (typeof value === 'string') {
-						formatted_content += `## ${key.charAt(0).toUpperCase() + key.slice(1)}\n\n${value}\n\n`;
-					} else if (Array.isArray(value)) {
-						formatted_content += `## ${key.charAt(0).toUpperCase() + key.slice(1)}\n\n`;
-						value.forEach((item, index) => {
-							if (typeof item === 'object') {
-								formatted_content += `### Item ${index + 1}\n\n`;
-								for (const [itemKey, itemValue] of Object.entries(
-									item,
-								)) {
-									formatted_content += `- **${itemKey}**: ${String(itemValue)}\n`;
-								}
-								formatted_content += '\n';
-							} else {
-								formatted_content += `- ${item}\n`;
-							}
-						});
-						formatted_content += '\n';
-					} else if (typeof value === 'object' && value !== null) {
-						formatted_content += `## ${key.charAt(0).toUpperCase() + key.slice(1)}\n\n`;
-						for (const [subKey, subValue] of Object.entries(value)) {
-							formatted_content += `- **${subKey}**: ${subValue}\n`;
-						}
-						formatted_content += '\n';
-					}
-				}
-
+				const formatted_content = `# Extracted Data from ${extract_url}\n\n${JSON.stringify(status_data.data, null, 2)}`;
 				// Create a single raw_content entry
 				const raw_contents = [
 					{
@@ -147,6 +123,9 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 
 				// Get title if available
 				const title =
+					status_data.data !== null &&
+					typeof status_data.data === 'object' &&
+					'title' in status_data.data &&
 					typeof status_data.data.title === 'string'
 						? status_data.data.title
 						: `Extracted Data from ${extract_url}`;
@@ -160,6 +139,7 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 					content: formatted_content,
 					raw_contents,
 					metadata: {
+						structured_data: status_data.data,
 						title,
 						word_count,
 						urls_processed: 1,
@@ -170,6 +150,8 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 				};
 			} catch (error) {
 				handle_provider_error(error, this.name, 'extract data');
+			} finally {
+				budget.dispose();
 			}
 		};
 

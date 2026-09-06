@@ -6,6 +6,21 @@ import {
 } from './search_operators.js';
 
 describe('parse_search_operators', () => {
+	it.each([
+		'mcp-omnisearch',
+		'C++',
+		'https://example.com/site:docs',
+		'before:2024-invalid',
+	])(
+		'does not parse punctuation within %s as an operator',
+		(query) => {
+			expect(parse_search_operators(query)).toMatchObject({
+				base_query: query,
+				operators: [],
+			});
+		},
+	);
+
 	it('extracts supported operators and preserves the base query', () => {
 		const parsed = parse_search_operators(
 			'sveltekit site:kit.svelte.dev -site:spam.dev filetype:pdf ext:md intitle:guide inurl:docs inbody:"load" inpage:"actions" lang:en location:us before:2024-01-01 after:2023-01-01 "remote functions" +forms -legacy AND OR NOT',
@@ -144,6 +159,20 @@ describe('apply_search_operators', () => {
 });
 
 describe('build_query_with_operators', () => {
+	it.each([
+		'cats OR dogs',
+		'"cats AND dogs" OR +birds NOT -fish',
+		'(site:a.example OR site:b.example) AND C++',
+		'intitle:"C++ guide" OR intitle:manual filetype:pdf filetype:md',
+		'"literal site:example.com and -term" mcp-omnisearch',
+	])('preserves query order and every term in %s', (query) => {
+		expect(
+			build_query_with_operators(
+				apply_search_operators(parse_search_operators(query)),
+			),
+		).toBe(query);
+	});
+
 	it('rebuilds the query with explicit and parsed filters', () => {
 		const query = build_query_with_operators(
 			{

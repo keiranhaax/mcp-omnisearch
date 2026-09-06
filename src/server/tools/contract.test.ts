@@ -5,7 +5,10 @@ import {
 	initialize_ai_search,
 	register_ai_search,
 } from './ai_search.js';
-import { tool_descriptions } from './descriptions.js';
+import {
+	describe_ai_search,
+	tool_descriptions,
+} from './descriptions.js';
 import {
 	initialize_web_search,
 	register_web_search,
@@ -79,6 +82,18 @@ afterEach(() => {
 });
 
 describe('Omnisearch tool descriptions', () => {
+	it('does not promise citations from plain-text Brave Answers', () => {
+		const description = describe_ai_search(['brave_answers']);
+		expect(description).not.toContain('with citations');
+		expect(description).toContain('plain-text');
+	});
+
+	it('describes Firecrawl start, status and cancel without repeat-start advice', () => {
+		expect(tool_descriptions.firecrawl_agent).toContain('job_id');
+		expect(tool_descriptions.firecrawl_agent).toContain('100');
+		expect(tool_descriptions.firecrawl_agent).toContain('cancel');
+	});
+
 	it('keeps descriptions concise and single-line', () => {
 		for (const [name, description] of Object.entries(
 			tool_descriptions,

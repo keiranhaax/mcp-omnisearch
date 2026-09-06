@@ -83,7 +83,9 @@ export const register_web_search = (
 						v.integer(),
 						v.minValue(1),
 						v.maxValue(100),
-						v.description('Maximum number of results (default: 10)'),
+						v.description(
+							'Maximum results. Tavily max 20; Brave/You cap at 20; Exa max 100. Defaults are provider-specific.',
+						),
 					),
 				),
 				include_domains: v.optional(
@@ -189,6 +191,18 @@ export const register_web_search = (
 			additional_queries,
 		}) => {
 			try {
+				if (
+					provider === 'tavily' &&
+					limit !== undefined &&
+					limit > 20
+				) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'Tavily supports at most 20 results',
+						'tavily',
+						{ retryable: false },
+					);
+				}
 				const selected = providers.get(provider);
 				if (!selected) {
 					throw new ProviderError(

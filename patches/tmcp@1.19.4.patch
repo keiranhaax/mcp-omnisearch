@@ -1,0 +1,20 @@
+--- a/src/index.js
++++ b/src/index.js
+@@ -50,6 +50,7 @@
+ /**
+  * @template {Record<string, unknown> | undefined} [TCustom=undefined]
+  * @typedef {Object} Context
++ * @property {AbortSignal} [signal]
+  * @property {string} [sessionId]
+  * @property {{ clientCapabilities?: ClientCapabilitiesType, clientInfo?: ClientInfoType, logLevel?: LoggingLevel }} [sessionInfo]
+  * @property {AuthInfo} [auth]
+--- a/src/types/index.d.ts
++++ b/src/types/index.d.ts
+@@ -214,6 +214,7 @@
+ 		extra?: Record<string, unknown> | undefined;
+ 	};
+ 	export type Context<TCustom extends Record<string, unknown> | undefined = undefined> = {
++		signal?: AbortSignal | undefined;
+ 		sessionId?: string | undefined;
+ 		sessionInfo?: {
+ 			clientCapabilities?: ClientCapabilities_1;

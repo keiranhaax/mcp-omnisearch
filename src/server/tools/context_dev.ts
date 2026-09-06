@@ -11,6 +11,7 @@ import { handle_large_result } from '../../common/results.js';
 import { ErrorType, ProviderError } from '../../common/types.js';
 import {
 	is_api_key_valid,
+	validate_processing_domain,
 	validate_processing_urls,
 } from '../../common/validation.js';
 import { config } from '../../config/env.js';
@@ -20,6 +21,9 @@ import {
 } from '../provider_health.js';
 import { tool_descriptions } from './descriptions.js';
 
+const bounded_integer = (max: number) =>
+	v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(max));
+const timeout_schema = v.optional(bounded_integer(60000), 60000);
 const provider_name = 'context_dev';
 const tool_names = [
 	'context_web_extract',
@@ -100,8 +104,8 @@ const register_context_web_extract = (
 				url: v.optional(v.string()),
 				domain: v.optional(v.string()),
 				query: v.optional(v.string()),
-				limit: v.optional(v.number()),
-				timeoutMS: v.optional(v.number()),
+				limit: v.optional(bounded_integer(100), 10),
+				timeoutMS: timeout_schema,
 				maxAgeMs: v.optional(v.number()),
 				scrape_markdown: v.optional(v.boolean()),
 				includeDomains: v.optional(v.array(v.string())),
@@ -131,6 +135,8 @@ const register_context_web_extract = (
 		}) => {
 			try {
 				let result: unknown;
+				if (domain !== undefined)
+					validate_processing_domain(domain, 'context_web_extract');
 				if (mode === 'markdown') {
 					if (!url)
 						throw new ProviderError(
@@ -268,12 +274,17 @@ const register_context_brand_intel = (
 					'simplified_domain',
 				]),
 				value: v.string(),
-				timeoutMS: v.optional(v.number()),
+				timeoutMS: timeout_schema,
 				maxAgeMs: v.optional(v.number()),
 			}),
 		},
 		async ({ lookup_type, value, timeoutMS, maxAgeMs }) => {
 			try {
+				if (
+					lookup_type === 'domain' ||
+					lookup_type === 'simplified_domain'
+				)
+					validate_processing_domain(value, 'context_brand_intel');
 				const path =
 					lookup_type === 'domain'
 						? '/brand/retrieve'
@@ -322,7 +333,7 @@ const register_context_styleguide = (
 				domain: v.optional(v.string()),
 				directUrl: v.optional(v.string()),
 				include_fonts: v.optional(v.boolean()),
-				timeoutMS: v.optional(v.number()),
+				timeoutMS: timeout_schema,
 				maxAgeMs: v.optional(v.number()),
 			}),
 		},
@@ -335,6 +346,8 @@ const register_context_styleguide = (
 		}) => {
 			try {
 				require_one('context_styleguide', { domain, directUrl });
+				if (domain !== undefined)
+					validate_processing_domain(domain, 'context_styleguide');
 				const params = optional_query({
 					domain,
 					directUrl: directUrl
@@ -379,9 +392,9 @@ const register_context_classify = (
 				sic_version: v.optional(
 					v.picklist(['original_sic', 'latest_sec']),
 				),
-				minResults: v.optional(v.number()),
-				maxResults: v.optional(v.number()),
-				timeoutMS: v.optional(v.number()),
+				minResults: v.optional(bounded_integer(20), 1),
+				maxResults: v.optional(bounded_integer(20), 20),
+				timeoutMS: timeout_schema,
 			}),
 		},
 		async ({
@@ -395,6 +408,15 @@ const register_context_classify = (
 		}) => {
 			try {
 				require_one('context_classify', { domain, name });
+				if ((minResults ?? 1) > (maxResults ?? 20)) {
+					throw new ProviderError(
+						ErrorType.INVALID_INPUT,
+						'minResults must not exceed maxResults',
+						'context_classify',
+					);
+				}
+				if (domain !== undefined)
+					validate_processing_domain(domain, 'context_classify');
 				const input = domain || name;
 				const result =
 					taxonomy === 'naics'
@@ -463,7 +485,7 @@ const register_context_transaction_identify = (
 				transaction_info: v.string(),
 				country_gl: v.optional(v.string()),
 				mcc: v.optional(v.string()),
-				timeoutMS: v.optional(v.number()),
+				timeoutMS: timeout_schema,
 			}),
 		},
 		async ({ transaction_info, country_gl, mcc, timeoutMS }) => {

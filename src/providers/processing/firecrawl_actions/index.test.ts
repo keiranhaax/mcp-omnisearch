@@ -77,6 +77,26 @@ describe('FirecrawlActionsProvider', () => {
 		]);
 	});
 
+	it('preserves action screenshot collections even without text', async () => {
+		fetch_mock.mockImplementation(async () =>
+			json_response({
+				success: true,
+				data: {
+					screenshot: 'page.png',
+					actions: { screenshots: ['step.png'] },
+				},
+			}),
+		);
+		const result =
+			await new FirecrawlActionsProvider().process_content(
+				'https://example.test',
+			);
+		expect(result.metadata).toMatchObject({
+			screenshot: 'page.png',
+			screenshots: ['step.png'],
+		});
+	});
+
 	it('rejects malformed action data as non-retryable', async () => {
 		const sentinel = 'actions-payload-secret-must-not-leak';
 		fetch_mock.mockResolvedValue(

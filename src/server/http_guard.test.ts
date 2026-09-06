@@ -13,9 +13,42 @@ import {
 	create_guard_server,
 	default_guard_config,
 	modern_protocol_version_key,
+	parse_guard_integer,
 } from './http_guard.js';
 
 const allowed = ['127.0.0.1:8000', 'mcp.keiranh.cloud'];
+
+describe('guard resource settings', () => {
+	it('parses byte limits independently of port ranges', () => {
+		expect(parse_guard_integer('4194304', 1024, 'body bytes')).toBe(
+			4194304,
+		);
+		expect(parse_guard_integer(undefined, 1024, 'body bytes')).toBe(
+			1024,
+		);
+		for (const raw of [
+			'0',
+			'-1',
+			'Infinity',
+			'1.5',
+			'9007199254740992',
+			'1e3',
+		]) {
+			expect(() =>
+				parse_guard_integer(raw, 1024, 'body bytes'),
+			).toThrow();
+		}
+	});
+	it('bounds raw connections even before headers arrive', () => {
+		const server = create_guard_server(
+			default_guard_config({
+				allowed_hosts: ['test'],
+				max_connections: 7,
+			}),
+		);
+		expect(server.maxConnections).toBe(7);
+	});
+});
 
 describe('check_host', () => {
 	it('accepts exact allowlist entries with and without port', () => {
@@ -128,13 +161,13 @@ describe('classify_body', () => {
 		});
 	});
 
-	it('treats malformed JSON and batches as legacy', () => {
+	it('detects batches while leaving parse errors to the proxy', () => {
 		expect(classify_body(Buffer.from('not json'))).toEqual({
 			modern_envelope: false,
 			id: null,
 		});
 		expect(classify_body(Buffer.from('[{"jsonrpc":"2.0"}]'))).toEqual(
-			{ modern_envelope: false, id: null },
+			{ modern_envelope: false, id: null, batch: true },
 		);
 	});
 });
@@ -160,7 +193,10 @@ const send = (options: {
 				port: options.port,
 				method: options.method ?? 'POST',
 				path: options.path ?? '/mcp',
-				headers: options.headers ?? {},
+				headers: {
+					'x-api-key': 'guard-test-key',
+					...options.headers,
+				},
 			},
 			(res) => {
 				let body = '';
@@ -249,6 +285,7 @@ describe('guard server integration', () => {
 				upstream_host: '127.0.0.1',
 				upstream_port,
 				allowed_hosts: [`127.0.0.1:${guard_port}`],
+				api_key: 'guard-test-key',
 				max_body_bytes: 1024,
 				body_read_timeout_ms: 500,
 			}),
@@ -261,6 +298,83 @@ describe('guard server integration', () => {
 	afterAll(async () => {
 		await close_server(guard);
 		await close_server(upstream);
+	});
+
+	it('rate-limits requests without retaining per-client state', async () => {
+		const limited = create_guard_server(
+			default_guard_config({
+				allowed_hosts: ['limit.test'],
+				api_key: 'guard-test-key',
+				rate_limit_requests: 1,
+				rate_limit_window_ms: 100,
+				upstream_port: (upstream.address() as AddressInfo).port,
+			}),
+		);
+		await new Promise<void>((resolve) =>
+			limited.listen(0, '127.0.0.1', resolve),
+		);
+		const port = (limited.address() as AddressInfo).port;
+		const options = {
+			port,
+			headers: { host: 'limit.test' },
+			body: '{"jsonrpc":"2.0","id":1,"method":"ping"}',
+		};
+		try {
+			expect((await send(options)).status).toBe(200);
+			const throttled = await send(options);
+			expect(throttled.status).toBe(429);
+			expect(throttled.headers['retry-after']).toBe('1');
+			await new Promise((resolve) => setTimeout(resolve, 120));
+			expect((await send(options)).status).toBe(200);
+		} finally {
+			limited.closeAllConnections();
+			await close_server(limited);
+		}
+	});
+
+	it('bounds concurrent uploads and releases the slot on abort', async () => {
+		const limited = create_guard_server(
+			default_guard_config({
+				allowed_hosts: ['limit.test'],
+				api_key: 'guard-test-key',
+				max_inflight_requests: 1,
+				body_read_timeout_ms: 500,
+				upstream_port: (upstream.address() as AddressInfo).port,
+			}),
+		);
+		await new Promise<void>((resolve) =>
+			limited.listen(0, '127.0.0.1', resolve),
+		);
+		const port = (limited.address() as AddressInfo).port;
+		const slow = connect(port, '127.0.0.1');
+		try {
+			await new Promise<void>((resolve) =>
+				slow.once('connect', () => {
+					slow.write(
+						'POST /mcp HTTP/1.1\r\nhost: limit.test\r\nx-api-key: guard-test-key\r\ncontent-length: 100\r\n\r\nx',
+						() => resolve(),
+					);
+				}),
+			);
+			const busy = await send({
+				port,
+				headers: { host: 'limit.test' },
+				body: '{"jsonrpc":"2.0","id":1,"method":"ping"}',
+			});
+			expect(busy.status).toBe(429);
+			slow.destroy();
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			const next = await send({
+				port,
+				headers: { host: 'limit.test' },
+				body: '{"jsonrpc":"2.0","id":2,"method":"ping"}',
+			});
+			expect(next.status).toBe(200);
+		} finally {
+			slow.destroy();
+			limited.closeAllConnections();
+			await close_server(limited);
+		}
 	});
 
 	it('forwards a legacy request with an allowed Host', async () => {
@@ -357,6 +471,17 @@ describe('guard server integration', () => {
 		expect(ping_post.status).toBe(405);
 	});
 
+	it.each(['[]', '[{"jsonrpc":"2.0","id":1,"method":"ping"}]'])(
+		'rejects JSON-RPC batches before forwarding: %s',
+		async (body) => {
+			const hits_before = upstream_hits;
+			const res = await send({ port: guard_port, body });
+			expect(res.status).toBe(400);
+			expect(JSON.parse(res.body).error.code).toBe(-32600);
+			expect(upstream_hits).toBe(hits_before);
+		},
+	);
+
 	it('rejects declared oversize bodies with 413', async () => {
 		const hits_before = upstream_hits;
 		const res = await send({
@@ -420,6 +545,44 @@ describe('guard server integration', () => {
 		expect(res.status).toBe(200);
 	});
 
+	it.each([
+		'content-length: 1000000000',
+		'transfer-encoding: chunked',
+	])(
+		'rejects a ping upload without waiting for its body: %s',
+		async (header) => {
+			const hits_before = upstream_hits;
+			const raw = await raw_request(
+				guard_port,
+				`GET /ping HTTP/1.1\r\nhost: 127.0.0.1:${guard_port}\r\n${header}\r\n\r\n`,
+			);
+			expect(raw).toContain('HTTP/1.1 400');
+			expect(upstream_hits).toBe(hits_before);
+		},
+	);
+
+	it.each(['', 'x-api-key: wrong\r\n'])(
+		'rejects unauthenticated uploads before reading body: %s',
+		async (auth) => {
+			const hits_before = upstream_hits;
+			const raw = await raw_request(
+				guard_port,
+				`POST /mcp HTTP/1.1\r\nhost: 127.0.0.1:${guard_port}\r\n${auth}content-length: 100\r\n\r\n`,
+			);
+			expect(raw).toContain('HTTP/1.1 401');
+			expect(upstream_hits).toBe(hits_before);
+		},
+	);
+
+	it('flushes an honest 408 before closing a slow upload', async () => {
+		const raw = await raw_request(
+			guard_port,
+			`POST /mcp HTTP/1.1\r\nhost: 127.0.0.1:${guard_port}\r\nx-api-key: guard-test-key\r\ncontent-length: 100\r\n\r\nx`,
+		);
+		expect(raw).toContain('HTTP/1.1 408');
+		expect(raw).toContain('Request Timeout');
+	});
+
 	it('survives a client aborting mid-body', async () => {
 		await new Promise<void>((resolve) => {
 			const socket = connect(guard_port, '127.0.0.1', () => {
@@ -449,6 +612,7 @@ describe('guard server integration', () => {
 				upstream_host: '127.0.0.1',
 				upstream_port: closed_port,
 				allowed_hosts: [`127.0.0.1:${lonely_port}`],
+				api_key: 'guard-test-key',
 				max_body_bytes: 1024,
 			}),
 		);

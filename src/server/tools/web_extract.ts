@@ -2,6 +2,7 @@ import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
 import { create_error_response } from '../../common/errors.js';
+import { firecrawl_format_schema } from '../../common/firecrawl_utils.js';
 import { handle_large_result } from '../../common/results.js';
 import {
 	ErrorType,
@@ -146,11 +147,6 @@ const valid_modes: Record<WebExtractProvider, WebExtractMode[]> = {
 	],
 	exa: ['contents', 'similar'],
 };
-
-const firecrawl_format_schema = v.union([
-	v.pipe(v.string(), v.maxLength(50)),
-	v.record(v.string(), v.any()),
-]);
 
 const firecrawl_options_schema = v.object({
 	formats: v.optional(
@@ -513,7 +509,9 @@ export const register_web_extract = (
 							? { formats: ['summary'] }
 							: provider === 'firecrawl' && resolved_mode === 'search'
 								? firecrawl_search_options
-								: undefined;
+								: provider === 'tavily'
+									? { query }
+									: undefined;
 
 				const result = await selected.process_content(
 					input,

@@ -2,6 +2,8 @@ import {
 	handle_provider_error,
 	sanitize_query,
 } from '../../../common/errors.js';
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { http_json } from '../../../common/http.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
@@ -12,28 +14,22 @@ import {
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface YouWebResult {
-	title: string;
-	url: string;
-	description?: string;
-	snippets?: string[];
-	thumbnail_url?: string;
-	page_age?: string;
-	authors?: string[];
-	favicon_url?: string;
-}
-
-interface YouSearchResponse {
-	results?: {
-		web?: YouWebResult[];
-		news?: YouWebResult[];
-	};
-	metadata?: {
-		query?: string;
-		search_uuid?: string;
-		latency?: number;
-	};
-}
+const you_result_schema = v.object({
+	title: v.string(),
+	url: v.string(),
+	description: v.optional(v.string()),
+	snippets: v.optional(v.array(v.string())),
+	page_age: v.optional(v.string()),
+	authors: v.optional(v.array(v.string())),
+});
+const you_response_schema = v.object({
+	results: v.optional(
+		v.object({
+			web: v.optional(v.array(you_result_schema)),
+			news: v.optional(v.array(you_result_schema)),
+		}),
+	),
+});
 
 export class YouSearchProvider implements SearchProvider {
 	name = 'you';
@@ -71,7 +67,7 @@ export class YouSearchProvider implements SearchProvider {
 					);
 				}
 
-				const data = await http_json<YouSearchResponse>(
+				const raw_data = await http_json(
 					this.name,
 					`${config.search.you.base_url}/v1/search?${query_params}`,
 					{
@@ -84,6 +80,11 @@ export class YouSearchProvider implements SearchProvider {
 					},
 				);
 
+				const data = parse_provider_response(
+					this.name,
+					you_response_schema,
+					raw_data,
+				);
 				const results: SearchResult[] = [];
 
 				for (const [type, items] of [

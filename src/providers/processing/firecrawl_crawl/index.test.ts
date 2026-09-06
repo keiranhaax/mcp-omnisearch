@@ -124,6 +124,149 @@ describe('FirecrawlCrawlProvider', () => {
 		expect(result.metadata.failed_urls).toEqual(['(unknown url)']);
 	});
 
+	it('follows completed crawl pagination while retaining provider totals', async () => {
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({ success: true, id: 'paged' }),
+		);
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({
+				status: 'completed',
+				total: 2,
+				completed: 2,
+				data: [
+					{
+						markdown: 'first',
+						metadata: { sourceURL: 'https://example.test/1' },
+					},
+				],
+				next: 'https://api.firecrawl.dev/v2/crawl/paged?skip=1',
+			}),
+		);
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({
+				status: 'completed',
+				total: 2,
+				completed: 2,
+				data: [
+					{
+						markdown: 'second',
+						metadata: { sourceURL: 'https://example.test/2' },
+					},
+				],
+				next: null,
+			}),
+		);
+		const promise = new FirecrawlCrawlProvider().process_content(
+			'https://example.test',
+		);
+		await vi.advanceTimersByTimeAsync(5000);
+		const result = await promise;
+		expect(result.raw_contents?.map((page) => page.content)).toEqual([
+			'first',
+			'second',
+		]);
+		expect(result.metadata).toMatchObject({
+			total: 2,
+			completed: 2,
+			returned_pages: 2,
+			truncated: false,
+			next: null,
+		});
+		expect(fetch_mock.mock.calls[2][0]).toBe(
+			'https://api.firecrawl.dev/v2/crawl/paged?skip=1',
+		);
+		expect(fetch_mock.mock.calls[2][1].redirect).toBe('error');
+	});
+
+	it.each([
+		'https://outside.test/v2/crawl/paged',
+		'https://api.firecrawl.dev/v2/agent/paged',
+		'https://user:password@api.firecrawl.dev/v2/crawl/paged',
+	])(
+		'rejects an unsafe continuation %s before sending credentials',
+		async (next) => {
+			fetch_mock.mockImplementationOnce(async () =>
+				json_response({ success: true, id: 'paged' }),
+			);
+			fetch_mock.mockImplementationOnce(async () =>
+				json_response({
+					status: 'completed',
+					data: [{ markdown: 'first' }],
+					next,
+				}),
+			);
+			const promise = new FirecrawlCrawlProvider()
+				.process_content('https://example.test')
+				.catch((error) => error);
+			await vi.advanceTimersByTimeAsync(5000);
+			expect(await promise).toMatchObject({
+				type: 'PROVIDER_ERROR',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(2);
+		},
+	);
+
+	it.each(['failed', 'error', 'cancelled', 'processing', 'scraping'])(
+		'rejects a %s continuation instead of reporting complete results',
+		async (status) => {
+			fetch_mock
+				.mockResolvedValueOnce(
+					json_response({ success: true, id: 'paged' }),
+				)
+				.mockResolvedValueOnce(
+					json_response({
+						status: 'completed',
+						total: 2,
+						completed: 2,
+						data: [{ markdown: 'first' }],
+						next: 'https://api.firecrawl.dev/v2/crawl/paged?skip=1',
+					}),
+				)
+				.mockResolvedValueOnce(json_response({ status }));
+			const promise = new FirecrawlCrawlProvider()
+				.process_content('https://example.test')
+				.catch((error: unknown) => error);
+			await vi.advanceTimersByTimeAsync(5000);
+			expect(await promise).toMatchObject({
+				type: 'PROVIDER_ERROR',
+				message: 'Crawl pagination did not complete',
+				details: { retryable: false },
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+		},
+	);
+
+	it('bounds pagination with an honest continuation instead of claiming completion', async () => {
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({ success: true, id: 'paged' }),
+		);
+		let page = 0;
+		fetch_mock.mockImplementation(async () =>
+			json_response({
+				status: 'completed',
+				total: 100,
+				completed: 100,
+				data: [{ markdown: `page ${++page}` }],
+				next: `https://api.firecrawl.dev/v2/crawl/paged?skip=${page}`,
+			}),
+		);
+		const promise = new FirecrawlCrawlProvider().process_content(
+			'https://example.test',
+		);
+		await vi.advanceTimersByTimeAsync(5000);
+		const result = await promise;
+		expect(result.metadata).toMatchObject({
+			total: 100,
+			completed: 100,
+			returned_pages: 10,
+			truncated: true,
+			next: 'https://api.firecrawl.dev/v2/crawl/paged?skip=10',
+			truncation_reason: 'page_limit',
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(11);
+	});
+
 	it('times out when the crawl never completes', async () => {
 		fetch_mock.mockImplementationOnce(async () =>
 			json_response({ success: true, id: 'crawl-3' }),

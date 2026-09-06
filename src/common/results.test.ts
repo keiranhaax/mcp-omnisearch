@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -24,6 +24,57 @@ afterEach(() => {
 });
 
 describe('handle_large_result', () => {
+	it.each([
+		'OMNISEARCH_RESULT_MAX_BYTES',
+		'OMNISEARCH_RESULT_STORE_MAX_BYTES',
+	])(
+		'uses canonical-only storage when the readable view exceeds %s',
+		(setting) => {
+			const original = {
+				content: 'a'.repeat(90000),
+				citations: ['preserved'],
+			};
+			const canonical = JSON.stringify(original, null, 2);
+			const quota = Buffer.byteLength(canonical) + 100;
+			process.env[setting] = String(quota);
+			try {
+				const pointer = handle_large_result(original, 'fixture') as {
+					result_id: string;
+				};
+				const file = join(result_dir, `${pointer.result_id}.txt`);
+				expect(statSync(file).size).toBeLessThanOrEqual(quota);
+				const stored = readFileSync(file, 'utf8');
+				expect(stored).toContain('FULL RESULT JSON\n');
+				expect(JSON.parse(stored.slice(stored.indexOf('{')))).toEqual(
+					original,
+				);
+			} finally {
+				delete process.env[setting];
+			}
+		},
+	);
+
+	it('retains canonical JSON even when it exactly fills the quota', () => {
+		const original = { content: 'a'.repeat(90000) };
+		const canonical = JSON.stringify(original, null, 2);
+		process.env.OMNISEARCH_RESULT_MAX_BYTES = String(
+			Buffer.byteLength(canonical),
+		);
+		try {
+			const pointer = handle_large_result(original, 'fixture') as {
+				result_id: string;
+			};
+			expect(
+				readFileSync(
+					join(result_dir, `${pointer.result_id}.txt`),
+					'utf8',
+				),
+			).toBe(canonical);
+		} finally {
+			delete process.env.OMNISEARCH_RESULT_MAX_BYTES;
+		}
+	});
+
 	it('returns the original result when it is safely sized', () => {
 		const result = {
 			content: 'small result',
@@ -32,6 +83,117 @@ describe('handle_large_result', () => {
 		};
 
 		expect(handle_large_result(result, 'web_extract')).toBe(result);
+	});
+
+	it('preserves multiline content and every semantic field in storage', () => {
+		const original = {
+			content: `# Rich title\nAuthor: marker-author\n${'body line\n'.repeat(12000)}`,
+			raw_contents: [
+				{
+					url: 'https://example.com',
+					content: 'raw-only',
+					extra: 'raw-extra',
+				},
+			],
+			citations: [
+				{ title: 'citation-marker', url: 'https://example.org' },
+			],
+			metadata: { summary: 'summary-marker' },
+			highlights: ['highlight-marker'],
+		};
+		const pointer = handle_large_result(original, 'fixture') as {
+			result_id: string;
+		};
+		let offset = 1;
+		let byte_offset = 0;
+		let stored = '';
+		for (let page = 0; page < 200; page++) {
+			const chunk = read_result_chunk(
+				pointer.result_id,
+				offset,
+				500,
+				byte_offset,
+			);
+			stored += chunk.content;
+			if (chunk.next_offset === undefined) break;
+			if (chunk.next_byte_offset === undefined) stored += '\n';
+			offset = chunk.next_offset;
+			byte_offset = chunk.next_byte_offset ?? 0;
+		}
+		expect(stored.includes(original.content)).toBe(true);
+		const marker = '\nFULL RESULT JSON\n';
+		expect(stored).toContain(marker);
+		expect(
+			JSON.parse(
+				stored.slice(stored.lastIndexOf(marker) + marker.length),
+			),
+		).toEqual(original);
+	});
+
+	it('bounds inline outlines and header metadata in UTF-8 bytes', () => {
+		const original = {
+			content: Array.from(
+				{ length: 10000 },
+				(_, index) => `# ${index} ${'🙂'.repeat(100)}`,
+			).join('\n'),
+			metadata: {
+				word_count: 'x'.repeat(100000),
+				urls_processed: { value: 'x'.repeat(100000) },
+			},
+			source_provider: 'x'.repeat(100000),
+		};
+		const pointer = handle_large_result(original, 'fixture') as {
+			result_id: string;
+			sections_truncated?: boolean;
+		};
+		expect(
+			Buffer.byteLength(JSON.stringify(pointer, null, 2)),
+		).toBeLessThanOrEqual(8000);
+		expect(pointer.sections_truncated).toBe(true);
+		expect(pointer.result_id).toMatch(/^[0-9a-f-]{36}$/);
+	});
+
+	it('bounds the escaped MCP text payload, not just the inner JSON', () => {
+		const result = { content: '\\'.repeat(35000) };
+		const safe = handle_large_result(result, 'fixture');
+		expect(safe).toHaveProperty('result_id');
+		expect(
+			Buffer.byteLength(
+				JSON.stringify({
+					content: [
+						{ type: 'text', text: JSON.stringify(safe, null, 2) },
+					],
+				}),
+			),
+		).toBeLessThan(80000);
+	});
+
+	it('uses UTF-8 bytes rather than UTF-16 length for inline limits', () => {
+		const result = { content: '漢'.repeat(30000) };
+		expect(handle_large_result(result, 'fixture')).toHaveProperty(
+			'result_id',
+		);
+	});
+
+	it('does not duplicate the raw readable view when rich content already exists', () => {
+		const content = 'readable body\n'.repeat(5000);
+		const original = {
+			content,
+			raw_contents: [{ url: 'https://example.com', content }],
+		};
+		// The canonical JSON plus one readable view fits; a second view does not.
+		const bytes =
+			Buffer.byteLength(JSON.stringify(original, null, 2)) +
+			Buffer.byteLength(content) +
+			1000;
+		process.env.OMNISEARCH_RESULT_MAX_BYTES = String(bytes);
+		try {
+			expect(handle_large_result(original, 'fixture')).toHaveProperty(
+				'result_id',
+			);
+		} finally {
+			delete process.env.OMNISEARCH_RESULT_MAX_BYTES;
+		}
 	});
 
 	it('stores oversized results behind an opaque paginated result ID', () => {

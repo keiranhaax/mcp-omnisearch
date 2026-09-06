@@ -1,13 +1,233 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { retry_with_backoff } from './retry.js';
+import { is_retryable_error, retry_with_backoff } from './retry.js';
+import { handle_provider_error } from './errors.js';
+import { http_json } from './http.js';
+import { run_with_request_context } from './request_context.js';
 import { ErrorType, ProviderError } from './types.js';
+
+const network_error = () =>
+	new ProviderError(
+		ErrorType.API_ERROR,
+		'Network request failed',
+		'test_provider',
+		{ retryable: true, cause: 'network' },
+	);
 
 afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 });
 
 describe('retry_with_backoff', () => {
+	it('does not retry unclassified application TypeErrors', () => {
+		expect(is_retryable_error(new TypeError('mapping failed'))).toBe(
+			false,
+		);
+	});
+	it('does not shorten a Retry-After outside the bounded wait budget', async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-09-05T12:00:00Z'));
+		const error = new ProviderError(
+			ErrorType.RATE_LIMIT,
+			'limited',
+			'test_provider',
+			{
+				reset_time: new Date('2026-09-05T12:01:00Z'),
+			},
+		);
+		const fn = vi.fn().mockRejectedValue(error);
+		await expect(retry_with_backoff(fn)).rejects.toBe(error);
+		expect(fn).toHaveBeenCalledTimes(1);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it.each([
+		[429, '8640000000001'],
+		[429, '9'.repeat(400)],
+		[503, '8640000000001'],
+		[503, '9'.repeat(400)],
+	])(
+		'does not retry HTTP %s with enormous Retry-After seconds %s',
+		async (status, retry_after) => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-09-05T12:00:00Z'));
+			vi.spyOn(Math, 'random').mockReturnValue(0);
+			const fetch_mock = vi
+				.fn()
+				.mockResolvedValueOnce(
+					new Response('wait', {
+						status: Number(status),
+						headers: { 'Retry-After': String(retry_after) },
+					}),
+				)
+				.mockResolvedValueOnce(new Response('{"ok":true}'));
+			vi.stubGlobal('fetch', fetch_mock);
+			const result = retry_with_backoff(() =>
+				http_json('test_provider', 'https://api.example.com'),
+			).catch((error: unknown) => error);
+			await vi.runAllTimersAsync();
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+			expect(await result).toMatchObject({
+				details: { status: Number(status) },
+			});
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
+
+	it.each([Infinity, NaN, -1, 0.5, 1000000])(
+		'rejects unsafe retry counts %s before calling the provider',
+		async (max_retries) => {
+			const fn = vi.fn().mockResolvedValue('ok');
+			await expect(
+				retry_with_backoff(fn, { max_retries }),
+			).rejects.toThrow(RangeError);
+			expect(fn).not.toHaveBeenCalled();
+		},
+	);
+	it.each(['request', 'call'] as const)(
+		'cancels the current non-cooperative attempt from the %s signal',
+		async (source) => {
+			vi.useFakeTimers();
+			const request = new AbortController();
+			const call = new AbortController();
+			const fn = vi.fn(() => new Promise(() => {}));
+			let outcome: unknown;
+			const result = run_with_request_context(request.signal, () =>
+				retry_with_backoff(fn, { signal: call.signal }),
+			).catch((error: unknown) => {
+				outcome = error;
+			});
+			(source === 'request' ? request : call).abort('PRIVATE_REASON');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(outcome).toMatchObject({
+				name: 'AbortError',
+				message: 'Operation cancelled',
+			});
+			await result;
+			expect(fn).toHaveBeenCalledTimes(1);
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
+
+	it.each(['request', 'call'] as const)(
+		'propagates the %s retry signal to nested HTTP',
+		async (source) => {
+			vi.useFakeTimers();
+			const request = new AbortController();
+			const call = new AbortController();
+			let fetch_signal: AbortSignal | undefined;
+			const fetch_mock = vi.fn((_url, options) => {
+				fetch_signal = options.signal;
+				return new Promise(() => {});
+			});
+			vi.stubGlobal('fetch', fetch_mock);
+			let outcome: unknown;
+			const result = run_with_request_context(request.signal, () =>
+				retry_with_backoff(
+					() => http_json('test_provider', 'https://api.example.com'),
+					{ signal: call.signal },
+				),
+			).catch((error: unknown) => {
+				outcome = error;
+			});
+			(source === 'request' ? request : call).abort('PRIVATE_REASON');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(fetch_signal?.aborted).toBe(true);
+			expect(outcome).toMatchObject({
+				name: 'AbortError',
+				message: 'Operation cancelled',
+			});
+			await result;
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
+
+	it.each(['request', 'call'] as const)(
+		'stops backoff immediately when the %s signal is cancelled',
+		async (source) => {
+			vi.useFakeTimers();
+			vi.spyOn(Math, 'random').mockReturnValue(1);
+			const request = new AbortController();
+			const call = new AbortController();
+			const fn = vi.fn().mockRejectedValue(network_error());
+			const result = run_with_request_context(request.signal, () =>
+				retry_with_backoff(fn, { signal: call.signal }),
+			);
+			const rejected = expect(result).rejects.toMatchObject({
+				name: 'AbortError',
+			});
+			await vi.advanceTimersByTimeAsync(1);
+			(source === 'request' ? request : call).abort();
+			await rejected;
+			expect(fn).toHaveBeenCalledTimes(1);
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
+	it.each(['2', 'Sat, 05 Sep 2026 12:00:02 GMT'])(
+		'honors Retry-After %s as a minimum wait',
+		async (retry_after) => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-09-05T12:00:00Z'));
+			vi.spyOn(Math, 'random').mockReturnValue(0);
+			const fetch_mock = vi
+				.fn()
+				.mockResolvedValueOnce(
+					new Response('slow down', {
+						status: 429,
+						headers: { 'Retry-After': retry_after },
+					}),
+				)
+				.mockResolvedValueOnce(new Response('{"ok":true}'));
+			vi.stubGlobal('fetch', fetch_mock);
+			const result = retry_with_backoff(() =>
+				http_json('test_provider', 'https://api.example.com'),
+			);
+			await vi.advanceTimersByTimeAsync(1999);
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+			await vi.advanceTimersByTimeAsync(1);
+			await expect(result).resolves.toEqual({ ok: true });
+			expect(fetch_mock).toHaveBeenCalledTimes(2);
+		},
+	);
+	it.each(['headers', 'body'])(
+		'retries %s network failures wrapped by the provider catch path',
+		async (phase) => {
+			vi.useFakeTimers();
+			const failure = new TypeError('private signed URL');
+			const fetch_mock = vi.fn();
+			if (phase === 'headers') {
+				fetch_mock.mockRejectedValueOnce(failure);
+			} else {
+				fetch_mock.mockResolvedValueOnce(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								controller.error(failure);
+							},
+						}),
+					),
+				);
+			}
+			fetch_mock.mockResolvedValueOnce(new Response('{"ok":true}'));
+			vi.stubGlobal('fetch', fetch_mock);
+			const result = retry_with_backoff(async () => {
+				try {
+					return await http_json(
+						'test_provider',
+						'https://api.example.com',
+					);
+				} catch (error) {
+					handle_provider_error(error, 'test_provider', 'search');
+				}
+			});
+			const resolved = expect(result).resolves.toEqual({ ok: true });
+			await vi.runAllTimersAsync();
+			await resolved;
+			expect(fetch_mock).toHaveBeenCalledTimes(2);
+		},
+	);
 	it('returns immediately when the operation succeeds on the first try', async () => {
 		const fn = vi.fn().mockResolvedValue('ok');
 
@@ -20,7 +240,7 @@ describe('retry_with_backoff', () => {
 		vi.spyOn(Math, 'random').mockReturnValue(1);
 		const fn = vi
 			.fn<() => Promise<string>>()
-			.mockRejectedValueOnce(new TypeError('network failure'))
+			.mockRejectedValueOnce(network_error())
 			.mockRejectedValueOnce(
 				new ProviderError(
 					ErrorType.RATE_LIMIT,
@@ -44,7 +264,7 @@ describe('retry_with_backoff', () => {
 	it('rethrows the final retryable error after exhausting retries', async () => {
 		vi.useFakeTimers();
 		vi.spyOn(Math, 'random').mockReturnValue(1);
-		const error = new TypeError('still failing');
+		const error = network_error();
 		const fn = vi
 			.fn<() => Promise<string>>()
 			.mockRejectedValue(error);

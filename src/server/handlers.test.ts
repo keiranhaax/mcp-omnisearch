@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { McpServer } from 'tmcp';
+import { ValibotJsonSchemaAdapter } from '@tmcp/adapter-valibot';
 import { ErrorType, ProviderError } from '../common/types.js';
 import { setup_handlers } from './handlers.js';
 import {
@@ -19,6 +21,12 @@ const create_mock_server = () => {
 	return {
 		resources,
 		server: {
+			template: (
+				definition: RegisteredResource['definition'],
+				handler: RegisteredResource['handler'],
+			) => {
+				resources.push({ definition, handler });
+			},
 			resource: (
 				definition: RegisteredResource['definition'],
 				handler: RegisteredResource['handler'],
@@ -37,6 +45,52 @@ const reset_available_providers = () => {
 };
 
 describe('setup_handlers', () => {
+	it('discovers and dispatches provider-info through the real resource template API', async () => {
+		reset_available_providers();
+		available_providers.search.add('fixture');
+		register_provider('search', 'fixture');
+		const server = new McpServer(
+			{ name: 'fixture', version: '1' },
+			{
+				adapter: new ValibotJsonSchemaAdapter(),
+				capabilities: { resources: {} },
+			},
+		);
+		setup_handlers(server);
+		const request = async (method: string, params = {}) =>
+			(await server.receive({
+				jsonrpc: '2.0',
+				id: 1,
+				method,
+				params,
+			})) as any;
+		const templates = await request('resources/templates/list');
+		expect(templates.result.resourceTemplates).toEqual([
+			expect.objectContaining({
+				name: 'provider-info',
+				uriTemplate: 'omnisearch://search/{provider}/info',
+			}),
+		]);
+		const resources = await request('resources/list');
+		expect(
+			resources.result.resources.map(
+				(resource: { name: string }) => resource.name,
+			),
+		).toEqual(['provider-status']);
+		const read = await request('resources/read', {
+			uri: 'omnisearch://search/fixture/info',
+		});
+		expect(read.error).toBeUndefined();
+		expect(JSON.parse(read.result.contents[0].text)).toMatchObject({
+			name: 'fixture',
+			status: 'registered',
+		});
+		const missing = await request('resources/read', {
+			uri: 'omnisearch://search/missing/info',
+		});
+		expect(missing.error).toBeDefined();
+	});
+
 	it('registers provider status and provider info resources', async () => {
 		reset_available_providers();
 		available_providers.search.add('brave');
@@ -255,6 +309,6 @@ describe('setup_handlers', () => {
 		expect(
 			status_body.provider_health.ai_response.brave_answers
 				.last_error,
-		).toBe('The operation was aborted due to timeout');
+		).toBeUndefined();
 	});
 });

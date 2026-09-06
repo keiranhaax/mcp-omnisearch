@@ -2,6 +2,8 @@ import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import {
 	make_firecrawl_request,
+	create_firecrawl_budget,
+	validate_firecrawl_formats,
 	validate_firecrawl_response,
 } from '../../../common/firecrawl_utils.js';
 import {
@@ -10,6 +12,7 @@ import {
 } from '../../../common/results.js';
 import {
 	is_non_retryable_provider_error,
+	is_retryable_error,
 	retry_with_backoff,
 } from '../../../common/retry.js';
 import {
@@ -23,6 +26,7 @@ import {
 	validate_processing_urls,
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
+import { throw_if_aborted } from '../../../common/request_context.js';
 
 type FirecrawlScrapeFormat =
 	| string
@@ -47,7 +51,7 @@ export interface FirecrawlScrapeOptions {
 const firecrawl_scrape_response_schema = v.object({
 	success: v.boolean(),
 	data: v.optional(
-		v.object({
+		v.looseObject({
 			markdown: v.optional(v.string()),
 			summary: v.optional(v.string()),
 			html: v.optional(v.string()),
@@ -77,6 +81,17 @@ const assert_valid_options = (
 	options: FirecrawlScrapeOptions,
 	provider_name: string,
 ) => {
+	validate_firecrawl_formats(options.formats, provider_name);
+	if (
+		options.formats &&
+		(options.question || options.highlights_query)
+	) {
+		throw new ProviderError(
+			ErrorType.INVALID_INPUT,
+			'formats cannot be combined with question or highlights_query',
+			provider_name,
+		);
+	}
 	if (options.question && options.highlights_query) {
 		throw new ProviderError(
 			ErrorType.INVALID_INPUT,
@@ -151,6 +166,9 @@ const extract_content = (data: FirecrawlScrapeResponse['data']) => {
 	if (data.html) return data.html;
 	if (data.rawHtml) return data.rawHtml;
 	if (data.links?.length) return data.links.join('\n');
+	if (Object.hasOwn(data, 'json'))
+		return JSON.stringify(data.json, null, 2);
+	if (data.screenshot) return data.screenshot;
 	return '';
 };
 
@@ -174,6 +192,11 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 				this.name,
 			);
 
+			const budget = create_firecrawl_budget(
+				config.processing.firecrawl_scrape.timeout,
+			);
+			const workers = new AbortController();
+			const signal = AbortSignal.any([budget.signal, workers.signal]);
 			try {
 				const scrape_single = async (
 					single_url: string,
@@ -190,6 +213,7 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 							),
 							config.processing.firecrawl_scrape.timeout,
 							firecrawl_scrape_response_schema,
+							signal,
 						);
 
 						validate_firecrawl_response(
@@ -222,14 +246,20 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 							metadata: {
 								...data.data.metadata,
 								warning: data.data.warning,
+								document: data.data,
 							},
 							success: true,
 						};
 					} catch (error) {
-						if (is_non_retryable_provider_error(error)) {
+						throw_if_aborted(signal);
+						if (
+							is_non_retryable_provider_error(error) ||
+							(error instanceof ProviderError &&
+								(error.type === ErrorType.RATE_LIMIT ||
+									!is_retryable_error(error)))
+						) {
 							throw error;
 						}
-						console.error(`Error processing ${single_url}:`, error);
 						return {
 							url: single_url,
 							content: '',
@@ -252,22 +282,42 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 					Array.from(
 						{ length: Math.min(concurrency, urls.length) },
 						async () => {
-							while (next_index < urls.length) {
-								const i = next_index++;
-								results[i] = await scrape_single(urls[i]);
+							try {
+								while (next_index < urls.length) {
+									throw_if_aborted(signal);
+									const i = next_index++;
+									results[i] = await scrape_single(urls[i]);
+								}
+							} catch (error) {
+								workers.abort();
+								throw error;
 							}
 						},
 					),
 				);
 
-				return aggregate_url_results(
+				const result = aggregate_url_results(
 					results,
 					this.name,
 					urls,
 					extract_depth,
 				);
+				return {
+					...result,
+					metadata: {
+						...result.metadata,
+						documents: results
+							.filter((item) => item.success)
+							.map((item) => ({
+								url: item.url,
+								...item.metadata.document,
+							})),
+					},
+				};
 			} catch (error) {
 				handle_provider_error(error, this.name, 'extract content');
+			} finally {
+				budget.dispose();
 			}
 		};
 

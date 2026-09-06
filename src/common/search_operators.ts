@@ -18,62 +18,70 @@ export interface SearchOperator {
 		| 'boolean';
 	value: string;
 	original_text: string;
+	start?: number;
 }
 
 export interface ParsedQuery {
 	base_query: string;
 	operators: SearchOperator[];
+	original_query?: string;
 }
 
 const operator_patterns = {
-	exclude_site: /-site:([^\s]+)/g,
-	site: /site:([^\s]+)/g,
-	filetype: /filetype:([^\s]+)/g,
-	ext: /ext:([^\s]+)/g,
-	intitle: /intitle:([^\s]+)/g,
-	inurl: /inurl:([^\s]+)/g,
-	inbody: /inbody:"?([^"\s]+)"?/g,
-	inpage: /inpage:"?([^"\s]+)"?/g,
-	language: /(?:lang|language):([^\s]+)/g,
-	location: /(?:loc|location):([^\s]+)/g,
-	before: /before:(\d{4}(?:-\d{2}(?:-\d{2})?)?)/g,
-	after: /after:(\d{4}(?:-\d{2}(?:-\d{2})?)?)/g,
-	exact: /"([^"]+)"/g,
-	force_include: /\+([^\s]+)/g,
-	exclude_term: /-([^\s:]+)(?!\s*site:)/g,
-	boolean: /\b(AND|OR|NOT)\b/g,
+	exclude_site: /^-site:([^\s]+)$/,
+	site: /^site:([^\s]+)$/,
+	filetype: /^filetype:([^\s]+)$/,
+	ext: /^ext:([^\s]+)$/,
+	intitle: /^intitle:("[^"]+"|[^\s]+)$/,
+	inurl: /^inurl:("[^"]+"|[^\s]+)$/,
+	inbody: /^inbody:("[^"]+"|[^\s]+)$/,
+	inpage: /^inpage:("[^"]+"|[^\s]+)$/,
+	language: /^(?:lang|language):([^\s]+)$/,
+	location: /^(?:loc|location):([^\s]+)$/,
+	before: /^before:(\d{4}(?:-\d{2}(?:-\d{2})?)?)$/,
+	after: /^after:(\d{4}(?:-\d{2}(?:-\d{2})?)?)$/,
+	exact: /^"([^"]+)"$/,
+	force_include: /^\+([^\s]+)$/,
+	exclude_term: /^-([^\s:]+)$/,
+	boolean: /^(AND|OR|NOT)$/,
 };
 
 export const parse_search_operators = (
 	query: string,
 ): ParsedQuery => {
 	const operators: SearchOperator[] = [];
-	let modified_query = query;
-
-	Object.entries(operator_patterns).forEach(([type, pattern]) => {
-		modified_query = modified_query.replace(
-			pattern,
-			(match, value) => {
+	// Match complete tokens, keeping quoted phrases and field values
+	// intact. Punctuation inside ordinary words is not syntax.
+	const modified_query = query.replace(
+		/(?:[^\s"]|"(?:\\.|[^"\\])*")+/g,
+		(token, start: number) => {
+			for (const [type, pattern] of Object.entries(
+				operator_patterns,
+			)) {
+				const match = pattern.exec(token);
+				if (!match) continue;
 				operators.push({
 					type: type as SearchOperator['type'],
-					value: value,
-					original_text: match,
+					value: match[1].replace(/^"|"$/g, ''),
+					original_text: token,
+					start,
 				});
 				return '';
-			},
-		);
-	});
-
-	const base_query = modified_query.replace(/\s+/g, ' ').trim();
+			}
+			return token;
+		},
+	);
 
 	return {
-		base_query,
+		base_query: modified_query.replace(/\s+/g, ' ').trim(),
 		operators,
+		original_query: query,
 	};
 };
 
 export interface SearchParams {
 	query: string;
+	parsed_query?: ParsedQuery;
 	include_domains?: string[];
 	exclude_domains?: string[];
 	file_type?: string;
@@ -99,6 +107,9 @@ export const apply_search_operators = (
 ): SearchParams => {
 	const params: SearchParams = {
 		query: parsed_query.base_query,
+		...(parsed_query.original_query !== undefined
+			? { parsed_query }
+			: {}),
 	};
 
 	for (const operator of parsed_query.operators) {
@@ -179,6 +190,7 @@ export const apply_search_operators = (
 export interface QueryBuildOptions {
 	exclude_file_type?: boolean;
 	exclude_dates?: boolean;
+	exclude_operators?: SearchOperator['type'][];
 }
 
 export const build_query_with_operators = (
@@ -187,6 +199,36 @@ export const build_query_with_operators = (
 	additional_exclude_domains?: string[],
 	options?: QueryBuildOptions,
 ): string => {
+	// Use the source query when available: rebuilding from scalar filters
+	// loses repeated fields, Boolean order, grouping, and quoting.
+	const parsed = search_params.parsed_query;
+	if (parsed?.original_query !== undefined) {
+		const excluded = new Set(options?.exclude_operators ?? []);
+		if (options?.exclude_file_type) {
+			excluded.add('filetype');
+			excluded.add('ext');
+		}
+		if (options?.exclude_dates) {
+			excluded.add('before');
+			excluded.add('after');
+		}
+		let query = parsed.original_query;
+		for (const operator of [...parsed.operators].reverse()) {
+			if (
+				operator.start !== undefined &&
+				excluded.has(operator.type)
+			) {
+				query =
+					query.slice(0, operator.start) +
+					query.slice(operator.start + operator.original_text.length);
+			}
+		}
+		return build_query_with_operators(
+			{ query: query.trim() },
+			additional_include_domains,
+			additional_exclude_domains,
+		);
+	}
 	let query = search_params.query;
 	const filters: string[] = [];
 
@@ -268,5 +310,5 @@ export const build_query_with_operators = (
 		query = `${query} ${filters.join(' ')}`;
 	}
 
-	return query;
+	return query.trim();
 };

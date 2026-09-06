@@ -1,0 +1,343 @@
+{
+	"initial-live-plan.json": {
+		"rules": [
+			{
+				"match": "^POST https://api\\.tavily\\.com/search$",
+				"limit": 1
+			},
+			{
+				"match": "^POST https://api\\.tavily\\.com/extract$",
+				"limit": 1
+			},
+			{
+				"match": "^POST https://api\\.exa\\.ai/search$",
+				"limit": 2
+			},
+			{
+				"match": "^POST https://api\\.exa\\.ai/contents$",
+				"limit": 1
+			},
+			{
+				"match": "^POST https://api\\.exa\\.ai/answer$",
+				"limit": 1
+			}
+		],
+		"cases": [
+			{
+				"id": "tavily-search",
+				"tool": "web_search",
+				"arguments": {
+					"provider": "tavily",
+					"query": "site:nodejs.org Node.js C++ OR JavaScript",
+					"limit": 2
+				},
+				"reserve_usd": 0.016,
+				"price_source": "https://docs.tavily.com/documentation/api-credits",
+				"expect": "nodejs.org"
+			},
+			{
+				"id": "tavily-extract",
+				"tool": "web_extract",
+				"arguments": {
+					"provider": "tavily",
+					"mode": "extract",
+					"url": "https://example.com/",
+					"query": "example domain illustrative documentation",
+					"extract_depth": "basic"
+				},
+				"reserve_usd": 0.008,
+				"price_source": "https://docs.tavily.com/documentation/api-credits",
+				"expect": "example"
+			},
+			{
+				"id": "exa-search",
+				"tool": "web_search",
+				"arguments": {
+					"provider": "exa",
+					"query": "Node.js official JavaScript runtime",
+					"limit": 2,
+					"search_type": "auto",
+					"include_domains": ["nodejs.org"]
+				},
+				"reserve_usd": 0.01,
+				"price_source": "https://docs.exa.ai/reference/pricing",
+				"expect": "nodejs.org"
+			},
+			{
+				"id": "exa-contents",
+				"tool": "web_extract",
+				"arguments": {
+					"provider": "exa",
+					"mode": "contents",
+					"url": "https://example.com/",
+					"extract_depth": "basic"
+				},
+				"reserve_usd": 0.002,
+				"price_source": "https://docs.exa.ai/reference/pricing",
+				"expect": "example"
+			},
+			{
+				"id": "exa-answer",
+				"tool": "ai_search",
+				"arguments": {
+					"provider": "exa_answer",
+					"query": "What is the example.com domain used for? Answer in one sentence.",
+					"limit": 2
+				},
+				"reserve_usd": 0.005,
+				"price_source": "https://docs.exa.ai/reference/pricing",
+				"expect": "example|documentation"
+			},
+			{
+				"id": "exa-deep",
+				"tool": "ai_search",
+				"arguments": {
+					"provider": "exa_deep_research",
+					"query": "In two sentences explain the purpose of example.com according to IANA.",
+					"limit": 2,
+					"exa_deep_search_type": "deep"
+				},
+				"reserve_usd": 0.015,
+				"price_source": "https://docs.exa.ai/reference/pricing",
+				"expect": "example|IANA",
+				"timeout_ms": 80000
+			}
+		]
+	},
+	"research-plan.json": {
+		"rules": [
+			{
+				"match": "^POST https://api\\.tavily\\.com/research$",
+				"limit": 1
+			},
+			{
+				"match": "^GET https://api\\.tavily\\.com/research/[a-zA-Z0-9_-]+$",
+				"limit": 24
+			}
+		],
+		"cases": [
+			{
+				"id": "tavily-research",
+				"tool": "ai_search",
+				"arguments": {
+					"provider": "tavily_research",
+					"query": "What is the purpose of example.com according to IANA? Give a short answer using one official source.",
+					"limit": 2
+				},
+				"reserve_usd": 2.0,
+				"price_source": "https://docs.tavily.com/documentation/api-credits",
+				"expect": "example|IANA",
+				"timeout_ms": 130000
+			}
+		]
+	},
+	"other-live-plan.json": {
+		"rules": [
+			{
+				"match": "^GET https://api\\.context\\.dev/v1/web/scrape/markdown$",
+				"limit": 1
+			},
+			{
+				"match": "^GET https://api\\.search\\.brave\\.com/res/v1/web/search$",
+				"limit": 1
+			},
+			{
+				"match": "^POST https://api\\.firecrawl\\.dev/v2/scrape$",
+				"limit": 1
+			},
+			{
+				"match": "^POST https://api\\.firecrawl\\.dev/v2/agent$",
+				"limit": 1
+			},
+			{
+				"match": "^GET https://api\\.you\\.com/v1/search$",
+				"limit": 1
+			}
+		],
+		"cases": [
+			{
+				"id": "context-markdown",
+				"tool": "context_web_extract",
+				"arguments": {
+					"mode": "markdown",
+					"url": "https://example.com/",
+					"timeoutMS": 15000
+				},
+				"reserve_usd": 0.01,
+				"price_source": "https://context.dev/pricing",
+				"expect": "Example Domain"
+			},
+			{
+				"id": "brave-search",
+				"tool": "web_search",
+				"arguments": {
+					"provider": "brave",
+					"query": "site:nodejs.org Node.js C++ OR JavaScript",
+					"limit": 2
+				},
+				"reserve_usd": 0.005,
+				"price_source": "https://brave.com/search/api/",
+				"expect": "nodejs.org"
+			},
+			{
+				"id": "you-search",
+				"tool": "web_search",
+				"arguments": {
+					"provider": "you",
+					"query": "site:nodejs.org Node.js JavaScript runtime",
+					"limit": 2
+				},
+				"reserve_usd": 0.005,
+				"price_source": "https://you.com/docs/administration/billing.md",
+				"expect": "nodejs.org"
+			},
+			{
+				"id": "firecrawl-scrape-json",
+				"tool": "web_extract",
+				"arguments": {
+					"provider": "firecrawl",
+					"mode": "scrape",
+					"url": "https://example.com/",
+					"extract_depth": "basic",
+					"firecrawl_options": {
+						"formats": [
+							"markdown",
+							{
+								"type": "json",
+								"schema": {
+									"type": "object",
+									"properties": {
+										"title": {
+											"type": "string"
+										},
+										"is_documentation_example": {
+											"type": "boolean"
+										}
+									},
+									"required": ["title", "is_documentation_example"]
+								}
+							}
+						]
+					}
+				},
+				"reserve_usd": 0.05,
+				"price_source": "https://www.firecrawl.dev/pricing",
+				"expect": "Example Domain",
+				"timeout_ms": 70000
+			},
+			{
+				"id": "firecrawl-agent-start",
+				"tool": "firecrawl_agent",
+				"arguments": {
+					"action": "start",
+					"prompt": "Visit only https://example.com/ and return its heading and purpose in one short sentence. Do not search other sites.",
+					"max_credits": 100,
+					"wait_for_completion": false
+				},
+				"reserve_usd": 0.75,
+				"price_source": "https://docs.firecrawl.dev/api-reference/endpoint/agent.md",
+				"expect": "job_id"
+			}
+		]
+	},
+	"agent-follow.json": {
+		"rules": [
+			{
+				"match": "^GET https://api\\.firecrawl\\.dev/v2/agent/01a07473-f3b2-70ad-8227-1a9154d67c61$",
+				"limit": 2
+			},
+			{
+				"match": "^DELETE https://api\\.firecrawl\\.dev/v2/agent/01a07473-f3b2-70ad-8227-1a9154d67c61$",
+				"limit": 1
+			}
+		],
+		"cases": [
+			{
+				"id": "firecrawl-agent-status",
+				"tool": "firecrawl_agent",
+				"arguments": {
+					"action": "status",
+					"job_id": "01a07473-f3b2-70ad-8227-1a9154d67c61"
+				},
+				"reserve_usd": 0.01,
+				"price_source": "https://docs.firecrawl.dev/api-reference/endpoint/agent-status.md",
+				"expect": "job_id"
+			},
+			{
+				"id": "firecrawl-agent-cancel",
+				"tool": "firecrawl_agent",
+				"arguments": {
+					"action": "cancel",
+					"job_id": "01a07473-f3b2-70ad-8227-1a9154d67c61"
+				},
+				"reserve_usd": 0.01,
+				"price_source": "https://docs.firecrawl.dev/api-reference/endpoint/cancel-agent.md"
+			},
+			{
+				"id": "firecrawl-agent-readback",
+				"tool": "firecrawl_agent",
+				"arguments": {
+					"action": "status",
+					"job_id": "01a07473-f3b2-70ad-8227-1a9154d67c61"
+				},
+				"reserve_usd": 0.01,
+				"price_source": "https://docs.firecrawl.dev/api-reference/endpoint/agent-status.md",
+				"expect": "completed|cancelled|failed"
+			}
+		]
+	},
+	"agent-cancel-plan.json": {
+		"rules": [
+			{
+				"match": "^POST https://api\\.firecrawl\\.dev/v2/agent$",
+				"limit": 1
+			},
+			{
+				"match": "^GET https://api\\.firecrawl\\.dev/v2/agent/[0-9a-f-]{36}$",
+				"limit": 2
+			},
+			{
+				"match": "^DELETE https://api\\.firecrawl\\.dev/v2/agent/[0-9a-f-]{36}$",
+				"limit": 1
+			}
+		],
+		"cases": [
+			{
+				"id": "firecrawl-cancel-start",
+				"tool": "firecrawl_agent",
+				"arguments": {
+					"action": "start",
+					"prompt": "Read https://example.com/ and https://www.iana.org/help/example-domains and briefly compare what they say about the reserved example domains. Only these official pages are needed.",
+					"max_credits": 100,
+					"wait_for_completion": false
+				},
+				"reserve_usd": 0.75,
+				"price_source": "https://docs.firecrawl.dev/api-reference/endpoint/agent.md",
+				"expect": "job_id"
+			},
+			{
+				"id": "firecrawl-cancel-running",
+				"tool": "firecrawl_agent",
+				"job_from": "firecrawl-cancel-start",
+				"arguments": {
+					"action": "cancel"
+				},
+				"reserve_usd": 0.01,
+				"price_source": "https://docs.firecrawl.dev/api-reference/endpoint/cancel-agent.md",
+				"expect": "cancelled"
+			},
+			{
+				"id": "firecrawl-cancel-readback",
+				"tool": "firecrawl_agent",
+				"job_from": "firecrawl-cancel-start",
+				"arguments": {
+					"action": "status"
+				},
+				"reserve_usd": 0.01,
+				"price_source": "https://docs.firecrawl.dev/api-reference/endpoint/agent-status.md",
+				"expect": "cancelled",
+				"delay_ms": 2000
+			}
+		]
+	}
+}

@@ -1,0 +1,103 @@
+--- a/src/index.js
++++ b/src/index.js
+@@ -16,6 +16,9 @@
+ 	 * @type {Set<() => void>}
+ 	 */
+ 	#cleaners = new Set();
++
++	/** @type {Map<string | number, AbortController>} */
++	#inflight = new Map();
+ 
+ 	/**
+ 	 * @type {NonNullable<Partial<Context["sessionInfo"]>>}
+@@ -83,10 +86,44 @@
+ 	}
+ 
+ 	#close() {
++		for (const controller of this.#inflight.values()) controller.abort();
++		this.#inflight.clear();
+ 		for (const cleaner of this.#cleaners) {
+ 			cleaner();
+ 		}
+-		process.exit(0);
++		setImmediate(() => process.exit(0));
++	}
++
++	/** @param {string} line @param {TCustom} [ctx] */
++	async #dispatch(line, ctx) {
++		let id;
++		let controller;
++		try {
++			const message = JSON.parse(line);
++			if (message?.jsonrpc === '2.0' && message.method === 'notifications/cancelled' && message.id === undefined) {
++				this.#inflight.get(message.params?.requestId)?.abort();
++				return;
++			}
++			if (message && typeof message.method === 'string' && (typeof message.id === 'string' || typeof message.id === 'number')) {
++				id = message.id;
++				if (this.#inflight.has(id)) return;
++				controller = new AbortController();
++				this.#inflight.set(id, controller);
++			}
++			const session_info = message.method === 'initialize'
++				? {clientCapabilities: message.params?.capabilities, clientInfo: message.params?.clientInfo}
++				: this.#session_info;
++			const response = await this.#server.receive(message, {
++				custom: ctx,
++				signal: controller?.signal,
++				sessionInfo: session_info,
++			});
++			if (response && !controller?.signal.aborted) process.stdout.write(JSON.stringify(response) + '\n');
++		} catch {
++			// Invalid input must not crash the shared transport.
++		} finally {
++			if (id !== undefined && this.#inflight.get(id) === controller) this.#inflight.delete(id);
++		}
+ 	}
+ 
+ 	/**
+@@ -98,7 +135,7 @@
+ 
+ 		let buffer = '';
+ 
+-		process.stdin.on('data', async (chunk) => {
++		process.stdin.on('data', (chunk) => {
+ 			buffer += chunk;
+ 
+ 			// Process complete JSON-RPC messages
+@@ -106,34 +143,7 @@
+ 			buffer = lines.pop() || ''; // Keep the incomplete line in buffer
+ 
+ 			for (const line of lines) {
+-				if (line.trim()) {
+-					try {
+-						const message = JSON.parse(line);
+-
+-						const is_init = message.method === 'initialize';
+-						const session_info = is_init
+-							? {
+-									clientCapabilities:
+-										message.params?.capabilities,
+-									clientInfo: message.params?.clientInfo,
+-								}
+-							: this.#session_info;
+-
+-						const response = await this.#server.receive(message, {
+-							custom: ctx,
+-							sessionInfo: /** @type {Context["sessionInfo"]} */ (
+-								session_info
+-							),
+-						});
+-						if (response) {
+-							process.stdout.write(
+-								JSON.stringify(response) + '\n',
+-							);
+-						}
+-					} catch {
+-						/** empty */
+-					}
+-				}
++				if (line.trim()) void this.#dispatch(line, ctx);
+ 			}
+ 		});
+ 

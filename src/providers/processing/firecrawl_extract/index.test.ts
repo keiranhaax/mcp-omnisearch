@@ -67,12 +67,71 @@ describe('FirecrawlExtractProvider', () => {
 			metadata: { title: 'Extracted title' },
 			source_provider: 'firecrawl_extract',
 		});
-		expect(result.content).toContain('- a');
-		expect(result.content).toContain('- **name**: Author');
+		expect(result.metadata.structured_data).toEqual({
+			title: 'Extracted title',
+			tags: ['a', 'b'],
+			author: { name: 'Author' },
+		});
 		expect(fetch_mock).toHaveBeenCalledTimes(2);
 	});
 
-	it('rejects malformed extracted data as non-retryable', async () => {
+	it.each([
+		null,
+		false,
+		0,
+		'text',
+		[null, false, 42, { nested: { ok: true } }],
+		{
+			title: 'A',
+			price: 42,
+			available: true,
+			items: [null],
+			nested: { deep: { value: 1 } },
+		},
+	])('preserves arbitrary JSON output: %j', async (data) => {
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({ success: true, id: 'json-job' }),
+		);
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({ status: 'completed', data }),
+		);
+		const result = new FirecrawlExtractProvider()
+			.process_content('https://example.test')
+			.catch((error) => error);
+		await vi.advanceTimersByTimeAsync(3000);
+		const output = await result;
+		expect(output.metadata?.structured_data).toEqual(data);
+		expect(output.content).toContain(JSON.stringify(data, null, 2));
+	});
+
+	it.each([
+		'../agent/other',
+		'job?redirect=/agent/other#fragment',
+		'%2e%2e%2fagent%2fother',
+		'.',
+		'..',
+		'',
+	])('rejects unsafe status job ID %j before polling', async (id) => {
+		fetch_mock
+			.mockResolvedValueOnce(json_response({ success: true, id }))
+			.mockResolvedValueOnce(
+				json_response({
+					status: 'completed',
+					data: { ok: true },
+				}),
+			);
+		const promise = new FirecrawlExtractProvider()
+			.process_content('https://extract.test')
+			.catch((error: unknown) => error);
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(await promise).toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			details: { retryable: false },
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
+	});
+
+	it('rejects malformed status as non-retryable', async () => {
 		const sentinel = 'extract-payload-secret-must-not-leak';
 		fetch_mock
 			.mockResolvedValueOnce(
@@ -80,8 +139,7 @@ describe('FirecrawlExtractProvider', () => {
 			)
 			.mockResolvedValueOnce(
 				json_response({
-					status: 'completed',
-					data: sentinel,
+					status: { private: sentinel },
 				}),
 			);
 

@@ -18,7 +18,8 @@ import {
 	validate_firecrawl_response,
 } from './firecrawl_utils.js';
 import { http_json } from './http.js';
-import { ErrorType } from './types.js';
+import { ErrorType, ProviderError } from './types.js';
+import { run_with_request_context } from './request_context.js';
 
 const http_json_mock = vi.mocked(http_json);
 
@@ -129,7 +130,7 @@ describe('validate_firecrawl_response', () => {
 			expect.objectContaining({
 				type: ErrorType.PROVIDER_ERROR,
 				provider: 'firecrawl',
-				message: 'Scrape failed: invalid URL',
+				message: 'Scrape failed',
 			}),
 		);
 	});
@@ -144,6 +145,114 @@ describe('poll_firecrawl_job', () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.restoreAllMocks();
+	});
+
+	it.each([401, 403, 404])(
+		'stops permanent HTTP %s without losing the error',
+		async (status) => {
+			const error = new ProviderError(
+				ErrorType.API_ERROR,
+				'permanent',
+				'firecrawl',
+				{ status },
+			);
+			http_json_mock.mockRejectedValue(error);
+			const result = poll_firecrawl_job(
+				{
+					provider_name: 'firecrawl',
+					status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+					api_key: 'test-key',
+					max_attempts: 3,
+					poll_interval: 10,
+					timeout: 5000,
+				},
+				firecrawl_job_schema,
+			).catch((error) => error);
+			await vi.advanceTimersByTimeAsync(30);
+			expect(await result).toBe(error);
+			expect(http_json_mock).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it('cancels polling during the sleep without making a GET', async () => {
+		const controller = new AbortController();
+		let settled = false;
+		const result = run_with_request_context(controller.signal, () =>
+			poll_firecrawl_job(
+				{
+					provider_name: 'firecrawl',
+					status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+					api_key: 'test-key',
+					max_attempts: 3,
+					poll_interval: 1000,
+					timeout: 5000,
+				},
+				firecrawl_job_schema,
+			),
+		).catch((error) => {
+			settled = true;
+			return error;
+		});
+		controller.abort();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(settled).toBe(true);
+		expect(await result).toMatchObject({ name: 'AbortError' });
+		expect(http_json_mock).not.toHaveBeenCalled();
+	});
+
+	it('enforces one total deadline including an in-flight poll', async () => {
+		http_json_mock.mockImplementation(() => new Promise(() => {}));
+		let settled = false;
+		const result = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'test-key',
+				max_attempts: 3,
+				poll_interval: 10,
+				timeout: 25,
+			},
+			firecrawl_job_schema,
+		).catch((error) => {
+			settled = true;
+			return error;
+		});
+		await vi.advanceTimersByTimeAsync(25);
+		expect(settled).toBe(true);
+		expect(await result).toMatchObject({ name: 'TimeoutError' });
+		expect(http_json_mock).toHaveBeenCalledTimes(1);
+		expect(http_json_mock.mock.calls[0][2]?.signal?.aborted).toBe(
+			true,
+		);
+	});
+
+	it('honors Retry-After before issuing another status request', async () => {
+		http_json_mock
+			.mockRejectedValueOnce(
+				new ProviderError(
+					ErrorType.RATE_LIMIT,
+					'rate limited',
+					'firecrawl',
+					{ reset_time: new Date(Date.now() + 1000) },
+				),
+			)
+			.mockResolvedValue({ status: 'completed' });
+		const result = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'test-key',
+				max_attempts: 2,
+				poll_interval: 10,
+				timeout: 2000,
+			},
+			firecrawl_job_schema,
+		);
+		await vi.advanceTimersByTimeAsync(999);
+		expect(http_json_mock).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1);
+		await result;
+		expect(http_json_mock).toHaveBeenCalledTimes(2);
 	});
 
 	it('retries through transient polling failures and resolves on completion', async () => {
@@ -228,7 +337,7 @@ describe('poll_firecrawl_job', () => {
 		const rejection = expect(promise).rejects.toMatchObject({
 			type: ErrorType.PROVIDER_ERROR,
 			provider: 'firecrawl',
-			message: 'Job failed: crawl crashed',
+			message: 'Job failed: error',
 		});
 
 		await vi.advanceTimersByTimeAsync(10);
@@ -256,7 +365,7 @@ describe('poll_firecrawl_job', () => {
 			);
 			const rejection = expect(promise).rejects.toMatchObject({
 				type: ErrorType.PROVIDER_ERROR,
-				message: `Job failed: ${status} job`,
+				message: `Job failed: ${status}`,
 			});
 
 			await vi.advanceTimersByTimeAsync(10);

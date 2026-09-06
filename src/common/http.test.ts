@@ -6,12 +6,23 @@ import {
 	it,
 	vi,
 } from 'vitest';
-import { http_json } from './http.js';
+import { http_json, safe_endpoint } from './http.js';
+import { run_with_request_context } from './request_context.js';
 import { ErrorType } from './types.js';
 
 const fetch_mock = vi.fn();
 
 describe('http_json', () => {
+	it.each([
+		[
+			'https://user:password@api.example.com/private-token?signature=SECRET#fragment',
+			'https://api.example.com',
+		],
+		['not a URL?SECRET', '[redacted endpoint]'],
+		['data:text/plain,SECRET', '[redacted endpoint]'],
+	])('redacts unsafe endpoint components from %s', (url, safe) => {
+		expect(safe_endpoint(url)).toBe(safe);
+	});
 	beforeEach(() => {
 		fetch_mock.mockReset();
 		vi.stubGlobal('fetch', fetch_mock);
@@ -20,6 +31,115 @@ describe('http_json', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+	});
+
+	it.each(['request', 'call'] as const)(
+		'aborts a pending fetch from the %s signal without exposing its reason',
+		async (source) => {
+			const request = new AbortController();
+			const call = new AbortController();
+			let fetch_signal: AbortSignal | null | undefined;
+			fetch_mock.mockImplementation((_url, options) => {
+				fetch_signal = options.signal;
+				return new Promise(() => {});
+			});
+			const result = run_with_request_context(request.signal, () =>
+				http_json('test_provider', 'https://api.example.com', {
+					signal: call.signal,
+				}),
+			);
+			const rejected = expect(result).rejects.toMatchObject({
+				name: 'AbortError',
+				message: 'Operation cancelled',
+			});
+			(source === 'request' ? request : call).abort(
+				new Error('private signed URL reason'),
+			);
+			expect(fetch_signal?.aborted).toBe(true);
+			await rejected;
+		},
+	);
+
+	it.each(['headers', 'body'])(
+		'normalizes %s network failures without retaining private data',
+		async (phase) => {
+			const failure = new TypeError('file:///PRIVATE_PATH?SECRET');
+			if (phase === 'headers') {
+				fetch_mock.mockRejectedValueOnce(failure);
+			} else {
+				fetch_mock.mockResolvedValueOnce(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								controller.error(failure);
+							},
+						}),
+					),
+				);
+			}
+			const error = await http_json(
+				'test_provider',
+				'https://api.example.com',
+			).catch((error: unknown) => error);
+			expect(error).toMatchObject({
+				type: ErrorType.API_ERROR,
+				message: 'Network request failed',
+				provider: 'test_provider',
+				details: { retryable: true, cause: 'network' },
+			});
+			expect(JSON.stringify(error)).not.toMatch(
+				/PRIVATE_PATH|SECRET/,
+			);
+		},
+	);
+
+	it.each([0, -1, NaN, Infinity, 0.5, 26 * 1024 * 1024])(
+		'rejects an unsafe response limit %s before fetching',
+		async (max_response_bytes) => {
+			fetch_mock.mockResolvedValue(new Response('{}'));
+			await expect(
+				http_json('test_provider', 'https://api.example.com', {
+					max_response_bytes,
+				}),
+			).rejects.toThrow(RangeError);
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
+
+	it('allows the bounded 25 MiB response ceiling', async () => {
+		fetch_mock.mockResolvedValue(new Response('{}'));
+		await expect(
+			http_json('test_provider', 'https://api.example.com', {
+				max_response_bytes: 25 * 1024 * 1024,
+			}),
+		).resolves.toEqual({});
+	});
+
+	it('cancels the body stream as soon as its byte limit is exceeded', async () => {
+		const cancel = vi.fn();
+		let reads = 0;
+		const body = new ReadableStream<Uint8Array>(
+			{
+				pull(controller) {
+					reads++;
+					controller.enqueue(new TextEncoder().encode('😀'));
+					if (reads === 10) controller.close();
+				},
+				cancel,
+			},
+			{ highWaterMark: 0 },
+		);
+		fetch_mock.mockResolvedValue(new Response(body));
+		await expect(
+			http_json('test_provider', 'https://api.example.com', {
+				max_response_bytes: 5,
+			}),
+		).rejects.toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			details: { retryable: false, cause: 'response_too_large' },
+		});
+		expect(reads).toBe(2);
+		expect(cancel).toHaveBeenCalledTimes(1);
 	});
 
 	it('returns parsed JSON for successful responses', async () => {
@@ -35,26 +155,44 @@ describe('http_json', () => {
 		).resolves.toEqual({ ok: true, value: 42 });
 	});
 
-	it('returns raw text when the response body is not JSON', async () => {
-		fetch_mock.mockResolvedValue(
-			new Response('plain text body', { status: 200 }),
-		);
+	it.each(['plain text body', '{"unterminated":', ''])(
+		'rejects malformed successful JSON: %s',
+		async (body) => {
+			fetch_mock.mockResolvedValue(
+				new Response(body, { status: 200 }),
+			);
 
-		await expect(
-			http_json('exa', 'https://api.example.com'),
-		).resolves.toBe('plain text body');
-	});
+			await expect(
+				http_json('exa', 'https://api.example.com'),
+			).rejects.toMatchObject({
+				type: ErrorType.PROVIDER_ERROR,
+				message: 'Provider returned invalid JSON',
+				details: {
+					retryable: false,
+					cause: 'invalid_json',
+					status: 200,
+				},
+			});
+		},
+	);
 
 	it('allows configured non-2xx statuses', async () => {
 		fetch_mock.mockResolvedValue(
-			new Response('not found but expected', { status: 404 }),
+			new Response('{"found":false}', { status: 404 }),
 		);
 
 		await expect(
 			http_json('exa', 'https://api.example.com', {
 				expectedStatuses: [404],
 			}),
-		).resolves.toBe('not found but expected');
+		).resolves.toEqual({ found: false });
+	});
+
+	it('preserves valid JSON null instead of returning the raw text', async () => {
+		fetch_mock.mockResolvedValue(new Response('null'));
+		await expect(
+			http_json('test_provider', 'https://api.example.com'),
+		).resolves.toBeNull();
 	});
 
 	it('throws a specific error for 401 responses', async () => {
@@ -106,7 +244,7 @@ describe('http_json', () => {
 			message: 'Endpoint not found',
 			details: {
 				status: 404,
-				url: 'https://api.firecrawl.dev/v1/agent',
+				url: 'https://api.firecrawl.dev',
 				method: 'POST',
 			},
 		});
@@ -140,21 +278,32 @@ describe('http_json', () => {
 		});
 	});
 
-	it('includes parsed error message details for other failures', async () => {
+	it('does not retain upstream validation inputs in HTTP errors', async () => {
 		fetch_mock.mockResolvedValue(
-			new Response(JSON.stringify({ detail: 'bad request body' }), {
-				status: 400,
-				headers: { 'Content-Type': 'application/json' },
-			}),
+			new Response(
+				JSON.stringify({
+					detail: [
+						{ input: 'PRIVATE_INPUT', msg: 'bad request body' },
+					],
+				}),
+				{
+					status: 400,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
 		);
 
-		await expect(
-			http_json('exa', 'https://api.example.com'),
-		).rejects.toMatchObject({
+		const error = await http_json(
+			'exa',
+			'https://api.example.com',
+		).catch((failure: unknown) => failure);
+		expect(error).toMatchObject({
 			type: ErrorType.API_ERROR,
 			provider: 'exa',
-			message: 'Unexpected error: bad request body',
+			message: 'Provider rejected the request (HTTP 400)',
 		});
+		expect(JSON.stringify(error)).not.toContain('PRIVATE_INPUT');
+		expect(error).not.toHaveProperty('details.response');
 	});
 
 	it('classifies entitlement errors from provider response text', async () => {

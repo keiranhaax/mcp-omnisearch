@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
 	create_guard_server,
 	default_guard_config,
+	parse_guard_integer,
 } from './server/http_guard.js';
 
 /**
@@ -59,9 +60,27 @@ if (allowed_hosts.length === 0) {
 	);
 	process.exit(1);
 }
-const max_body_bytes = optional_port(
-	'GUARD_MAX_BODY_BYTES',
+const max_body_bytes = parse_guard_integer(
+	process.env.GUARD_MAX_BODY_BYTES,
 	4 * 1024 * 1024,
+	'GUARD_MAX_BODY_BYTES',
+);
+const resource_settings = Object.fromEntries(
+	[
+		['max_connections', 'GUARD_MAX_CONNECTIONS', 256],
+		['max_inflight_requests', 'GUARD_MAX_INFLIGHT_REQUESTS', 64],
+		['rate_limit_requests', 'GUARD_RATE_LIMIT_REQUESTS', 600],
+		['rate_limit_window_ms', 'GUARD_RATE_LIMIT_WINDOW_MS', 60_000],
+		['body_read_timeout_ms', 'GUARD_BODY_READ_TIMEOUT_MS', 30_000],
+	].map(([key, name, fallback]) => [
+		key,
+		parse_guard_integer(
+			process.env[String(name)],
+			Number(fallback),
+			String(name),
+			2_147_483_647,
+		),
+	]),
 );
 const api_key = require_env('MCP_API_KEY');
 
@@ -156,6 +175,8 @@ wait_for_upstream(upstream_host, upstream_port, 15_000)
 				upstream_port,
 				allowed_hosts,
 				max_body_bytes,
+				api_key,
+				...resource_settings,
 			}),
 		);
 		server.listen(listen_port, listen_host, () => {

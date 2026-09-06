@@ -1,6 +1,10 @@
 import { Octokit } from 'octokit';
 import * as v from 'valibot';
 import { parse_provider_response } from '../../../common/provider_response.js';
+import {
+	combine_request_signal,
+	with_abort_signal,
+} from '../../../common/request_context.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
@@ -79,7 +83,15 @@ export class GitHubSearchProvider implements SearchProvider {
 			config.search.github.api_key,
 			this.name,
 		);
-		const octokit = new Octokit({ auth: api_key });
+		const signal = combine_request_signal(
+			AbortSignal.timeout(config.search.github.timeout),
+		);
+		const octokit = new Octokit({
+			auth: api_key,
+			request: { signal },
+			retry: { enabled: false },
+			throttle: { enabled: false },
+		});
 
 		const search_request = async () => {
 			try {
@@ -132,7 +144,10 @@ export class GitHubSearchProvider implements SearchProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return with_abort_signal(
+			() => retry_with_backoff(search_request, { signal }),
+			signal,
+		);
 	}
 
 	// Dedicated repository search method with enhanced metadata
@@ -145,7 +160,15 @@ export class GitHubSearchProvider implements SearchProvider {
 			config.search.github.api_key,
 			this.name,
 		);
-		const octokit = new Octokit({ auth: api_key });
+		const signal = combine_request_signal(
+			AbortSignal.timeout(config.search.github.timeout),
+		);
+		const octokit = new Octokit({
+			auth: api_key,
+			request: { signal },
+			retry: { enabled: false },
+			throttle: { enabled: false },
+		});
 
 		const search_request = async () => {
 			try {
@@ -191,7 +214,10 @@ export class GitHubSearchProvider implements SearchProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return with_abort_signal(
+			() => retry_with_backoff(search_request, { signal }),
+			signal,
+		);
 	}
 
 	// Alias for backward compatibility
@@ -211,7 +237,15 @@ export class GitHubSearchProvider implements SearchProvider {
 			config.search.github.api_key,
 			this.name,
 		);
-		const octokit = new Octokit({ auth: api_key });
+		const signal = combine_request_signal(
+			AbortSignal.timeout(config.search.github.timeout),
+		);
+		const octokit = new Octokit({
+			auth: api_key,
+			request: { signal },
+			retry: { enabled: false },
+			throttle: { enabled: false },
+		});
 
 		const search_request = async () => {
 			try {
@@ -244,7 +278,10 @@ export class GitHubSearchProvider implements SearchProvider {
 			}
 		};
 
-		return retry_with_backoff(search_request);
+		return with_abort_signal(
+			() => retry_with_backoff(search_request, { signal }),
+			signal,
+		);
 	}
 
 	// Centralized error handling
@@ -258,35 +295,67 @@ export class GitHubSearchProvider implements SearchProvider {
 			typeof error.status === 'number'
 				? error.status
 				: 500;
-		const message =
-			error instanceof Error
-				? error.message
-				: 'An unexpected error occurred.';
-
+		const response =
+			error && typeof error === 'object' && 'response' in error
+				? error.response
+				: undefined;
+		const headers =
+			response &&
+			typeof response === 'object' &&
+			'headers' in response &&
+			response.headers &&
+			typeof response.headers === 'object'
+				? (response.headers as Record<string, unknown>)
+				: {};
+		const retry_after = headers['retry-after'];
+		const reset = headers['x-ratelimit-reset'];
+		const reset_ms =
+			typeof retry_after === 'string'
+				? /^\d+$/.test(retry_after)
+					? Date.now() + Number(retry_after) * 1000
+					: Date.parse(retry_after)
+				: typeof reset === 'string' && /^\d+$/.test(reset)
+					? Number(reset) * 1000
+					: NaN;
+		if (
+			status === 429 ||
+			(status === 403 &&
+				(retry_after !== undefined ||
+					headers['x-ratelimit-remaining'] === '0'))
+		) {
+			throw new ProviderError(
+				ErrorType.RATE_LIMIT,
+				'GitHub API rate limit exceeded',
+				this.name,
+				{
+					status,
+					reset_time: Number.isFinite(reset_ms)
+						? new Date(reset_ms)
+						: undefined,
+				},
+			);
+		}
 		switch (status) {
 			case 401:
 			case 403:
 				throw new ProviderError(
 					ErrorType.API_ERROR,
-					`Invalid or unauthorized GitHub API key: ${message}`,
+					'Invalid or unauthorized GitHub API key',
 					this.name,
+					{ status },
 				);
 			case 422:
 				throw new ProviderError(
 					ErrorType.INVALID_INPUT,
-					`Invalid GitHub search query: ${message}`,
+					'Invalid GitHub search query',
 					this.name,
+					{ status },
 				);
-			case 429:
-				throw new ProviderError(
-					ErrorType.RATE_LIMIT,
-					`GitHub API rate limit exceeded: ${message}`,
-					this.name,
-				);
+
 			default:
 				throw new ProviderError(
 					ErrorType.PROVIDER_ERROR,
-					`GitHub API error: ${message}`,
+					'GitHub API error',
 					this.name,
 					{ status },
 				);

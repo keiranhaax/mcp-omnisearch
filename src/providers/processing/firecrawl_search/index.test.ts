@@ -245,6 +245,44 @@ describe('FirecrawlSearchProvider', () => {
 		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	});
 
+	it('preserves screenshot and structured formats for search hits', async () => {
+		const web = [
+			{
+				url: 'https://example.test',
+				json: { nested: [null, false, 42] },
+				screenshot: 'https://images.test/shot.png',
+			},
+		];
+		fetch_mock.mockImplementation(
+			async () =>
+				new Response(
+					JSON.stringify({ success: true, data: { web } }),
+				),
+		);
+		const result =
+			await new FirecrawlSearchProvider().process_content(
+				'query',
+				'basic',
+				{
+					scrapeOptions: {
+						formats: ['screenshot', { type: 'json' }],
+					},
+				},
+			);
+		expect(result.metadata.documents.web).toEqual(web);
+	});
+
+	it('rejects unsupported scrape formats before searching', async () => {
+		await expect(
+			new FirecrawlSearchProvider().process_content(
+				'query',
+				'basic',
+				{ scrapeOptions: { formats: ['unsupported-format'] } },
+			),
+		).rejects.toMatchObject({ type: 'INVALID_INPUT' });
+		expect(fetch_mock).not.toHaveBeenCalled();
+	});
+
 	it('rejects mutually exclusive domain filters', async () => {
 		const provider = new FirecrawlSearchProvider();
 		await expect(

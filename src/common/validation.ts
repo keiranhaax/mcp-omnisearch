@@ -62,17 +62,17 @@ const is_non_public_ipv4 = (hostname: string): boolean => {
 };
 
 const is_non_public_ipv6 = (hostname: string): boolean => {
-	const normalized = hostname.toLowerCase();
-	if (normalized === '::' || normalized === '::1') return true;
-	if (normalized.startsWith('fc') || normalized.startsWith('fd'))
-		return true;
-	if (/^fe[89ab]/.test(normalized)) return true;
-	if (normalized.startsWith('2001:db8:')) return true;
-	if (normalized.startsWith('::ffff:')) {
-		const mapped = normalized.slice('::ffff:'.length);
-		return isIP(mapped) === 4 ? is_non_public_ipv4(mapped) : true;
-	}
-	return false;
+	// Only global-unicast literals, excluding special-purpose, documentation,
+	// and transition ranges (which can embed otherwise blocked IPv4 targets).
+	const [first, second = '0'] = hostname.split(':');
+	const prefix = Number.parseInt(first, 16);
+	const subnet = Number.parseInt(second || '0', 16);
+	return (
+		!(prefix >= 0x2000 && prefix <= 0x3fff) ||
+		(prefix === 0x2001 && (subnet < 0x200 || subnet === 0xdb8)) ||
+		prefix === 0x2002 ||
+		(prefix === 0x3fff && subnet < 0x1000)
+	);
 };
 
 const is_non_public_hostname = (raw_hostname: string): boolean => {
@@ -103,6 +103,10 @@ const is_non_public_hostname = (raw_hostname: string): boolean => {
 	return !hostname.includes('.');
 };
 
+// This is a syntactic public-target policy, not an SSRF guarantee. DNS,
+// redirects and crawl-discovered URLs are resolved/fetched by remote providers.
+// Local DNS checks would not bind their resolver or prevent rebinding there;
+// providers must enforce destination/redirect policy at retrieval time.
 export const is_valid_url = (value: string): boolean => {
 	try {
 		const url = new URL(value);
@@ -140,13 +144,31 @@ export const validate_processing_urls = (
 		if (!is_valid_url(candidate)) {
 			throw new ProviderError(
 				ErrorType.INVALID_INPUT,
-				`Invalid URL provided: ${candidate}`,
+				'Invalid URL provided; use a public HTTP(S) URL without credentials',
 				provider_name,
 			);
 		}
 	}
 
 	return urls;
+};
+
+export const validate_processing_domain = (
+	domain: string,
+	provider: string,
+): string => {
+	const hostname = isIP(domain) === 6 ? `[${domain}]` : domain;
+	const is_hostname =
+		/^[a-z0-9.-]+$/i.test(hostname) ||
+		/^\[[a-f0-9:]+\]$/i.test(hostname);
+	if (!is_hostname || !is_valid_url(`https://${hostname}`)) {
+		throw new ProviderError(
+			ErrorType.INVALID_INPUT,
+			'Invalid public domain provided',
+			provider,
+		);
+	}
+	return domain;
 };
 
 export const PROCESSING_URL_LIMIT = MAX_PROCESSING_URLS;

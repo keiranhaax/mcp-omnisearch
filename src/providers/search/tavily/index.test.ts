@@ -13,6 +13,42 @@ const fetch_mock = vi.fn();
 const previous_api_key = config.search.tavily.api_key;
 
 describe('TavilySearchProvider', () => {
+	it('does not turn Boolean phrase alternatives into a global exact match requirement', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(JSON.stringify({ results: [] })),
+		);
+		await new TavilySearchProvider().search({
+			query: '"cats" OR "dogs"',
+		});
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body),
+		).not.toHaveProperty('exact_match');
+	});
+	it('caps direct provider requests at twenty results', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(JSON.stringify({ results: [] })),
+		);
+		await new TavilySearchProvider().search({
+			query: 'test',
+			limit: 100,
+		});
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body).max_results,
+		).toBe(20);
+	});
+	it.each([
+		'mcp-omnisearch C++ filetype:pdf -outdated +manual intitle:guide lang:en',
+		'"cats AND dogs" OR birds NOT fish site:example.com',
+	])('preserves all unmapped query syntax in %s', async (query) => {
+		fetch_mock.mockResolvedValue(
+			new Response(JSON.stringify({ results: [] })),
+		);
+		await new TavilySearchProvider().search({ query });
+		expect(JSON.parse(fetch_mock.mock.calls[0][1].body).query).toBe(
+			query,
+		);
+	});
+
 	beforeEach(() => {
 		fetch_mock.mockReset();
 		vi.stubGlobal('fetch', fetch_mock);

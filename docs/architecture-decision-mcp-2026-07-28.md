@@ -13,6 +13,19 @@ narrow, reviewed HTTP security guard (`src/server/http_guard.ts`,
 entry `src/guard.ts`). Path B (native SDK v2 server migration) is
 rejected for this upgrade; see "Why not Path B" below.
 
+## Reliability follow-up (isolated candidate, not deployed)
+
+The original staging observations below are historical, not proof that
+the unpatched proxy has no leaks. The later reliability audit
+reproduced retained legacy stateless instances. The current candidate
+keeps Path A but adds pnpm patches for per-exchange cleanup, explicit
+legacy cancellation, validation before modern subscription
+acquisition, and cancellable concurrent stdio dispatch. The guard now
+authenticates before buffering bodies and bounds connections,
+concurrent requests, and global request rate. See `deployment.md` for
+candidate controls and verification boundaries. No production
+deployment is implied.
+
 ## Candidate and integrity metadata
 
 - Runtime toolchain: Node.js v22.23.1, Corepack pnpm 11.9.0

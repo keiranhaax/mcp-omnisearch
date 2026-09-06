@@ -148,8 +148,8 @@ export const config = {
 			api_key: FIRECRAWL_API_KEY,
 			override_url: FIRECRAWL_AGENT_URL,
 			base_url: FIRECRAWL_BASE_URL
-				? `${FIRECRAWL_BASE_URL}/v1/agent`
-				: 'https://api.firecrawl.dev/v1/agent',
+				? `${FIRECRAWL_BASE_URL}/v2/agent`
+				: 'https://api.firecrawl.dev/v2/agent',
 			timeout: 180000, // 3 minutes for agent tasks
 		},
 		firecrawl_search: {

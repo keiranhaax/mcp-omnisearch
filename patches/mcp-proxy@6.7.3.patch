@@ -1,0 +1,279 @@
+diff --git a/dist/startStdioServer-BomI-BJR.mjs b/dist/startStdioServer-BomI-BJR.mjs
+index d40cc2ee8df447d9a633e940ef59c9b4a8053925..33492c1af6e7d907d55603da117424aed3658399 100644
+--- a/dist/startStdioServer-BomI-BJR.mjs
++++ b/dist/startStdioServer-BomI-BJR.mjs
+@@ -19128,10 +19128,7 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
+ 		};
+ 		target.onclose = teardown;
+ 		try {
+-			if (onListenSubscriptions) {
+-				const listenUris = readListenSubscriptions(body);
+-				if (listenUris.length > 0) releaseSubscriptions = await onListenSubscriptions(listenUris);
+-			}
++
+ 			if (authResult && typeof server === "object" && server !== null && "updateAuth" in server && typeof server.updateAuth === "function") server.updateAuth(authResult);
+ 			if (onConnect) await onConnect(server);
+ 		} catch (error) {
+@@ -19141,8 +19138,14 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
+ 		}
+ 		return {
+ 			server,
+-			teardown
+-		};
++      teardown,
++      acquireSubscriptions: async () => {
++        if (onListenSubscriptions) {
++          const listenUris = readListenSubscriptions(body);
++          if (listenUris.length > 0) releaseSubscriptions = await onListenSubscriptions(listenUris);
++        }
++      }
++    };
+ 	};
+ 	const handler = createMcpHandler(() => {
+ 		const instance = requestContext.getStore();
+@@ -19154,7 +19157,14 @@ const createModernLeg = ({ createServer, onClose, onConnect, onListenSubscriptio
+ 			console.error("[mcp-proxy] modern handler error", error);
+ 		}
+ 	});
+-	const nodeHandler = toNodeHandler({ fetch: (request, options) => handler.fetch(request, options) });
++	const nodeHandler = toNodeHandler({ fetch: async (request, options) => {
++    const response = await handler.fetch(request, options);
++    if (response.ok) {
++      try { await requestContext.getStore()?.acquireSubscriptions(); }
++      catch (error) { await response.body?.cancel(); throw error; }
++    }
++    return response;
++  } });
+ 	return {
+ 		close: () => handler.close(),
+ 		createInstance,
+@@ -19210,6 +19220,59 @@ const reapIdleSessions = async (sessions, idleTimeout) => {
+ 		await session.transport.close();
+ 	}
+ };
++const statelessStates = new WeakMap();
++const statelessState = (owner) => {
++  let entries = statelessStates.get(owner);
++  if (!entries) { entries = new Set(); statelessStates.set(owner, entries); }
++  return entries;
++};
++
++// Stateless transports still own notification leases. Release every exchange,
++// but do not close a legacy call merely because its HTTP client disconnected.
++const handleStatelessRequest = async ({ body, createServer, enableJsonResponse, onClose, onConnect, req, res, entries }) => {
++  const transport = new NodeStreamableHTTPServerTransport({ enableJsonResponse, sessionIdGenerator: undefined });
++  const server = await createServer(req);
++  const previousOnClose = server.onclose;
++  let closed = false;
++  const teardown = () => {
++    if (closed) return;
++    closed = true;
++    previousOnClose?.();
++  };
++  server.onclose = teardown;
++  try {
++    await server.connect(transport);
++    if (onConnect) await onConnect(server);
++    let settleRequest;
++    let dispatched = false;
++    const completed = new Promise(resolve => { settleRequest = resolve; });
++    const deliver = transport.onmessage;
++    transport.onmessage = (message, extra) => {
++      if (message && "method" in message && "id" in message) dispatched = true;
++      deliver?.(message, extra);
++    };
++    const send = transport.send.bind(transport);
++    transport.send = async (message, options) => {
++      try { await send(message, options); }
++      finally { if (message && ("result" in message || "error" in message)) settleRequest(); }
++    };
++    const record = body;
++    const entry = {
++      id: record?.id, key: req.headers["x-api-key"],
++      cancel: (notification) => { transport.onmessage?.(notification); res.end(); settleRequest(); },
++    };
++    if (record?.id !== undefined && record?.method !== "initialize") entries.add(entry);
++    try {
++      await transport.handleRequest(req, res, body);
++      if (dispatched) await completed;
++    }
++    finally { entries.delete(entry); }
++  } finally {
++    await cleanupServer(server, onClose);
++    teardown();
++  }
++};
++
+ const handleStreamRequest = async ({ activeTransports, authenticate, authMiddleware, createServer, enableJsonResponse, endpoint, eventStore, eventStoreMaxEvents, maxBodySize, modernHandler, oauth, onClose, onConnect, req, res, stateless }) => {
+ 	if (req.method === "POST" && new URL(req.url, "http://localhost").pathname === endpoint) {
+ 		let body;
+@@ -19292,6 +19355,20 @@ const handleStreamRequest = async ({ activeTransports, authenticate, authMiddlew
+ 					return true;
+ 				}
+ 			}
++      if (stateless) {
++        const entries = statelessState(activeTransports);
++        const notification = body;
++        if (isJsonRpcMessage(body) && notification.method === "notifications/cancelled" && notification.id === undefined) {
++          // A shared API key identifies a principal, not a client. Never guess
++          // when concurrent clients reuse an id. Custom auth needs its own scope.
++          const matches = authenticate ? [] : [...entries].filter(entry => entry.id === notification.params?.requestId && entry.key === req.headers["x-api-key"]);
++          if (matches.length === 1) matches[0].cancel(body);
++          res.writeHead(202).end();
++          return true;
++        }
++        await handleStatelessRequest({body, createServer, enableJsonResponse, onClose, onConnect, req, res, entries});
++        return true;
++      }
+ 			if (sessionId) {
+ 				const activeTransport = activeTransports[sessionId];
+ 				if (!activeTransport) {
+diff --git a/src/startHTTPServer.ts b/src/startHTTPServer.ts
+index d28248b372c66bfd9c68cdbc294861d48af1afc0..f43dca9a590bb2d04cb2e92195d8f6832ee13386 100644
+--- a/src/startHTTPServer.ts
++++ b/src/startHTTPServer.ts
+@@ -700,6 +700,7 @@ export type ListenSubscriptionsHandler = (
+ type ModernInstance<T> = {
+   server: T;
+   teardown: () => void;
++  acquireSubscriptions: () => Promise<void>;
+ };
+ 
+ type ModernLeg<T> = {
+@@ -788,13 +789,6 @@ const createModernLeg = <T extends ServerLike>({
+     target.onclose = teardown;
+ 
+     try {
+-      if (onListenSubscriptions) {
+-        const listenUris = readListenSubscriptions(body);
+-
+-        if (listenUris.length > 0) {
+-          releaseSubscriptions = await onListenSubscriptions(listenUris);
+-        }
+-      }
+ 
+       // Same convention the 2025-era leg uses for a session's auth context;
+       // `authResult` is the consumer's own value, not an SDK `AuthInfo`.
+@@ -821,7 +815,12 @@ const createModernLeg = <T extends ServerLike>({
+       throw error;
+     }
+ 
+-    return { server, teardown };
++    return { server, teardown, acquireSubscriptions: async () => {
++      if (onListenSubscriptions) {
++        const listenUris = readListenSubscriptions(body);
++        if (listenUris.length > 0) releaseSubscriptions = await onListenSubscriptions(listenUris);
++      }
++    } };
+   };
+ 
+   const handler: McpHttpHandler = createMcpHandler(
+@@ -849,7 +848,14 @@ const createModernLeg = <T extends ServerLike>({
+   );
+ 
+   const nodeHandler = toNodeHandler({
+-    fetch: (request, options) => handler.fetch(request, options),
++    fetch: async (request, options) => {
++      const response = await handler.fetch(request, options);
++      if (response.ok) {
++        try { await requestContext.getStore()?.acquireSubscriptions(); }
++        catch (error) { await response.body?.cancel(); throw error; }
++      }
++      return response;
++    },
+   });
+ 
+   return {
+@@ -977,6 +983,70 @@ const reapIdleSessions = async <T>(
+   }
+ };
+ 
++type StatelessEntry = { id: unknown; key: string | string[] | undefined; cancel: (message: unknown) => void };
++const statelessStates = new WeakMap<object, Set<StatelessEntry>>();
++const statelessState = (owner: object): Set<StatelessEntry> => {
++  let entries = statelessStates.get(owner);
++  if (!entries) { entries = new Set(); statelessStates.set(owner, entries); }
++  return entries;
++};
++
++// Stateless transports still own notification leases. Release every exchange,
++// but do not close a legacy call merely because its HTTP client disconnected.
++const handleStatelessRequest = async <T extends ServerLike>({ body, createServer, enableJsonResponse, onClose, onConnect, req, res, entries }: {
++  entries: Set<StatelessEntry>;
++  body: unknown;
++  createServer: (req: http.IncomingMessage) => Promise<T>;
++  enableJsonResponse?: boolean;
++  onClose?: (server: T) => Promise<void>;
++  onConnect?: (server: T) => Promise<void>;
++  req: http.IncomingMessage;
++  res: http.ServerResponse;
++}) => {
++  const transport = new NodeStreamableHTTPServerTransport({ enableJsonResponse, sessionIdGenerator: undefined });
++  const server = await createServer(req);
++  const target = server as unknown as Server;
++  const previousOnClose = target.onclose;
++  let closed = false;
++  const teardown = () => {
++    if (closed) return;
++    closed = true;
++    previousOnClose?.();
++  };
++  target.onclose = teardown;
++  try {
++    await server.connect(transport);
++    if (onConnect) await onConnect(server);
++    let settleRequest!: () => void;
++    let dispatched = false;
++    const completed = new Promise<void>(resolve => { settleRequest = resolve; });
++    const deliver = transport.onmessage;
++    transport.onmessage = (message, extra) => {
++      if (message && "method" in message && "id" in message) dispatched = true;
++      deliver?.(message, extra);
++    };
++    const send = transport.send.bind(transport);
++    transport.send = async (message, options) => {
++      try { await send(message, options); }
++      finally { if (message && ("result" in message || "error" in message)) settleRequest(); }
++    };
++    const record = body as {id?: unknown; method?: string};
++    const entry = {
++      id: record?.id, key: req.headers["x-api-key"],
++      cancel: (notification: unknown) => { transport.onmessage?.(notification as Parameters<NonNullable<typeof transport.onmessage>>[0]); res.end(); settleRequest(); },
++    };
++    if (record?.id !== undefined && record?.method !== "initialize") entries.add(entry);
++    try {
++      await transport.handleRequest(req, res, body);
++      if (dispatched) await completed;
++    }
++    finally { entries.delete(entry); }
++  } finally {
++    await cleanupServer(server, onClose);
++    teardown();
++  }
++};
++
+ const handleStreamRequest = async <T extends ServerLike>({
+   activeTransports,
+   authenticate,
+@@ -1178,6 +1248,21 @@ const handleStreamRequest = async <T extends ServerLike>({
+         }
+       }
+ 
++      if (stateless) {
++        const entries = statelessState(activeTransports);
++        const notification = body as {method?: string; id?: unknown; params?: {requestId?: unknown}};
++        if (isJsonRpcMessage(body) && notification.method === "notifications/cancelled" && notification.id === undefined) {
++          // A shared API key identifies a principal, not a client. Never guess
++          // when concurrent clients reuse an id. Custom auth needs its own scope.
++          const matches = authenticate ? [] : [...entries].filter(entry => entry.id === notification.params?.requestId && entry.key === req.headers["x-api-key"]);
++          if (matches.length === 1) matches[0].cancel(body);
++          res.writeHead(202).end();
++          return true;
++        }
++        await handleStatelessRequest({body, createServer, enableJsonResponse, onClose, onConnect, req, res, entries});
++        return true;
++      }
++
+       if (sessionId) {
+         const activeTransport = activeTransports[sessionId];
+         if (!activeTransport) {

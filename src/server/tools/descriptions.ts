@@ -4,7 +4,7 @@ export const tool_descriptions = {
 	github_search:
 		'Search GitHub: find code, repositories, or users. Supports filename:, path:, repo:, user:, language:, and in:file syntax.',
 	ai_search:
-		'Answer/Research: get synthesized answers with citations. Use Exa for fast or deep research, Brave Answers as fallback, and Tavily for research.',
+		'Answer/Research: synthesized answers from Exa, Tavily, or Linkup; Brave Answers provides plain-text grounding without inline citations.',
 	web_extract:
 		'Extract/Process: read or process known URLs. Firecrawl handles scrape/summarize/crawl/map/extract/actions/search; Exa handles contents/similar; Tavily extracts.',
 	brave_llm_context:
@@ -14,7 +14,7 @@ export const tool_descriptions = {
 	brave_media_search:
 		'Media Search: find Brave image or video results with SafeSearch and country/language filters. Use only when visual media results are needed.',
 	firecrawl_agent:
-		'Autonomous Web Agent: Firecrawl agent for multi-step web data tasks. Credit-sensitive; use only when search/extract is not enough.',
+		'Autonomous Web Agent: Credit-sensitive; start a web task (default cap 100 credits), then use action=status or cancel with job_id. Repeating start creates a new paid job. Prefer search/extract for simple tasks.',
 	context_web_extract:
 		'Context.dev Web: scrape markdown/HTML/images/screenshots, crawl pages, get sitemaps, or web-search with optional markdown scraping.',
 	context_brand_intel:
@@ -45,7 +45,7 @@ export const describe_ai_search = (
 		hints.push('Exa for deep research');
 	}
 	if (available.has('brave_answers')) {
-		hints.push('Brave Answers as fallback');
+		hints.push('Brave Answers for plain-text grounded answers');
 	}
 	if (available.has('tavily_research')) {
 		hints.push('Tavily for research');
@@ -54,5 +54,5 @@ export const describe_ai_search = (
 		hints.push('Linkup for sourced answers');
 	}
 	const use = hints.length ? ` Use ${hints.join(', ')}.` : '';
-	return `Answer/Research: get synthesized answers with citations.${use}`;
+	return `Answer/Research: get synthesized answers; citation availability depends on the provider.${use}`;
 };

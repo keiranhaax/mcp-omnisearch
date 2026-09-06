@@ -6,6 +6,7 @@ import {
 	cleanup_expired_results,
 	read_result_chunk,
 	RESULT_READ_LIMIT,
+	RESULT_READ_MAX_BYTES,
 } from '../../common/result_store.js';
 
 export const register_result_read = (
@@ -15,8 +16,7 @@ export const register_result_read = (
 	server.tool(
 		{
 			name: 'result_read',
-			description:
-				'Read a paginated chunk from an oversized Omnisearch result using the opaque result_id returned by another tool. Results expire automatically.',
+			description: `Read up to ${RESULT_READ_MAX_BYTES} UTF-8 bytes by opaque result_id. Follow next_offset and next_byte_offset as byte_offset within that line. Join byte continuations directly, ordinary line pages with LF. Results expire or may be evicted.`,
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,
@@ -39,7 +39,19 @@ export const register_result_read = (
 						v.number(),
 						v.integer(),
 						v.minValue(1),
+						v.maxValue(Number.MAX_SAFE_INTEGER),
 						v.description('One-based line offset (default: 1)'),
+					),
+				),
+				byte_offset: v.optional(
+					v.pipe(
+						v.number(),
+						v.integer(),
+						v.minValue(0),
+						v.maxValue(Number.MAX_SAFE_INTEGER),
+						v.description(
+							'UTF-8 byte offset within the selected line; pass next_byte_offset unchanged (default: 0)',
+						),
 					),
 				),
 				limit: v.optional(
@@ -55,9 +67,14 @@ export const register_result_read = (
 				),
 			}),
 		},
-		async ({ result_id, offset, limit }) => {
+		async ({ result_id, offset, limit, byte_offset }) => {
 			try {
-				const chunk = read_result_chunk(result_id, offset, limit);
+				const chunk = read_result_chunk(
+					result_id,
+					offset,
+					limit,
+					byte_offset,
+				);
 				return {
 					content: [
 						{

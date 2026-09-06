@@ -1,9 +1,61 @@
-import { handle_rate_limit } from './errors.js';
+import { handle_rate_limit, safe_endpoint } from './errors.js';
+export { safe_endpoint } from './errors.js';
+import {
+	combine_request_signal,
+	throw_if_aborted,
+	with_abort_signal,
+} from './request_context.js';
 import { ErrorType, ProviderError } from './types.js';
 
 export interface HttpJsonOptions extends RequestInit {
 	expectedStatuses?: number[];
+	max_response_bytes?: number;
 }
+
+export const MAX_HTTP_RESPONSE_BYTES = 25 * 1024 * 1024;
+
+const read_bounded_body = async (
+	res: Response,
+	provider: string,
+	limit: number,
+	signal?: AbortSignal,
+): Promise<string> => {
+	if (!res.body) return '';
+	const reader = res.body.getReader();
+	const decoder = new TextDecoder();
+	const chunks: string[] = [];
+	let bytes = 0;
+	try {
+		while (true) {
+			const { done, value } = await with_abort_signal(
+				() => reader.read(),
+				signal,
+			);
+			if (done) break;
+			bytes += value.byteLength;
+			if (bytes > limit) {
+				throw new ProviderError(
+					ErrorType.PROVIDER_ERROR,
+					'Provider response exceeds byte limit',
+					provider,
+					{
+						status: res.status,
+						retryable: false,
+						cause: 'response_too_large',
+					},
+				);
+			}
+			chunks.push(decoder.decode(value, { stream: true }));
+		}
+		chunks.push(decoder.decode());
+		return chunks.join('');
+	} catch (error) {
+		void reader.cancel().catch(() => {});
+		throw error;
+	} finally {
+		reader.releaseLock();
+	}
+};
 
 const tryParseJson = (text: string) => {
 	if (!text) return undefined;
@@ -19,13 +71,28 @@ const entitlement_pattern =
 const endpoint_missing_pattern =
 	/(cannot (get|post|put|patch|delete)\s+\/|endpoint not found|route not found|unknown endpoint)/i;
 
-export const safe_endpoint = (url: string): string => {
-	try {
-		const parsed = new URL(url);
-		return `${parsed.origin}${parsed.pathname}`;
-	} catch {
-		return url.split('?')[0];
+const retry_after_details = (
+	value: string | null,
+): { reset_time?: Date; retryable?: false } => {
+	if (!value) return {};
+	const text = value.trim();
+	if (/^\d+$/.test(text)) {
+		const seconds = Number(text);
+		const now = Date.now();
+		// An unrepresentable but valid delay must disable retry, not
+		// disappear or overflow into an immediate timer.
+		if (
+			!Number.isSafeInteger(seconds) ||
+			seconds > (8_640_000_000_000_000 - now) / 1000
+		) {
+			return { retryable: false };
+		}
+		return { reset_time: new Date(now + seconds * 1000) };
 	}
+	const timestamp = /^[a-z]{3}/i.test(text) ? Date.parse(text) : NaN;
+	return Number.isFinite(timestamp)
+		? { reset_time: new Date(timestamp) }
+		: {};
 };
 
 export const http_json = async <T = any>(
@@ -33,8 +100,43 @@ export const http_json = async <T = any>(
 	url: string,
 	options: HttpJsonOptions = {},
 ): Promise<T> => {
-	const res = await fetch(url, options);
-	const raw = await res.text();
+	const max_response_bytes =
+		options.max_response_bytes ?? MAX_HTTP_RESPONSE_BYTES;
+	if (
+		!Number.isSafeInteger(max_response_bytes) ||
+		max_response_bytes < 1 ||
+		max_response_bytes > MAX_HTTP_RESPONSE_BYTES
+	) {
+		throw new RangeError(
+			'max_response_bytes must be between 1 byte and 25 MiB',
+		);
+	}
+	const signal = combine_request_signal(options.signal);
+	let res: Response;
+	let raw: string;
+	try {
+		res = await with_abort_signal(
+			() => fetch(url, { ...options, signal }),
+			signal,
+		);
+		raw = await read_bounded_body(
+			res,
+			provider,
+			max_response_bytes,
+			signal,
+		);
+	} catch (error) {
+		throw_if_aborted(signal);
+		if (error instanceof TypeError) {
+			throw new ProviderError(
+				ErrorType.API_ERROR,
+				'Network request failed',
+				provider,
+				{ retryable: true, cause: 'network' },
+			);
+		}
+		throw error;
+	}
 	const body = tryParseJson(raw);
 
 	const okOrExpected =
@@ -63,7 +165,7 @@ export const http_json = async <T = any>(
 			status: res.status,
 			url: safe_endpoint(url),
 			method: (options.method || 'GET').toUpperCase(),
-			response: message,
+			...retry_after_details(res.headers.get('Retry-After')),
 		};
 
 		switch (res.status) {
@@ -82,7 +184,7 @@ export const http_json = async <T = any>(
 					details,
 				);
 			case 429:
-				handle_rate_limit(provider);
+				handle_rate_limit(provider, details.reset_time, details);
 			default:
 				if (
 					res.status === 404 &&
@@ -113,13 +215,20 @@ export const http_json = async <T = any>(
 				}
 				throw new ProviderError(
 					ErrorType.API_ERROR,
-					`Unexpected error: ${message}`,
+					`Provider rejected the request (HTTP ${res.status})`,
 					provider,
 					details,
 				);
 		}
 	}
 
-	// Prefer JSON if parseable, otherwise return as any
-	return (body as T) ?? (raw as unknown as T);
+	if (body === undefined) {
+		throw new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'Provider returned invalid JSON',
+			provider,
+			{ status: res.status, retryable: false, cause: 'invalid_json' },
+		);
+	}
+	return body as T;
 };

@@ -8,6 +8,7 @@ import { parse_provider_response } from '../../../common/provider_response.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	apply_search_operators,
+	build_query_with_operators,
 	parse_search_operators,
 } from '../../../common/search_operators.js';
 import {
@@ -64,22 +65,50 @@ export class TavilySearchProvider implements SearchProvider {
 
 		const parsed_query = parse_search_operators(params.query);
 		const search_params = apply_search_operators(parsed_query);
+		// Native API filters are global constraints. Do not hoist them out
+		// of Boolean/grouped expressions, or collapse repeated scalars.
+		const can_map =
+			!parsed_query.operators.some((op) => op.type === 'boolean') &&
+			!/[()]/.test(params.query);
+		const mapped_types = parsed_query.operators
+			.filter(
+				(op) =>
+					can_map &&
+					(op.type === 'site' ||
+						op.type === 'exclude_site' ||
+						(['before', 'after', 'location'].includes(op.type) &&
+							parsed_query.operators.filter(
+								(other) => other.type === op.type,
+							).length === 1)),
+			)
+			.map((op) => op.type);
 
 		const search_request = async () => {
 			try {
 				// Merge operator-extracted domains with explicit params
 				const include_domains = [
 					...(params.include_domains ?? []),
-					...(search_params.include_domains ?? []),
+					...(mapped_types.includes('site')
+						? (search_params.include_domains ?? [])
+						: []),
 				];
 				const exclude_domains = [
 					...(params.exclude_domains ?? []),
-					...(search_params.exclude_domains ?? []),
+					...(mapped_types.includes('exclude_site')
+						? (search_params.exclude_domains ?? [])
+						: []),
 				];
 
 				const request_body: Record<string, any> = {
-					query: sanitize_query(search_params.query),
-					max_results: params.limit ?? 5,
+					query: sanitize_query(
+						build_query_with_operators(
+							search_params,
+							undefined,
+							undefined,
+							{ exclude_operators: mapped_types },
+						),
+					),
+					max_results: Math.min(params.limit ?? 5, 20),
 					include_domains:
 						include_domains.length > 0 ? include_domains : [],
 					exclude_domains:
@@ -89,12 +118,18 @@ export class TavilySearchProvider implements SearchProvider {
 				};
 
 				// Map date operators to Tavily's start_date/end_date
-				if (search_params.date_after) {
+				if (
+					search_params.date_after &&
+					mapped_types.includes('after')
+				) {
 					request_body.start_date = normalize_tavily_date(
 						search_params.date_after,
 					);
 				}
-				if (search_params.date_before) {
+				if (
+					search_params.date_before &&
+					mapped_types.includes('before')
+				) {
 					request_body.end_date = normalize_tavily_date(
 						search_params.date_before,
 					);
@@ -102,20 +137,18 @@ export class TavilySearchProvider implements SearchProvider {
 
 				// Map exact phrases to Tavily's exact_match
 				if (
+					can_map &&
 					search_params.exact_phrases &&
 					search_params.exact_phrases.length > 0
 				) {
 					request_body.exact_match = true;
-					// Re-add quoted phrases to the query for Tavily
-					const exact_query_parts = search_params.exact_phrases.map(
-						(phrase) => `"${phrase}"`,
-					);
-					request_body.query =
-						`${request_body.query} ${exact_query_parts.join(' ')}`.trim();
 				}
 
 				// Map location operator to Tavily's country param
-				if (search_params.location) {
+				if (
+					search_params.location &&
+					mapped_types.includes('location')
+				) {
 					request_body.country = normalize_tavily_country(
 						search_params.location,
 					);

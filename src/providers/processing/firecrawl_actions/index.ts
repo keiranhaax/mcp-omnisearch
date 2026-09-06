@@ -133,7 +133,9 @@ export class FirecrawlActionsProvider implements ProcessingProvider {
 				if (
 					!actions_data.data.markdown &&
 					!actions_data.data.html &&
-					!actions_data.data.rawHtml
+					!actions_data.data.rawHtml &&
+					!actions_data.data.screenshot &&
+					!actions_data.data.actions?.screenshots?.length
 				) {
 					throw new ProviderError(
 						ErrorType.PROVIDER_ERROR,
@@ -199,6 +201,7 @@ export class FirecrawlActionsProvider implements ProcessingProvider {
 						successful_extractions: 1,
 						extract_depth,
 						screenshot: actions_data.data.screenshot,
+						screenshots: actions_data.data.actions?.screenshots,
 					},
 					source_provider: this.name,
 				};

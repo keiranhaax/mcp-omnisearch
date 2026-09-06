@@ -1,4 +1,11 @@
+import * as v from 'valibot';
+import { parse_provider_response } from '../../../common/provider_response.js';
 import { http_json } from '../../../common/http.js';
+import {
+	combine_request_signal,
+	with_abort_signal,
+	throw_if_aborted,
+} from '../../../common/request_context.js';
 import {
 	BaseSearchParams,
 	ErrorType,
@@ -10,30 +17,35 @@ import {
 	handle_provider_error,
 	sanitize_query,
 } from '../../../common/errors.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import { delay, is_retryable_error } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
-interface TavilyResearchStartResponse {
-	status: string;
-	request_id: string;
-	input: string;
-	model: string;
-	response_time: number;
-}
-
-interface TavilyResearchPollResponse {
-	status: string;
-	request_id: string;
-	response_time: number;
-	content?: string;
-	sources?: Array<{
-		title?: string;
-		url: string;
-		content?: string;
-		raw_content?: string;
-	}>;
-}
+const research_start_schema = v.object({
+	status: v.picklist([
+		'pending',
+		'in_progress',
+		'completed',
+		'failed',
+		'error',
+	]),
+	request_id: v.pipe(v.string(), v.minLength(1)),
+});
+const research_poll_schema = v.object({
+	...research_start_schema.entries,
+	response_time: v.optional(v.union([v.number(), v.string()])),
+	content: v.optional(v.string()),
+	sources: v.optional(
+		v.array(
+			v.object({
+				title: v.optional(v.string()),
+				url: v.string(),
+				content: v.optional(v.string()),
+				raw_content: v.optional(v.string()),
+			}),
+		),
+	),
+});
 
 export class TavilyResearchProvider implements SearchProvider {
 	name = 'tavily_research';
@@ -52,31 +64,32 @@ export class TavilyResearchProvider implements SearchProvider {
 				const timeout = config.ai_response.tavily_research.timeout;
 				const deadline = Date.now() + timeout;
 
-				const start_response =
-					await http_json<TavilyResearchStartResponse>(
-						this.name,
-						`${base_url}/research`,
-						{
-							method: 'POST',
-							headers: {
-								Authorization: `Bearer ${api_key}`,
-								'Content-Type': 'application/json',
-							},
-							body: JSON.stringify({
-								input: sanitize_query(params.query),
-								model: 'auto',
-							}),
-							signal: AbortSignal.timeout(Math.min(30000, timeout)),
+				const start_data = await http_json(
+					this.name,
+					`${base_url}/research`,
+					{
+						method: 'POST',
+						headers: {
+							Authorization: `Bearer ${api_key}`,
+							'Content-Type': 'application/json',
 						},
-					);
+						body: JSON.stringify({
+							input: sanitize_query(params.query),
+							model: 'auto',
+							stream: false,
+						}),
+						signal: AbortSignal.any([
+							signal,
+							AbortSignal.timeout(Math.min(30000, timeout)),
+						]),
+					},
+				);
 
-				if (!start_response.request_id) {
-					throw new ProviderError(
-						ErrorType.PROVIDER_ERROR,
-						'No request ID returned from research API',
-						this.name,
-					);
-				}
+				const start_response = parse_provider_response(
+					this.name,
+					research_start_schema,
+					start_data,
+				);
 
 				const request_id = start_response.request_id;
 				const poll_interval = 5000;
@@ -87,35 +100,54 @@ export class TavilyResearchProvider implements SearchProvider {
 						break;
 					}
 
-					await new Promise((resolve) =>
-						setTimeout(
-							resolve,
-							Math.min(poll_interval, remaining_before_wait),
-						),
+					await delay(
+						Math.min(poll_interval, remaining_before_wait),
+						signal,
 					);
+					throw_if_aborted(signal);
+					if (Date.now() >= deadline) break;
 
-					let poll_result: TavilyResearchPollResponse;
+					let poll_result: v.InferOutput<typeof research_poll_schema>;
 					try {
-						poll_result = await http_json<TavilyResearchPollResponse>(
+						const poll_data = await http_json(
 							this.name,
-							`${base_url}/research/${request_id}`,
+							`${base_url}/research/${encodeURIComponent(request_id)}`,
 							{
 								method: 'GET',
 								headers: {
 									Authorization: `Bearer ${api_key}`,
 								},
-								signal: AbortSignal.timeout(
-									Math.min(15000, deadline - Date.now()),
-								),
+								signal: AbortSignal.any([
+									signal,
+									AbortSignal.timeout(
+										Math.min(15000, deadline - Date.now()),
+									),
+								]),
 							},
 						);
+						poll_result = parse_provider_response(
+							this.name,
+							research_poll_schema,
+							poll_data,
+						);
 					} catch (error) {
-						if (
-							error instanceof ProviderError &&
-							(error.type === ErrorType.API_ERROR ||
-								error.type === ErrorType.INVALID_INPUT)
-						) {
+						if (!is_retryable_error(error)) {
 							throw error;
+						}
+						const reset_time =
+							error instanceof ProviderError
+								? error.details?.reset_time
+								: undefined;
+						if (
+							reset_time instanceof Date &&
+							Number.isFinite(reset_time.getTime())
+						) {
+							const wait = Math.max(
+								0,
+								reset_time.getTime() - Date.now(),
+							);
+							if (wait >= deadline - Date.now()) throw error;
+							await delay(wait, signal);
 						}
 						continue;
 					}
@@ -126,6 +158,7 @@ export class TavilyResearchProvider implements SearchProvider {
 								ErrorType.PROVIDER_ERROR,
 								'Research completed but no content returned',
 								this.name,
+								{ retryable: false },
 							);
 						}
 
@@ -180,10 +213,9 @@ export class TavilyResearchProvider implements SearchProvider {
 					) {
 						throw new ProviderError(
 							ErrorType.PROVIDER_ERROR,
-							`Research task failed${
-								poll_result.content ? `: ${poll_result.content}` : ''
-							}`,
+							'Research task failed',
 							this.name,
+							{ retryable: false },
 						);
 					}
 				}
@@ -192,12 +224,16 @@ export class TavilyResearchProvider implements SearchProvider {
 					ErrorType.PROVIDER_ERROR,
 					'Research timed out — try a simpler query',
 					this.name,
+					{ retryable: false },
 				);
 			} catch (error) {
 				handle_provider_error(error, this.name, 'run deep research');
 			}
 		};
 
-		return retry_with_backoff(research_request, { max_retries: 0 });
+		const signal = combine_request_signal(
+			AbortSignal.timeout(config.ai_response.tavily_research.timeout),
+		)!;
+		return with_abort_signal(research_request, signal);
 	}
 }

@@ -5,6 +5,32 @@ import { config } from '../config/env.js';
 
 export type ContextDevParams = Record<string, unknown>;
 
+const validate_response = <T>(body: T): T => {
+	if (body === null || typeof body !== 'object') {
+		throw new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'Context.dev returned an invalid response shape',
+			'context_dev',
+		);
+	}
+	if (!Array.isArray(body)) {
+		const envelope = body as Record<string, unknown>;
+		if (
+			envelope.success === false ||
+			envelope.ok === false ||
+			(typeof envelope.status === 'string' &&
+				/^(error|failed|failure)$/i.test(envelope.status))
+		) {
+			throw new ProviderError(
+				ErrorType.PROVIDER_ERROR,
+				'Context.dev reported an application failure',
+				'context_dev',
+			);
+		}
+	}
+	return body;
+};
+
 const append_param = (
 	params: URLSearchParams,
 	key: string,
@@ -43,14 +69,20 @@ export const context_dev_get = async <T>(
 	params?: ContextDevParams,
 ): Promise<T> => {
 	const api_key = context_api_key();
-	return http_json<T>('context_dev', context_url(path, params), {
-		method: 'GET',
-		headers: {
-			Authorization: `Bearer ${api_key}`,
-			Accept: 'application/json',
+	const result = await http_json<T>(
+		'context_dev',
+		context_url(path, params),
+		{
+			method: 'GET',
+			headers: {
+				Authorization: `Bearer ${api_key}`,
+				Accept: 'application/json',
+			},
+			max_response_bytes: 8 * 1024 * 1024,
+			signal: AbortSignal.timeout(config.search.context_dev.timeout),
 		},
-		signal: AbortSignal.timeout(config.search.context_dev.timeout),
-	});
+	);
+	return validate_response(result);
 };
 
 export const context_dev_post = async <T>(
@@ -58,16 +90,22 @@ export const context_dev_post = async <T>(
 	body: ContextDevParams,
 ): Promise<T> => {
 	const api_key = context_api_key();
-	return http_json<T>('context_dev', context_url(path), {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${api_key}`,
-			'Content-Type': 'application/json',
-			Accept: 'application/json',
+	const result = await http_json<T>(
+		'context_dev',
+		context_url(path),
+		{
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${api_key}`,
+				'Content-Type': 'application/json',
+				Accept: 'application/json',
+			},
+			body: JSON.stringify(body),
+			max_response_bytes: 8 * 1024 * 1024,
+			signal: AbortSignal.timeout(config.search.context_dev.timeout),
 		},
-		body: JSON.stringify(body),
-		signal: AbortSignal.timeout(config.search.context_dev.timeout),
-	});
+	);
+	return validate_response(result);
 };
 
 export const require_one = (

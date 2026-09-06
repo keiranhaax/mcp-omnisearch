@@ -1,8 +1,10 @@
 import {
 	chmodSync,
+	closeSync,
 	existsSync,
 	mkdirSync,
-	readFileSync,
+	openSync,
+	readSync,
 	readdirSync,
 	statSync,
 	unlinkSync,
@@ -19,6 +21,8 @@ const DEFAULT_MAX_RESULT_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_STORE_BYTES = 256 * 1024 * 1024;
 const MAX_CONFIGURED_BYTES = 1024 * 1024 * 1024;
 const MAX_READ_LINES = 500;
+// Leave room for JSON escaping and the tool envelope, not just text.
+const MAX_READ_BYTES = 12000;
 const RESULT_ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -63,6 +67,9 @@ const get_max_store_bytes = () =>
 		DEFAULT_MAX_STORE_BYTES,
 	);
 
+export const get_result_storage_limit = () =>
+	Math.min(get_max_result_bytes(), get_max_store_bytes());
+
 const ensure_result_dir = () => {
 	const result_dir = get_result_dir();
 	mkdirSync(result_dir, { recursive: true, mode: 0o700 });
@@ -86,8 +93,10 @@ export interface StoredResult {
 export interface ResultChunk extends StoredResult {
 	offset: number;
 	limit: number;
+	byte_offset: number;
 	content: string;
 	next_offset?: number;
+	next_byte_offset?: number;
 }
 
 export const cleanup_expired_results = (now = Date.now()): number => {
@@ -185,8 +194,9 @@ export const read_result_chunk = (
 	result_id: string,
 	offset = 1,
 	limit = 200,
+	byte_offset = 0,
 ): ResultChunk => {
-	if (!Number.isInteger(offset) || offset < 1) {
+	if (!Number.isSafeInteger(offset) || offset < 1) {
 		throw result_error('Offset must be a positive integer');
 	}
 	if (
@@ -196,6 +206,11 @@ export const read_result_chunk = (
 	) {
 		throw result_error(
 			`Limit must be an integer between 1 and ${MAX_READ_LINES}`,
+		);
+	}
+	if (!Number.isSafeInteger(byte_offset) || byte_offset < 0) {
+		throw result_error(
+			'Byte offset must be a non-negative safe integer',
 		);
 	}
 
@@ -211,20 +226,84 @@ export const read_result_chunk = (
 		throw result_error('Result not found or expired');
 	}
 
-	const text = readFileSync(path, 'utf8');
-	const lines = text.length === 0 ? [] : text.split('\n');
-	const start = offset - 1;
-	const end = Math.min(start + limit, lines.length);
-
-	return {
-		result_id,
-		offset,
-		limit,
-		content: lines.slice(start, end).join('\n'),
-		total_lines: lines.length,
-		next_offset: end < lines.length ? end + 1 : undefined,
-		expires_at: new Date(expires_at_ms).toISOString(),
-	};
+	const fd = openSync(path, 'r');
+	try {
+		// Scan legacy files in bounded blocks: no full-file read or line array.
+		const scan = Buffer.alloc(16384);
+		let total_lines = stats.size === 0 ? 0 : 1;
+		let line_start = offset === 1 ? 0 : undefined;
+		let line_end = stats.size;
+		let position = 0;
+		let count: number;
+		while (
+			(count = readSync(fd, scan, 0, scan.length, position)) > 0
+		) {
+			for (
+				let i = scan.indexOf(10);
+				i >= 0 && i < count;
+				i = scan.indexOf(10, i + 1)
+			) {
+				if (total_lines === offset) line_end = position + i;
+				total_lines++;
+				if (total_lines === offset) line_start = position + i + 1;
+			}
+			position += count;
+		}
+		if (byte_offset > line_end - (line_start ?? stats.size)) {
+			throw result_error('Byte offset exceeds the selected line');
+		}
+		const start = (line_start ?? stats.size) + byte_offset;
+		const page = Buffer.alloc(MAX_READ_BYTES + 4);
+		const available = readSync(fd, page, 0, page.length, start);
+		if (
+			byte_offset > 0 &&
+			available > 0 &&
+			(page[0] & 0xc0) === 0x80
+		) {
+			throw result_error(
+				'Byte offset must be on a UTF-8 character boundary',
+			);
+		}
+		let end = Math.min(available, MAX_READ_BYTES);
+		// The first excluded byte must not be a UTF-8 continuation byte.
+		while (end < available && (page[end] & 0xc0) === 0x80) end--;
+		let newlines = 0;
+		let last_newline = -1;
+		let next_offset: number | undefined;
+		let next_byte_offset: number | undefined;
+		for (let i = 0; i <= end && i < available; i++) {
+			if (page[i] !== 10) continue;
+			if (newlines + 1 === limit) {
+				// Preserve old line-offset pages: separator LF is omitted.
+				end = i;
+				next_offset = offset + limit;
+				break;
+			}
+			if (i < end) {
+				newlines++;
+				last_newline = i;
+			}
+		}
+		if (next_offset === undefined && start + end < stats.size) {
+			next_offset = offset + newlines;
+			next_byte_offset =
+				last_newline < 0 ? byte_offset + end : end - last_newline - 1;
+		}
+		return {
+			result_id,
+			offset,
+			limit,
+			byte_offset,
+			content: page.toString('utf8', 0, end),
+			total_lines,
+			next_offset,
+			next_byte_offset,
+			expires_at: new Date(expires_at_ms).toISOString(),
+		};
+	} finally {
+		closeSync(fd);
+	}
 };
 
 export const RESULT_READ_LIMIT = MAX_READ_LINES;
+export const RESULT_READ_MAX_BYTES = MAX_READ_BYTES;

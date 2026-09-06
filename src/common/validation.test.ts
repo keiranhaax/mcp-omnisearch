@@ -48,6 +48,28 @@ describe('is_valid_url', () => {
 		expect(is_valid_url('http://docs.example.com')).toBe(true);
 	});
 
+	it('rejects non-public IPv6 ranges including multicast and site-local', () => {
+		for (const host of [
+			'ff02::1',
+			'fec0::1',
+			'fe80::1234',
+			'::ffff:7f00:1',
+			'64:ff9b::a00:1',
+			'100::1',
+			'2001::1',
+			'2002:a00:1::',
+			'3fff::1',
+		]) {
+			expect(is_valid_url(`https://[${host}]`), host).toBe(false);
+		}
+		for (const host of [
+			'2001:4860:4860::8888',
+			'2606:4700:4700::1111',
+		]) {
+			expect(is_valid_url(`https://[${host}]`), host).toBe(true);
+		}
+	});
+
 	it('rejects malformed, non-HTTP, and credential-bearing URLs', () => {
 		expect(is_valid_url('not-a-url')).toBe(false);
 		expect(is_valid_url('file:///etc/passwd')).toBe(false);
@@ -90,6 +112,18 @@ describe('validate_processing_urls', () => {
 		).toEqual(['https://example.com', 'https://kit.svelte.dev']);
 	});
 
+	it.each([
+		'file:///private/SECRET',
+		'data:text/plain,SECRET',
+		'https://localhost/path\nSECRET',
+	])('does not echo rejected URL input: %s', (value) => {
+		expect(() =>
+			validate_processing_urls(value, 'fixture'),
+		).toThrowError(
+			'Invalid URL provided; use a public HTTP(S) URL without credentials',
+		);
+	});
+
 	it('throws a provider error for invalid URLs', () => {
 		expect(() =>
 			validate_processing_urls(
@@ -100,7 +134,8 @@ describe('validate_processing_urls', () => {
 			expect.objectContaining({
 				type: ErrorType.INVALID_INPUT,
 				provider: 'firecrawl',
-				message: 'Invalid URL provided: nope',
+				message:
+					'Invalid URL provided; use a public HTTP(S) URL without credentials',
 			}),
 		);
 	});

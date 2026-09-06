@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import {
 	firecrawl_poll_status_schema,
+	create_firecrawl_budget,
 	make_firecrawl_request,
 	poll_firecrawl_job,
 	validate_firecrawl_response,
@@ -18,6 +19,8 @@ import {
 	validate_processing_urls,
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
+import { http_json } from '../../../common/http.js';
+import { parse_provider_response } from '../../../common/provider_response.js';
 
 const firecrawl_crawl_start_schema = v.object({
 	success: v.boolean(),
@@ -31,6 +34,7 @@ const firecrawl_crawl_status_schema = v.object({
 	status: firecrawl_poll_status_schema,
 	total: v.optional(v.number()),
 	completed: v.optional(v.number()),
+	next: v.nullish(v.string()),
 	data: v.optional(
 		v.array(
 			v.object({
@@ -90,6 +94,9 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 				this.name,
 			);
 
+			const budget = create_firecrawl_budget(
+				config.processing.firecrawl_crawl.timeout,
+			);
 			try {
 				// Start the crawl
 				const crawl_data = await make_firecrawl_request(
@@ -107,6 +114,7 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 					},
 					config.processing.firecrawl_crawl.timeout,
 					firecrawl_crawl_start_schema,
+					budget.signal,
 				);
 
 				validate_firecrawl_response(
@@ -115,19 +123,82 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 					'Error starting crawl',
 				);
 
+				const status_url = `${config.processing.firecrawl_crawl.base_url}/${encodeURIComponent(crawl_data.id)}`;
 				// Poll for crawl completion
 				const status_data = await poll_firecrawl_job(
 					{
 						provider_name: this.name,
-						status_url: `${config.processing.firecrawl_crawl.base_url}/${crawl_data.id}`,
+						status_url,
 						api_key,
 						max_attempts: 20,
 						poll_interval: 5000,
 						timeout: 30000,
+						signal: budget.signal,
 					},
 					firecrawl_crawl_status_schema,
 				);
 
+				const pages = [...(status_data.data ?? [])];
+				let next = status_data.next ?? null;
+				let page_count = 1;
+				while (next) {
+					let continuation: URL;
+					try {
+						continuation = new URL(next, status_url);
+					} catch {
+						throw new ProviderError(
+							ErrorType.PROVIDER_ERROR,
+							'Invalid crawl continuation URL',
+							this.name,
+							{ retryable: false },
+						);
+					}
+					const expected = new URL(status_url);
+					if (
+						continuation.origin !== expected.origin ||
+						continuation.pathname !== expected.pathname ||
+						continuation.username ||
+						continuation.password ||
+						continuation.hash
+					) {
+						throw new ProviderError(
+							ErrorType.PROVIDER_ERROR,
+							'Unsafe crawl continuation URL',
+							this.name,
+							{ retryable: false },
+						);
+					}
+					next = continuation.href;
+					if (page_count >= 10) break;
+					const raw = await http_json(this.name, next, {
+						method: 'GET',
+						headers: { Authorization: `Bearer ${api_key}` },
+						signal: budget.signal,
+						redirect: 'error',
+					});
+					const page = parse_provider_response(
+						this.name,
+						firecrawl_crawl_status_schema,
+						raw,
+					);
+					validate_firecrawl_response(
+						page,
+						this.name,
+						'Crawl pagination failed',
+					);
+					if (page.status !== 'completed') {
+						throw new ProviderError(
+							ErrorType.PROVIDER_ERROR,
+							'Crawl pagination did not complete',
+							this.name,
+							{ retryable: false },
+						);
+					}
+					pages.push(...(page.data ?? []));
+					page_count++;
+					next = page.next ?? null;
+				}
+				status_data.data = pages;
 				// Verify we have data
 				if (!status_data.data || status_data.data.length === 0) {
 					throw new ProviderError(
@@ -192,7 +263,14 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 						word_count,
 						failed_urls:
 							failed_urls.length > 0 ? failed_urls : undefined,
-						urls_processed: status_data.data.length,
+						urls_processed:
+							status_data.completed ?? status_data.data.length,
+						total: status_data.total,
+						completed: status_data.completed,
+						returned_pages: status_data.data.length,
+						truncated: next !== null,
+						next,
+						truncation_reason: next ? 'page_limit' : undefined,
 						successful_extractions: successful_pages.length,
 						extract_depth,
 					},
@@ -200,6 +278,8 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 				};
 			} catch (error) {
 				handle_provider_error(error, this.name, 'crawl website');
+			} finally {
+				budget.dispose();
 			}
 		};
 

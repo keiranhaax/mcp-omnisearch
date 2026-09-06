@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import {
 	make_firecrawl_request,
+	validate_firecrawl_formats,
 	validate_firecrawl_response,
 } from '../../../common/firecrawl_utils.js';
 import {
@@ -41,7 +42,7 @@ export interface FirecrawlSearchOptions {
 	};
 }
 
-const firecrawl_web_result_schema = v.object({
+const firecrawl_web_result_schema = v.looseObject({
 	url: v.string(),
 	title: v.optional(v.string()),
 	markdown: v.optional(v.string()),
@@ -61,7 +62,7 @@ const firecrawl_image_result_schema = v.object({
 	position: v.optional(v.number()),
 });
 
-const firecrawl_news_result_schema = v.object({
+const firecrawl_news_result_schema = v.looseObject({
 	url: v.string(),
 	title: v.optional(v.string()),
 	snippet: v.optional(v.string()),
@@ -218,6 +219,11 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 
 		const search_options = normalize_options(options);
 		assert_domain_filters(search_options, this.name);
+		if (search_options.scrapeOptions?.formats?.length !== 0)
+			validate_firecrawl_formats(
+				search_options.scrapeOptions?.formats,
+				this.name,
+			);
 
 		const search_request = async () => {
 			const api_key = validate_api_key(
@@ -295,6 +301,7 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 					raw_contents,
 					metadata: {
 						word_count,
+						documents: { web, images, news },
 						urls_processed: total_results,
 						successful_extractions: total_results,
 						extract_depth,

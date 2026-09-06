@@ -1,9 +1,14 @@
 # Production deployment: MCP 2026-07-28 via pinned proxy (Path A)
 
-This fork runs in production on `vnic-keiran` behind a narrow HTTP
-security guard. This document is the reproducible runbook for that
-topology. The architecture decision and full staging evidence live in
-`docs/architecture-decision-mcp-2026-07-28.md`.
+This runbook describes the native guard/proxy topology and the
+isolated reliability candidate. **The candidate changes have not been
+deployed.** Historical production observations and original staging
+evidence are in `docs/architecture-decision-mcp-2026-07-28.md`;
+recheck the live checkout, process owner, and endpoints before any
+cutover.
+
+The candidate was exercised on Node.js 22.23.2 with Corepack pnpm
+11.9.0. The table below describes the original deployment baseline.
 
 ## Versions
 
@@ -25,7 +30,7 @@ untouched as the rollback runtime; production no longer executes it.
 client
   -> http_guard (100.84.79.102:8000)      # src/guard.ts, dist/guard.js
   -> mcp-proxy@6.7.3 (127.0.0.1:8002)     # loopback only, spawned child
-  -> node dist/index.js (stdio)           # tmcp registration, unchanged
+  -> node dist/index.js (stdio)           # tmcp registration layer
 ```
 
 PM2 manages exactly one foreground process (`start-server.sh` ->
@@ -35,7 +40,8 @@ stdio server, and signals propagate down the chain.
 ## Protocol support
 
 - Modern `2026-07-28`: full envelope validation
-  (`io.modelcontextprotocol/protocolVersion` +
+  (`io.modelcontextprotocol/protocolVersion`,
+  `io.modelcontextprotocol/clientInfo`, and
   `io.modelcontextprotocol/clientCapabilities` in `params._meta`),
   `MCP-Protocol-Version` and `Mcp-Method` headers required.
 - Legacy `2025-11-25`: stateless streamable HTTP on `/mcp`, no session
@@ -52,16 +58,23 @@ stdio server, and signals propagate down the chain.
   Origin (non-browser clients) is allowed. No CORS headers are ever
   emitted.
 - Routes: `POST /mcp` and `GET /ping` only. Everything else 404/405.
-- Body: 4 MB pre-dispatch bound (declared and chunked), 30 s intake
-  deadline; the proxy enforces the same bound again downstream.
+- Body: 4 MiB pre-dispatch bound (declared and chunked), 30 s intake
+  deadline; the proxy enforces the same bound again downstream. Slow
+  uploads receive 408 before their socket closes. `/ping` cannot carry
+  a body. JSON-RPC batches are rejected before forwarding.
+- Global bounds: 256 connections, 64 concurrent HTTP requests, and 600
+  requests per 60-second window by default. These are shared
+  instance-wide limits, not per-client quotas. Rate and concurrency
+  rejection returns 429 with `Retry-After`; raw connection overflow
+  closes excess sockets. Authentication failures and health requests
+  also consume the global rate window.
 - `#2589` guard: a modern envelope without `MCP-Protocol-Version` gets
   400 with JSON-RPC `-32020`; legacy no-envelope requests pass.
-- Authentication stays with the proxy (constant-time `X-API-Key`
-  comparison). The guard never inspects the key at request time; it
-  hands `MCP_API_KEY` to the spawned proxy as `MCP_PROXY_API_KEY` in
-  the child environment, keeping it out of `/proc/*/cmdline`. Caddy
-  translates `Authorization: Bearer` to `X-API-Key` and redacts both
-  from logs.
+- The candidate authenticates `X-API-Key` in constant time in the
+  guard before buffering MCP bodies, and again in the proxy. The
+  launcher passes `MCP_API_KEY` to the proxy as `MCP_PROXY_API_KEY` in
+  its environment, not on the command line. The existing Caddy
+  Bearer-to-key translation is unchanged. Do not log either header.
 
 ## Ingress paths
 
@@ -86,41 +99,126 @@ allowlist of variables through `env -i`. Guard settings:
 The launcher fails closed on a wildcard `BIND_HOST` (the guard needs
 an explicit address to build the allowlist).
 
+Candidate controls, all positive integers and passed through the
+launcher allowlist:
+
+- `GUARD_MAX_BODY_BYTES`: 4194304.
+- `GUARD_BODY_READ_TIMEOUT_MS`: 30000.
+- `GUARD_MAX_CONNECTIONS`: 256.
+- `GUARD_MAX_INFLIGHT_REQUESTS`: 64.
+- `GUARD_RATE_LIMIT_REQUESTS`: 600.
+- `GUARD_RATE_LIMIT_WINDOW_MS`: 60000.
+
+`pnpm-workspace.yaml` declares patches for `mcp-proxy@6.7.3`,
+`@tmcp/transport-stdio@0.4.3`, and `tmcp@1.19.4`; their hashes and
+package snapshots are locked. The proxy patch covers source and the
+published runtime bundle. A fresh frozen install must pass the
+transport tests, not rely on a previously edited `node_modules`.
+
+Legacy HTTP disconnects do not mean explicit cancellation. A
+`notifications/cancelled` request is routed only to an unambiguous
+in-flight ID under the same API key. Concurrent ID collisions are
+ignored rather than cancelling an arbitrary caller; a shared key is
+one security principal, not per-client isolation. Custom-auth
+stateless cancellation is intentionally not routed by this patch.
+Modern subscriptions acquire upstream leases only after SDK validation
+succeeds. Stdio forwards cancellation into provider requests.
+
 ## Verification commands
 
-Staging (worktree, port 8001):
+Run these in the isolated candidate worktree, never the live checkout:
 
 ```bash
-/home/ubuntu/worktrees/mcp-omnisearch-mcp-2026/staging/run-staging.sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm run check
+corepack pnpm test
+corepack pnpm run build
+corepack pnpm run test:smoke
+python3 -B -m unittest discover -s docker -p 'test_*.py' -v
+shellcheck start-server.sh
+git diff --check
 ```
 
-Direct production probes (never print the key):
+The smoke script starts and tears down its own loopback-only guard,
+proxy, and stdio server using random unused ports, a temporary home
+and result store, fixture credentials, and blocked provider fetches.
+It checks ping, authentication, Host/Origin/routes, both protocol
+eras, 14 tools with all fixture providers enabled, modern discovery,
+resource-template reads, lossless UTF-8 pagination, envelope/header
+mismatch rejection, batch rejection, and invalid-budget rejection. No
+provider job is created. Real configured deployments may expose fewer
+tools; fixture discovery is not a live-provider entitlement test.
+
+The Docker launcher/Compose tests do not require a daemon. Image build
+and real MCPO runtime checks are separate gates and remain unverified
+when Docker is unavailable; do not start a system daemon just to make
+this check pass:
 
 ```bash
-key=$(grep -E '^MCP_API_KEY=' /opt/mcp-omnisearch/.env | head -1 | cut -d= -f2- | tr -d "\"'")
-curl -sS http://100.84.79.102:8000/ping
-curl -sS -X POST http://100.84.79.102:8000/mcp \
-  -H "X-API-Key: $key" -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"elicitation":{},"roots":{},"sampling":{}}}}}'
+docker build --check .
 ```
 
-Public path and Hermes:
+Read-only production health probes (not deployment authorization):
 
 ```bash
-curl -sS https://mcp.keiranh.cloud/omnisearch/ping
-hermes mcp test omnisearch
+curl --max-time 10 -fsS http://100.84.79.102:8000/ping
+curl --max-time 10 -fsS https://mcp.keiranh.cloud/omnisearch/ping
 ```
 
-## Staging procedure and result isolation
+Before and after isolated checks, compare the exact PM2 process PID,
+restart count, production source/build hashes, listeners, and result
+file metadata. Never print raw `pm2 jlist`, environments, or
+credential configuration. Capture only the relevant non-secret fields.
 
-Staging uses the same launcher with explicit overrides (`PORT=8001`,
-`GUARD_ALLOWED_HOSTS=100.84.79.102:8001`,
-`OMNISEARCH_RESULT_DIR=~/.cache/mcp-omnisearch/staging-mcp-2026` mode
-0700). Result offloads (>80 000 serialized chars) land in the staging
-directory only; verify the production result directory by metadata
-comparison (names, sizes, mtimes) before and after.
+## Isolated verification snapshot (2026-09-06)
+
+The reliability candidate is uncommitted and **not deployed**.
+
+- Fresh registry install into an empty private pnpm store: passed; all
+  three dependency patches applied without manual edits.
+- Final clean-copy frozen install, formatting, lint, and types:
+  passed.
+- Vitest: 477 tests passed across 46 files.
+- Build and isolated MCP smoke: passed, 10 smoke groups.
+- Docker launcher/Compose: 9 tests passed; ShellCheck and diff checks
+  passed. `pnpm audit` reported zero advisories.
+- Production guard PID 3153 and proxy PID 3189 remained unchanged,
+  with zero PM2 restarts. Source/build hashes and metadata for the 12
+  stored production results were unchanged across final verification.
+  Direct and public `/ping` both returned `pong`.
+
+At this initial snapshot, Docker image/runtime, Node.js 24, and live
+provider behavior were unverified. Node 24 and selected live checks
+were subsequently exercised in the separately approved follow-up
+below. Docker still requires a daemon. No deployment, commits, or
+pushes were performed.
+
+`pnpm store status` reported modified cached dependencies. The shared
+store was not repaired or purged. Verification used a separately
+created private store with `--package-import-method=copy`; use the
+same fresh-store isolation for release preparation rather than
+trusting a pre-existing manually edited dependency tree.
+
+## Node 24 and live-provider follow-up
+
+The separately approved Node 24.20.0 check passed the frozen install,
+lint/types, all 477 tests, build, and 10 offline MCP smoke groups.
+Selected live-provider checks also ran against the isolated candidate.
+See [Node 24 and live-provider evidence](verification-node24-live.md)
+for exact coverage, cancellation-status caveats, skipped unbounded
+operations, and incomplete final billing attribution. This follow-up
+does not deploy the candidate or clear the Docker runtime gate.
+
+## Cutover and rollback boundary
+
+No cutover, restart, commit, or merge is included in isolated
+verification. Before separately approved deployment, preserve and
+verify the current launcher, frozen dependency tree, source/build
+artifacts, and configuration privately; establish a restore point for
+that actual release. Never overwrite a dirty production checkout.
+
+The rollback below is the **historical 2026-08 protocol migration**,
+not a current reliability-release rollback. Do not execute it blindly.
 
 ## Rollback
 

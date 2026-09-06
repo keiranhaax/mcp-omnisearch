@@ -13,6 +13,56 @@ const fetch_mock = vi.fn();
 const previous_api_key = config.processing.tavily_extract.api_key;
 
 describe('TavilyExtractProvider response validation', () => {
+	it.each([
+		{ chunks_per_source: 3 },
+		{ query: 'test', chunks_per_source: 0 },
+		{ query: 'test', chunks_per_source: 6 },
+		{ query: 'test', chunks_per_source: 1.5 },
+		{ query: ' ', chunks_per_source: 2 },
+	])(
+		'rejects invalid reranking options before requesting: %o',
+		async (options) => {
+			await expect(
+				new TavilyExtractProvider().process_content(
+					'https://example.com',
+					'basic',
+					options,
+				),
+			).rejects.toMatchObject({
+				type: 'INVALID_INPUT',
+				provider: 'tavily_extract',
+			});
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
+	it('forwards query reranking and chunk count without changing extraction depth', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: [
+						{
+							url: 'https://example.com',
+							raw_content: 'Relevant chunks',
+						},
+					],
+					failed_results: [],
+				}),
+			),
+		);
+		await new TavilyExtractProvider().process_content(
+			'https://example.com',
+			'basic',
+			{ query: 'mcp-omnisearch C++', chunks_per_source: 5 },
+		);
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body),
+		).toMatchObject({
+			query: 'mcp-omnisearch C++',
+			chunks_per_source: 5,
+			extract_depth: 'basic',
+			include_images: false,
+		});
+	});
 	beforeEach(() => {
 		fetch_mock.mockReset();
 		vi.stubGlobal('fetch', fetch_mock);

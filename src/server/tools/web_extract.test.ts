@@ -6,6 +6,9 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import * as v from 'valibot';
+import { ValibotJsonSchemaAdapter } from '@tmcp/adapter-valibot';
+import { TavilyExtractProvider } from '../../providers/processing/tavily_extract/index.js';
 import { config } from '../../config/env.js';
 import {
 	get_available_providers,
@@ -78,6 +81,48 @@ describe('web_extract Firecrawl summarize', () => {
 		config.processing.exa_similar.api_key = previous_keys.exa_similar;
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+	});
+
+	it('forwards the Tavily reranking query through provider options', async () => {
+		config.processing.tavily_extract.api_key = 'tvly-test-key';
+		const process = vi
+			.spyOn(TavilyExtractProvider.prototype, 'process_content')
+			.mockResolvedValue({
+				content: 'chunks',
+				metadata: {},
+				source_provider: 'tavily_extract',
+			});
+		const { server, tools } = create_server();
+		initialize_web_extract();
+		register_web_extract(server as any);
+		await tools[0].handler({
+			provider: 'tavily',
+			url: 'https://example.test',
+			query: 'pricing details',
+		});
+		expect(process).toHaveBeenCalledWith(
+			'https://example.test',
+			undefined,
+			{ query: 'pricing details' },
+		);
+	});
+
+	it('advertises only supported Firecrawl formats with a convertible schema', async () => {
+		const { server, tools } = create_server();
+		initialize_web_extract();
+		register_web_extract(server as any);
+		const schema = tools[0].definition.schema;
+		expect(
+			v.safeParse(schema, {
+				provider: 'firecrawl',
+				url: 'https://example.test',
+				firecrawl_options: { formats: ['unsupported-format'] },
+			}).success,
+		).toBe(false);
+		expect(
+			(await new ValibotJsonSchemaAdapter().toJsonSchema(schema))
+				.type,
+		).toBe('object');
 	});
 
 	it('registers firecrawl:summarize with only configured providers', () => {

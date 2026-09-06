@@ -42,8 +42,26 @@ export class TavilyExtractProvider implements ProcessingProvider {
 	async process_content(
 		url: string | string[],
 		extract_depth: 'basic' | 'advanced' = 'basic',
+		options?: { query?: string; chunks_per_source?: number },
 	): Promise<ProcessingResult> {
 		const urls = validate_processing_urls(url, this.name);
+		if (
+			(options?.query !== undefined &&
+				(typeof options.query !== 'string' ||
+					!options.query.trim())) ||
+			(options?.chunks_per_source !== undefined &&
+				(!options.query?.trim() ||
+					!Number.isInteger(options.chunks_per_source) ||
+					options.chunks_per_source < 1 ||
+					options.chunks_per_source > 5))
+		) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'Tavily chunk reranking requires a non-empty query and chunks_per_source must be an integer from 1 to 5',
+				this.name,
+				{ retryable: false },
+			);
+		}
 
 		const extract_request = async () => {
 			const api_key = validate_api_key(
@@ -65,6 +83,8 @@ export class TavilyExtractProvider implements ProcessingProvider {
 							urls: urls,
 							include_images: false,
 							extract_depth,
+							query: options?.query,
+							chunks_per_source: options?.chunks_per_source,
 						}),
 						signal: AbortSignal.timeout(
 							config.processing.tavily_extract.timeout,

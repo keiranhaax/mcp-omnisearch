@@ -215,6 +215,181 @@ describe('FirecrawlScrapeProvider', () => {
 		expect(fetch_mock).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		{ formats: [{ type: 'json' }], data: { json: null } },
+		{ formats: [{ type: 'json' }], data: { json: false } },
+		{ formats: [{ type: 'json' }], data: { json: 0 } },
+		{
+			formats: ['screenshot'],
+			data: { screenshot: 'https://images.test/page.png' },
+		},
+		{
+			formats: ['markdown', 'screenshot', { type: 'json' }],
+			data: {
+				markdown: '# Page',
+				screenshot: 'https://images.test/page.png',
+				json: { items: [null, { active: false }] },
+			},
+		},
+	])(
+		'preserves every requested representation: $formats',
+		async ({ formats, data }) => {
+			fetch_mock.mockImplementation(
+				async () =>
+					new Response(JSON.stringify({ success: true, data })),
+			);
+			const result =
+				await new FirecrawlScrapeProvider().process_content(
+					'https://example.test',
+					'basic',
+					{ formats },
+				);
+			expect(result.metadata.documents).toEqual([
+				{ url: 'https://example.test', ...data },
+			]);
+			expect(result.content.length).toBeGreaterThan(0);
+		},
+	);
+
+	it('rejects unsupported formats instead of charging for discarded data', async () => {
+		await expect(
+			new FirecrawlScrapeProvider().process_content(
+				'https://example.test',
+				'basic',
+				{ formats: ['unsupported-format'] },
+			),
+		).rejects.toMatchObject({ type: 'INVALID_INPUT' });
+		expect(fetch_mock).not.toHaveBeenCalled();
+	});
+
+	it('rejects formats combined with shortcut questions rather than replacing formats', async () => {
+		await expect(
+			new FirecrawlScrapeProvider().process_content(
+				'https://example.test',
+				'basic',
+				{ formats: ['screenshot'], question: 'Why?' },
+			),
+		).rejects.toMatchObject({ type: 'INVALID_INPUT' });
+		expect(fetch_mock).not.toHaveBeenCalled();
+	});
+
+	it('aborts all workers and never drains the queue after a fatal response', async () => {
+		vi.useFakeTimers();
+		try {
+			fetch_mock.mockImplementationOnce(
+				async () =>
+					new Response(JSON.stringify({ success: 'malformed' })),
+			);
+			fetch_mock.mockImplementation(
+				() =>
+					new Promise((resolve) =>
+						setTimeout(
+							() =>
+								resolve(
+									new Response(
+										JSON.stringify({
+											success: true,
+											data: { markdown: 'late' },
+										}),
+									),
+								),
+							50,
+						),
+					),
+			);
+			await expect(
+				new FirecrawlScrapeProvider().process_content(
+					Array.from(
+						{ length: 20 },
+						(_, i) => `https://example.test/${i}`,
+					),
+				),
+			).rejects.toMatchObject({ details: { retryable: false } });
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(fetch_mock).toHaveBeenCalledTimes(4);
+			expect(
+				fetch_mock.mock.calls.every(
+					([, options]) => options.signal.aborted,
+				),
+			).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('stops queued paid requests on 429 and retains Retry-After', async () => {
+		vi.useFakeTimers();
+		try {
+			const reset_time = new Date(Date.now() + 60000);
+			fetch_mock.mockImplementation(
+				async () =>
+					new Response('{}', {
+						status: 429,
+						headers: { 'Retry-After': '60' },
+					}),
+			);
+			const pending = new FirecrawlScrapeProvider()
+				.process_content(
+					Array.from(
+						{ length: 20 },
+						(_, i) => `https://example.test/${i}`,
+					),
+				)
+				.catch((error: unknown) => error);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(fetch_mock).toHaveBeenCalledTimes(4);
+			expect(await pending).toMatchObject({
+				type: 'RATE_LIMIT',
+				details: { status: 429, reset_time },
+			});
+			await vi.advanceTimersByTimeAsync(60000);
+			expect(fetch_mock).toHaveBeenCalledTimes(4);
+			expect(
+				fetch_mock.mock.calls.every(
+					([, options]) => options.signal.aborted,
+				),
+			).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it.each([401, 403, 404])(
+		'stops the queue on permanent HTTP %s',
+		async (status) => {
+			fetch_mock.mockImplementation(
+				async () => new Response('{}', { status }),
+			);
+			await expect(
+				new FirecrawlScrapeProvider().process_content(
+					Array.from(
+						{ length: 20 },
+						(_, i) => `https://example.test/${i}`,
+					),
+				),
+			).rejects.toMatchObject({ details: { status } });
+			expect(fetch_mock).toHaveBeenCalledTimes(4);
+		},
+	);
+
+	it('never logs URLs or upstream messages on scrape failure', async () => {
+		const log = vi
+			.spyOn(console, 'error')
+			.mockImplementation(() => {});
+		fetch_mock.mockImplementation(
+			async () =>
+				new Response(
+					JSON.stringify({ success: false, error: 'private-echo' }),
+				),
+		);
+		await expect(
+			new FirecrawlScrapeProvider().process_content(
+				'https://example.test/?token=private-url',
+			),
+		).rejects.toBeInstanceOf(Error);
+		expect(JSON.stringify(log.mock.calls)).not.toContain('private-');
+	});
+
 	it('does not automatically repeat a paid scrape after provider failure', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		fetch_mock.mockResolvedValue(

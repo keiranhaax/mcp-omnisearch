@@ -8,15 +8,15 @@
 > It preserves the original project's unified search foundation while
 > maintaining a different provider catalog, expanded tool surface,
 > hardened remote transport, and production-oriented result handling.
-> Kagi and You.com integrations are not included in this fork.
+> Kagi is not included; You.com is available as a search fallback.
 
 A Model Context Protocol (MCP) server that gives agents one interface
 for web search, cited research, GitHub discovery, content extraction,
 news and media search, web automation, and business intelligence.
 
-The current fork integrates Tavily, Brave, Exa, GitHub, Linkup,
-Firecrawl, and Context.dev through four consolidated tools and ten
-focused tools. Tools and providers are registered only when their
+The current fork integrates Tavily, Brave, Exa, GitHub, You.com,
+Linkup, Firecrawl, and Context.dev through four consolidated tools and
+ten focused tools. Tools and providers are registered only when their
 required API keys are available.
 
 ## What this fork adds
@@ -51,7 +51,7 @@ required API keys are available.
 
 | Capability                    | Providers                                                             |
 | ----------------------------- | --------------------------------------------------------------------- |
-| Web search                    | Tavily, Brave, Exa                                                    |
+| Web search                    | Tavily, Brave, Exa, You.com                                           |
 | AI answers and research       | Exa Answer, Exa Deep Research, Brave Answers, Tavily Research, Linkup |
 | GitHub discovery              | GitHub                                                                |
 | Extraction and processing     | Tavily Extract, Exa Contents/Similar, Firecrawl                       |
@@ -66,7 +66,7 @@ entitlements. Missing keys disable only the affected capabilities.
 
 ### Consolidated tools
 
-- `web_search`: search with Tavily, Brave, or Exa. Supports
+- `web_search`: search with Tavily, Brave, Exa, or You.com. Supports
   provider-aware domain filters, Brave operators, and advanced Exa
   retrieval options.
 - `ai_search`: cited answers and research through Exa, Brave Answers,
@@ -154,6 +154,7 @@ source control.
 | `BRAVE_ANSWERS_API_KEY`             | Optional separate Brave Answers credential                      |
 | `GITHUB_API_KEY`                    | GitHub code, repository, and user search                        |
 | `EXA_API_KEY`                       | Exa search, answers, deep research, contents, and similar pages |
+| `YOU_API_KEY`                       | You.com web search fallback                                     |
 | `LINKUP_API_KEY`                    | Linkup sourced answers                                          |
 | `FIRECRAWL_API_KEY`                 | Firecrawl processing, search, and agent tools                   |
 | `FIRECRAWL_BASE_URL`                | Optional self-hosted Firecrawl base URL                         |
@@ -165,7 +166,16 @@ source control.
 | `OMNISEARCH_RESULT_STORE_MAX_BYTES` | Total quota, default 256 MiB with oldest-first eviction         |
 
 The result directory is created with mode `0700`; stored results use
-mode `0600`. `result_read` returns at most 500 lines per request.
+mode `0600`. `result_read` returns at most 500 lines and 12,000 UTF-8
+content bytes per request, including when a single line is longer. Use
+`next_offset` as the next `offset`, and `next_byte_offset` as the next
+`byte_offset` (reset to zero when absent). Line-limited pages omit
+their separator newline; byte-limited pages preserve it. The stored
+`FULL RESULT JSON` section retains every original field; the preceding
+text and bounded section outline are navigation aids. The
+inline/offload threshold is 80,000 UTF-8 bytes including JSON escaping
+in the MCP text payload. Near the storage quota, only the canonical
+JSON view is stored; optional readable copies are omitted.
 
 ### GitHub token
 
@@ -178,7 +188,33 @@ deliberately required by your deployment.
 Set `FIRECRAWL_BASE_URL` to a Firecrawl instance exposing the expected
 v2 endpoints. A `FIRECRAWL_API_KEY` is still required. Use
 `FIRECRAWL_AGENT_URL` only when the Agent endpoint differs from the
-base URL.
+base URL. An explicit Agent override is exclusive: errors never retry
+against the public cloud. Firecrawl API requests reject redirects,
+including create, polling, status, and cancellation, so a redirect
+cannot silently forward a private prompt to another origin. Configure
+the final API URL rather than a redirecting alias.
+
+`firecrawl_agent` starts a new paid job by default. Its default
+`max_credits` cap is **100**, and zero, negative, fractional, or
+unsafe integer caps are rejected before networking. The default model
+is `spark-2`; legacy model aliases remain accepted. MCP start returns
+a job ID immediately by default (`wait_for_completion: false`). Use
+`action: "status"` or `action: "cancel"` with that `job_id`, or opt
+into `wait_for_completion: true` for a bounded wait. Repeating `start`
+creates a new job. Creation is not automatically retried. Local
+cancellation/deadlines stop waiting and polling, not necessarily the
+remote paid job; use explicit `cancel` to request remote termination.
+If creation fails before a job ID is received, its outcome is unknown.
+Errors after an accepted start retain that ID and safe status/cancel
+guidance. Scrape workers stop dequeuing after rate limiting; crawl
+continuations must report completion. Crawls fetch at most ten result
+pages and report `truncated`, `next`, and the provider's totals when
+more remain, rather than implying full retrieval.
+
+Extraction URL and Context domain/direct-URL checks reject literal
+private/reserved addresses and local names. They are not an SSRF
+sandbox: DNS, redirects, and discovered crawl URLs are resolved by the
+remote provider, which must enforce retrieval-time destination policy.
 
 ## Transport and deployment
 
@@ -204,8 +240,12 @@ It supports modern MCP `2026-07-28` and stateless legacy MCP
 `2025-11-25` on `POST /mcp`. `GET /ping` is the only health route. The
 legacy `/sse` route is intentionally retired.
 
-Authentication remains in `mcp-proxy`; the guard enforces network and
-protocol boundaries without inspecting the API key. See:
+The reliability candidate checks the API key in constant time in the
+guard **before body intake**, and checks it again in the proxy.
+Connection, concurrent-request, and global request-rate bounds are
+configurable. The pinned transport patches are applied through
+`pnpm-workspace.yaml` and `pnpm-lock.yaml`, not manual dependency
+edits. See:
 
 - [Production deployment](docs/deployment.md)
 - [MCP 2026-07-28 architecture decision](docs/architecture-decision-mcp-2026-07-28.md)
@@ -224,13 +264,22 @@ for clients such as OpenWebUI:
 git clone https://github.com/keiranhaax/mcp-omnisearch.git
 cd mcp-omnisearch
 cp .env.example .env 2>/dev/null || touch .env
-# Add only the provider keys you need to .env
+# Set a non-blank MCP_API_KEY and only the provider keys you need
 docker compose up -d --build
 ```
 
 The default container port is `8000`, and the generated MCPO route is
 `/omnisearch`. This Docker/MCPO path is separate from the hardened
-native `/mcp` deployment described above.
+native `/mcp` deployment described above. Compose injects `.env`,
+requires `MCP_API_KEY`, and publishes only on `127.0.0.1` by default.
+MCPO requires the configured key in its Bearer authentication header,
+including for documentation routes (`strict_auth`). `MCPO_BIND_HOST`
+changes the host publication address; `PORT` changes both ports. Do
+not expose it publicly without a separately reviewed ingress policy.
+MCPO and its Python dependencies are pinned and installed at image
+build time. No runtime package download or shell-based credential
+substitution is used. The temporary JSON configuration is private; the
+inbound API key is neither in that file nor the command line.
 
 ## Examples
 
@@ -288,6 +337,9 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm run check
 corepack pnpm test
 corepack pnpm run build
+corepack pnpm run test:smoke
+python3 -B -m unittest discover -s docker -p 'test_*.py' -v
+shellcheck start-server.sh
 ```
 
 Use an isolated branch or worktree for non-trivial changes. Do not use
@@ -298,7 +350,7 @@ a live deployment checkout as a scratch workspace.
 This is a maintained customization, not a drop-in mirror of upstream.
 Notable differences include:
 
-- Kagi and You.com integrations are removed.
+- Kagi is removed; You.com is retained as a search fallback.
 - Brave, Firecrawl, Exa, and Context.dev capabilities are expanded.
 - Result delivery uses private authenticated pagination rather than
   exposing local filesystem paths to remote clients.

@@ -58,7 +58,7 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 	);
 
 	// Provider Info Resource Template
-	server.resource(
+	server.template(
 		{
 			name: 'provider-info',
 			description: 'Registration and runtime health for a provider',

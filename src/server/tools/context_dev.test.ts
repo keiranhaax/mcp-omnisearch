@@ -7,6 +7,7 @@ import {
 	vi,
 } from 'vitest';
 import { config } from '../../config/env.js';
+import * as v from 'valibot';
 import {
 	initialize_context_dev,
 	register_context_dev_tools,
@@ -16,12 +17,17 @@ const fetch_mock = vi.fn();
 const previous_key = config.search.context_dev.api_key;
 
 const create_server = () => {
-	const tools: Array<{ definition: { name: string }; handler: any }> =
-		[];
+	const tools: Array<{
+		definition: { name: string; schema: v.GenericSchema };
+		handler: any;
+	}> = [];
 	return {
 		tools,
 		server: {
-			tool: (definition: { name: string }, handler: any) => {
+			tool: (
+				definition: { name: string; schema: v.GenericSchema },
+				handler: any,
+			) => {
 				tools.push({ definition, handler });
 			},
 		},
@@ -168,6 +174,189 @@ describe('Context.dev tools', () => {
 			'https://api.context.dev/v1/brand/retrieve?domain=example.com',
 		);
 		expect(result.content[0].text).toContain('software');
+	});
+
+	it.each([
+		[
+			'context_web_extract',
+			{ mode: 'sitemap', domain: '169.254.169.254' },
+		],
+		[
+			'context_web_extract',
+			{ mode: 'screenshot', domain: '127.0.0.1' },
+		],
+		['context_styleguide', { domain: '10.0.0.4' }],
+		[
+			'context_brand_intel',
+			{ lookup_type: 'domain', value: '[ff02::1]' },
+		],
+		[
+			'context_brand_intel',
+			{ lookup_type: 'simplified_domain', value: 'localhost' },
+		],
+		['context_classify', { taxonomy: 'naics', domain: '[fec0::1]' }],
+		[
+			'context_classify',
+			{ taxonomy: 'eic', domain: 'service.internal' },
+		],
+	])(
+		'rejects non-public domain targets for %s before networking',
+		async (name, args) => {
+			fetch_mock.mockImplementation(
+				async () => new Response('{"success":true}'),
+			);
+			const { server, tools } = create_server();
+			initialize_context_dev();
+			register_context_dev_tools(server as any);
+			const result = await tools
+				.find((tool) => tool.definition.name === name)!
+				.handler(args);
+			expect(result.isError).toBe(true);
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		{ success: false, error: 'fixture failure' },
+		{ ok: false },
+		{ status: 'error', message: 'fixture failure' },
+		{ status: 'failed' },
+	])(
+		'marks declared Context failures as MCP tool errors',
+		async (body) => {
+			fetch_mock.mockResolvedValue(
+				new Response(JSON.stringify(body)),
+			);
+			const { server, tools } = create_server();
+			initialize_context_dev();
+			register_context_dev_tools(server as any);
+			const result = await tools[0].handler({
+				mode: 'markdown',
+				url: 'https://example.com',
+			});
+			expect(result.isError).toBe(true);
+		},
+	);
+
+	it.each([
+		[
+			'context_web_extract',
+			{ mode: 'crawl_markdown', url: 'https://example.com' },
+			'limit',
+			[0, -1, 1.5, 101, 1e12],
+		],
+		[
+			'context_web_extract',
+			{ mode: 'markdown', url: 'https://example.com' },
+			'timeoutMS',
+			[0, -1, 1.5, 60001, 1e12],
+		],
+		[
+			'context_brand_intel',
+			{ lookup_type: 'domain', value: 'example.com' },
+			'timeoutMS',
+			[-1, 60001],
+		],
+		[
+			'context_styleguide',
+			{ domain: 'example.com' },
+			'timeoutMS',
+			[-1, 60001],
+		],
+		[
+			'context_classify',
+			{ taxonomy: 'naics', domain: 'example.com' },
+			'minResults',
+			[0, 1.5, 21, 1e12],
+		],
+		[
+			'context_classify',
+			{ taxonomy: 'sic', domain: 'example.com' },
+			'maxResults',
+			[0, 1.5, 21, 1e12],
+		],
+		[
+			'context_transaction_identify',
+			{ transaction_info: 'fixture' },
+			'timeoutMS',
+			[-1, 60001],
+		],
+	])(
+		'bounds %s %s %s in its public schema',
+		(name, args, field, values) => {
+			const { server, tools } = create_server();
+			initialize_context_dev();
+			register_context_dev_tools(server as any);
+			const tool = tools.find(
+				(item) => item.definition.name === name,
+			)!;
+			for (const value of values as number[]) {
+				expect(
+					v.safeParse(tool.definition.schema, {
+						...(args as object),
+						[field as string]: value,
+					}).success,
+					`${field}:${value}`,
+				).toBe(false);
+			}
+		},
+	);
+
+	it('applies explicit bounded defaults to Context crawl requests', async () => {
+		fetch_mock.mockResolvedValue(new Response('{"success":true}'));
+		const { server, tools } = create_server();
+		initialize_context_dev();
+		register_context_dev_tools(server as any);
+		const tool = tools[0];
+		const args = v.parse(tool.definition.schema, {
+			mode: 'crawl_markdown',
+			url: 'https://example.com',
+		});
+		await tool.handler(args);
+		const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
+		expect(body).toMatchObject({ maxPages: 10, timeoutMS: 60000 });
+	});
+
+	it.each([
+		{ minResults: 6, maxResults: 5 },
+		{ minResults: 20, maxResults: 1 },
+	])(
+		'rejects contradictory classification ranges before networking',
+		async (range) => {
+			fetch_mock.mockResolvedValue(new Response('{"success":true}'));
+			const { server, tools } = create_server();
+			initialize_context_dev();
+			register_context_dev_tools(server as any);
+			const tool = tools.find(
+				(item) => item.definition.name === 'context_classify',
+			)!;
+			const result = await tool.handler({
+				taxonomy: 'naics',
+				domain: 'example.com',
+				...range,
+			});
+			expect(result.isError).toBe(true);
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
+
+	it('defaults classification to a bounded result range', async () => {
+		fetch_mock.mockResolvedValue(new Response('{"success":true}'));
+		const { server, tools } = create_server();
+		initialize_context_dev();
+		register_context_dev_tools(server as any);
+		const tool = tools.find(
+			(item) => item.definition.name === 'context_classify',
+		)!;
+		await tool.handler(
+			v.parse(tool.definition.schema, {
+				taxonomy: 'naics',
+				domain: 'example.com',
+			}),
+		);
+		const params = new URL(fetch_mock.mock.calls[0][0]).searchParams;
+		expect(params.get('minResults')).toBe('1');
+		expect(params.get('maxResults')).toBe('20');
 	});
 
 	it('rejects private scrape targets before calling Context.dev', async () => {

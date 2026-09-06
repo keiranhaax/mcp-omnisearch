@@ -63,6 +63,33 @@ describe('result_read tool', () => {
 		expect(body.next_offset).toBe(3);
 	});
 
+	it('forwards within-line continuation without oversized MCP text', async () => {
+		const { server, tools } = create_mock_server();
+		register_result_read(server as any);
+		const text = '\u0000🙂'.repeat(10000);
+		const stored = store_result(text);
+		let offset = 1;
+		let byte_offset = 0;
+		let reconstructed = '';
+		for (let page = 0; page < 20; page++) {
+			const response = await tools[0].handler({
+				result_id: stored.result_id,
+				offset,
+				byte_offset,
+				limit: 1,
+			});
+			expect(
+				Buffer.byteLength(JSON.stringify(response)),
+			).toBeLessThan(100000);
+			const chunk = JSON.parse(response.content[0].text);
+			reconstructed += chunk.content;
+			if (chunk.next_offset === undefined) break;
+			offset = chunk.next_offset;
+			byte_offset = chunk.next_byte_offset;
+		}
+		expect(reconstructed === text).toBe(true);
+	});
+
 	it('returns an MCP error for missing or expired IDs', async () => {
 		const { server, tools } = create_mock_server();
 		register_result_read(server as any);

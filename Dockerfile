@@ -1,60 +1,41 @@
-# Use Node.js 24 Alpine
-FROM node:24-alpine
+# Pin the multi-platform Node 22 image (includes linux/arm64).
+FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS build
 
 WORKDIR /app
-
-# MCPO uses Python/uv to expose the stdio MCP server over HTTP.
-RUN apk add --no-cache python3 py3-pip gettext \
-    && pip3 install --break-system-packages uv
-
-# Use the repository-pinned package manager release.
-RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
-
+RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod=false
+COPY patches ./patches
+# Corepack reads the packageManager pin from package.json.
+RUN corepack pnpm install --frozen-lockfile --prod=false
+COPY tsconfig.json vite.config.ts ./
+COPY src ./src
+RUN corepack pnpm run build && corepack pnpm prune --prod
 
-COPY . .
-RUN pnpm run build && pnpm prune --prod
+FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
 
-# Keep runtime substitution so credentials are not baked into the image.
-RUN printf '%s\n' \
-    '{' \
-    '  "mcpServers": {' \
-    '    "omnisearch": {' \
-    '      "command": "node",' \
-    '      "args": ["dist/index.js"],' \
-    '      "env": {' \
-    '        "BRAVE_API_KEY": "${BRAVE_API_KEY}",' \
-    '        "BRAVE_ANSWERS_API_KEY": "${BRAVE_ANSWERS_API_KEY}",' \
-    '        "TAVILY_API_KEY": "${TAVILY_API_KEY}",' \
-    '        "GITHUB_API_KEY": "${GITHUB_API_KEY}",' \
-    '        "EXA_API_KEY": "${EXA_API_KEY}",' \
-    '        "LINKUP_API_KEY": "${LINKUP_API_KEY}",' \
-    '        "CONTEXT_DEV_API_KEY": "${CONTEXT_DEV_API_KEY}",' \
-    '        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",' \
-    '        "FIRECRAWL_BASE_URL": "${FIRECRAWL_BASE_URL}",' \
-    '        "FIRECRAWL_AGENT_URL": "${FIRECRAWL_AGENT_URL}",' \
-    '        "OMNISEARCH_RESULT_TTL_MS": "${OMNISEARCH_RESULT_TTL_MS}",' \
-    '        "OMNISEARCH_RESULT_MAX_BYTES": "${OMNISEARCH_RESULT_MAX_BYTES}",' \
-    '        "OMNISEARCH_RESULT_STORE_MAX_BYTES": "${OMNISEARCH_RESULT_STORE_MAX_BYTES}"' \
-    '      }' \
-    '    }' \
-    '  }' \
-    '}' > /app/mcpo-config.json
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+COPY docker/requirements.txt /tmp/mcpo-requirements.txt
+RUN python3 -m venv /opt/mcpo \
+    && /opt/mcpo/bin/pip install --no-cache-dir -r /tmp/mcpo-requirements.txt \
+    && /opt/mcpo/bin/pip check \
+    && /opt/mcpo/bin/python -c 'from mcpo.main import run' \
+    && rm /tmp/mcpo-requirements.txt
 
-RUN python3 -m json.tool /app/mcpo-config.json > /dev/null
+COPY --from=build /app/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY docker/start.py ./docker/start.py
 
-RUN printf '%s\n' \
-    '#!/bin/sh' \
-    'set -eu' \
-    'envsubst < /app/mcpo-config.json > /tmp/mcpo-config-final.json' \
-    'exec uv tool run mcpo --port ${PORT:-8000} --config /tmp/mcpo-config-final.json' \
-    > /app/start.sh \
-    && chmod +x /app/start.sh \
-    && chown -R node:node /app
-
+ENV PATH="/opt/mcpo/bin:${PATH}" \
+    NODE_ENV=production \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    MCPO_HOST=0.0.0.0
 USER node
 EXPOSE 8000
-ENV NODE_ENV=production
 
-CMD ["/app/start.sh"]
+# Authentication and provider configuration come only from runtime environment.
+CMD ["python3", "/app/docker/start.py"]

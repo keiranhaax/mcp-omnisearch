@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import {
 	createServer,
 	request as http_request,
@@ -20,8 +21,8 @@ import {
  *
  * This guard fails closed on all of the above, limits routes to the
  * MCP endpoint and health check, and bounds request bodies before
- * anything reaches the proxy. Authentication stays with the proxy
- * (constant-time API key comparison); the guard never sees the key.
+ * anything reaches the proxy. The guard repeats the proxy's constant-time
+ * API key check before reading bodies; the proxy still authenticates too.
  */
 
 export const modern_protocol_version_key =
@@ -32,6 +33,11 @@ export interface GuardConfig {
 	upstream_port: number;
 	/** Exact `host[:port]` values clients may send, compared lowercase. */
 	allowed_hosts: readonly string[];
+	api_key: string;
+	max_connections: number;
+	max_inflight_requests: number;
+	rate_limit_requests: number;
+	rate_limit_window_ms: number;
 	max_body_bytes: number;
 	/** Deadline for receiving the full request body once it starts. */
 	body_read_timeout_ms: number;
@@ -45,12 +51,39 @@ export const default_guard_config = (
 	upstream_host: '127.0.0.1',
 	upstream_port: 8002,
 	allowed_hosts: [],
+	api_key: '',
+	max_connections: 256,
+	max_inflight_requests: 64,
+	rate_limit_requests: 600,
+	rate_limit_window_ms: 60_000,
 	max_body_bytes: 4 * 1024 * 1024,
 	body_read_timeout_ms: 30_000,
 	mcp_path: '/mcp',
 	ping_path: '/ping',
 	...overrides,
 });
+
+/** Positive, finite integer settings; unlike ports, byte counts may exceed 65535. */
+export const parse_guard_integer = (
+	raw: string | undefined,
+	fallback: number,
+	name: string,
+	maximum = Number.MAX_SAFE_INTEGER,
+): number => {
+	if (raw === undefined) return fallback;
+	const value = Number(raw);
+	if (
+		!/^\d+$/.test(raw) ||
+		!Number.isSafeInteger(value) ||
+		value < 1 ||
+		value > maximum
+	) {
+		throw new Error(
+			`guard: ${name} must be a positive integer no greater than ${maximum}`,
+		);
+	}
+	return value;
+};
 
 export type HostCheck =
 	| { ok: true; host: string }
@@ -127,13 +160,10 @@ export const check_origin = (
 export interface BodyClassification {
 	modern_envelope: boolean;
 	id: string | number | null;
+	batch?: true;
 }
 
-/**
- * Detects a 2026-07-28 style request envelope. Unparseable bodies and
- * batches are classified as legacy and forwarded so the proxy keeps
- * owning JSON-RPC level errors.
- */
+/** Detects modern envelopes and disallowed multi-message bodies. */
 export const classify_body = (body: Buffer): BodyClassification => {
 	let parsed: unknown;
 	try {
@@ -141,11 +171,9 @@ export const classify_body = (body: Buffer): BodyClassification => {
 	} catch {
 		return { modern_envelope: false, id: null };
 	}
-	if (
-		parsed === null ||
-		typeof parsed !== 'object' ||
-		Array.isArray(parsed)
-	)
+	if (Array.isArray(parsed))
+		return { modern_envelope: false, id: null, batch: true };
+	if (parsed === null || typeof parsed !== 'object')
 		return { modern_envelope: false, id: null };
 	const record = parsed as Record<string, unknown>;
 	const id =
@@ -202,8 +230,8 @@ export const read_bounded_body = (
 			resolve(result);
 		};
 		const timer = setTimeout(() => {
+			req.pause();
 			finish({ status: 'timeout' });
-			req.destroy();
 		}, timeout_ms);
 		req.on('data', (chunk: Buffer) => {
 			if (settled) return;
@@ -248,7 +276,9 @@ const send_json = (
 		// socket open.
 		connection: 'close',
 	});
-	res.end(body);
+	res.end(body, () => {
+		if (!res.req.complete) res.req.destroy();
+	});
 };
 
 const reject = (
@@ -371,6 +401,13 @@ const handle_request = async (
 			reject(res, 405, 'Method Not Allowed');
 			return;
 		}
+		if (
+			req.headers['transfer-encoding'] !== undefined ||
+			Number(req.headers['content-length'] ?? 0) !== 0
+		) {
+			reject(res, 400, 'Bad Request: ping must not include a body');
+			return;
+		}
 		forward_to_upstream(config, req, res, Buffer.alloc(0));
 		return;
 	}
@@ -382,6 +419,20 @@ const handle_request = async (
 	if (req.method !== 'POST') {
 		res.setHeader('allow', 'POST');
 		reject(res, 405, 'Method Not Allowed');
+		return;
+	}
+
+	const supplied_key = req.headers['x-api-key'];
+	const expected = Buffer.from(config.api_key);
+	const actual = Buffer.from(
+		typeof supplied_key === 'string' ? supplied_key : '',
+	);
+	if (
+		!expected.length ||
+		actual.length !== expected.length ||
+		!timingSafeEqual(actual, expected)
+	) {
+		reject(res, 401, 'Unauthorized: Invalid or missing API key');
 		return;
 	}
 
@@ -404,6 +455,18 @@ const handle_request = async (
 	}
 
 	const classification = classify_body(read.body);
+	if (classification.batch) {
+		send_json(
+			res,
+			400,
+			json_rpc_error(
+				null,
+				-32600,
+				'A single JSON-RPC message is required',
+			),
+		);
+		return;
+	}
 	const has_version_header =
 		req.headers['mcp-protocol-version'] !== undefined;
 	if (classification.modern_envelope && !has_version_header) {
@@ -435,7 +498,41 @@ export const create_guard_server = (config: GuardConfig): Server => {
 			host.toLowerCase(),
 		),
 	};
+	let inflight = 0;
+	let window_started = Date.now();
+	let accepted = 0;
 	const server = createServer((req, res) => {
+		const now = Date.now();
+		if (now - window_started >= config.rate_limit_window_ms) {
+			window_started = now;
+			accepted = 0;
+		}
+		if (accepted >= config.rate_limit_requests) {
+			res.setHeader(
+				'retry-after',
+				String(
+					Math.max(
+						1,
+						Math.ceil(
+							(window_started + config.rate_limit_window_ms - now) /
+								1000,
+						),
+					),
+				),
+			);
+			reject(res, 429, 'Too Many Requests');
+			return;
+		}
+		accepted++;
+		if (inflight >= config.max_inflight_requests) {
+			res.setHeader('retry-after', '1');
+			reject(res, 429, 'Too Many Requests');
+			return;
+		}
+		inflight++;
+		res.once('close', () => {
+			inflight--;
+		});
 		handle_request(normalized, req, res).catch(() => {
 			if (res.headersSent) {
 				res.destroy();
@@ -448,6 +545,7 @@ export const create_guard_server = (config: GuardConfig): Server => {
 	// request timeout is disabled and slow senders are bounded by
 	// body_read_timeout_ms instead.
 	server.requestTimeout = 0;
+	server.maxConnections = config.max_connections;
 	server.on('clientError', (_error, socket) => {
 		socket.end(
 			'HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n',

@@ -1,4 +1,8 @@
 import { ErrorType, ProviderError } from '../common/types.js';
+import {
+	public_error_message,
+	safe_endpoint,
+} from '../common/errors.js';
 
 export type ProviderCategory =
 	| 'search'
@@ -64,6 +68,10 @@ export const mark_provider_success = (
 	state.last_runtime_status = 'ok';
 	state.active_error = false;
 	state.last_success_at = new Date().toISOString();
+	delete state.last_error;
+	delete state.last_error_at;
+	delete state.last_error_type;
+	delete state.last_endpoint;
 };
 
 const map_error_to_status = (
@@ -89,19 +97,20 @@ export const mark_provider_error = (
 	const state = ensure_state(category, provider);
 	state.last_runtime_status = map_error_to_status(error);
 	state.active_error = true;
-	state.last_error = error.message;
+	state.last_error = public_error_message(error);
 	state.last_error_type = error.type;
 	state.last_error_at = new Date().toISOString();
+	delete state.last_endpoint;
 	if (
 		error.details &&
 		typeof error.details === 'object' &&
 		typeof error.details.url === 'string'
 	) {
-		state.last_endpoint = error.details.url;
+		state.last_endpoint = safe_endpoint(error.details.url);
 	}
 
 	console.warn(
-		`Provider runtime issue (${category}/${provider}): ${state.last_runtime_status} - ${error.message}`,
+		`Provider runtime issue (${category}/${provider}): ${state.last_runtime_status} - ${state.last_error}`,
 	);
 };
 

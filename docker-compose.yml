@@ -5,23 +5,13 @@ services:
       dockerfile: Dockerfile
     container_name: mcp-omnisearch
     restart: unless-stopped
-    # Environment variables can be set via .env file or passed directly
-    # Uncomment and customize as needed:
-    # environment:
-    #   - BRAVE_API_KEY=${BRAVE_API_KEY}
-    #   - BRAVE_ANSWERS_API_KEY=${BRAVE_ANSWERS_API_KEY}
-    #   - TAVILY_API_KEY=${TAVILY_API_KEY}
-    #   - GITHUB_API_KEY=${GITHUB_API_KEY}
-    #   - EXA_API_KEY=${EXA_API_KEY}
-    #   - LINKUP_API_KEY=${LINKUP_API_KEY}
-    #   - CONTEXT_DEV_API_KEY=${CONTEXT_DEV_API_KEY}
-    #   - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-    #   - FIRECRAWL_BASE_URL=${FIRECRAWL_BASE_URL}
-    #   - FIRECRAWL_AGENT_URL=${FIRECRAWL_AGENT_URL}
-    #   - OMNISEARCH_RESULT_TTL_MS=${OMNISEARCH_RESULT_TTL_MS}
-    #   - OMNISEARCH_RESULT_MAX_BYTES=${OMNISEARCH_RESULT_MAX_BYTES}
-    #   - OMNISEARCH_RESULT_STORE_MAX_BYTES=${OMNISEARCH_RESULT_STORE_MAX_BYTES}
-
-    # Expose port for MCPO
+    # Compose's interpolation .env is not injected automatically.
+    env_file:
+      - .env
+    environment:
+      MCP_API_KEY: ${MCP_API_KEY:?Set a non-blank MCP_API_KEY in .env}
+      # Listen on the container interface; publish only on host loopback.
+      MCPO_HOST: '0.0.0.0'
+      PORT: ${PORT:-8000}
     ports:
-      - '8000:8000'
+      - '${MCPO_BIND_HOST:-127.0.0.1}:${PORT:-8000}:${PORT:-8000}'

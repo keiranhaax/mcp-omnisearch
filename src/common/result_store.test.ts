@@ -52,6 +52,44 @@ describe('remote result store', () => {
 		expect(second.next_offset).toBeUndefined();
 	});
 
+	it.each([
+		'🙂é漢'.repeat(20000),
+		`first\n${'🙂'.repeat(10000)}\n\nlast\n`,
+		`${'a'.repeat(11999)}\n${'b'.repeat(24001)}`,
+	])(
+		'reconstructs byte-bounded pages without skipping UTF-8 data',
+		(text) => {
+			const stored = store_result(text);
+			let offset = 1;
+			let byte_offset = 0;
+			let reconstructed = '';
+			const visited = new Set<string>();
+			for (let page = 0; page < 100; page++) {
+				const cursor = `${offset}:${byte_offset}`;
+				expect(visited.has(cursor)).toBe(false);
+				visited.add(cursor);
+				const chunk = read_result_chunk(
+					stored.result_id,
+					offset,
+					2,
+					byte_offset,
+				);
+				expect(Buffer.byteLength(chunk.content)).toBeLessThanOrEqual(
+					12000,
+				);
+				expect(chunk.content).not.toContain('\uFFFD');
+				reconstructed += chunk.content;
+				if (chunk.next_offset === undefined) break;
+				// Legacy line pages omit their separating LF. Byte continuations do not.
+				if (chunk.next_byte_offset === undefined)
+					reconstructed += '\n';
+				offset = chunk.next_offset;
+				byte_offset = chunk.next_byte_offset ?? 0;
+			}
+			expect(reconstructed).toBe(text);
+		},
+	);
+
 	it('rejects malformed IDs and invalid pagination bounds', () => {
 		expect(() => read_result_chunk('../secret', 1, 10)).toThrow(
 			'Invalid result ID',
