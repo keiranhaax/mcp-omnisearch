@@ -108,6 +108,9 @@ export class TavilyResearchProvider implements SearchProvider {
 					if (Date.now() >= deadline) break;
 
 					let poll_result: v.InferOutput<typeof research_poll_schema>;
+					const poll_timeout = AbortSignal.timeout(
+						Math.min(15000, deadline - Date.now()),
+					);
 					try {
 						const poll_data = await http_json(
 							this.name,
@@ -117,12 +120,7 @@ export class TavilyResearchProvider implements SearchProvider {
 								headers: {
 									Authorization: `Bearer ${api_key}`,
 								},
-								signal: AbortSignal.any([
-									signal,
-									AbortSignal.timeout(
-										Math.min(15000, deadline - Date.now()),
-									),
-								]),
+								signal: AbortSignal.any([signal, poll_timeout]),
 							},
 						);
 						poll_result = parse_provider_response(
@@ -131,6 +129,9 @@ export class TavilyResearchProvider implements SearchProvider {
 							poll_data,
 						);
 					} catch (error) {
+						throw_if_aborted(signal);
+						// A GET timeout may retry this job, never its paid POST.
+						if (poll_timeout.aborted) continue;
 						if (!is_retryable_error(error)) {
 							throw error;
 						}

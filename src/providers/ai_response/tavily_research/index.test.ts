@@ -33,6 +33,219 @@ afterEach(() => {
 });
 
 describe('Tavily research polling', () => {
+	describe('per-poll timeouts', () => {
+		beforeEach(() => {
+			config.ai_response.tavily_research.timeout = 60000;
+			// Native AbortSignal.timeout does not follow fake timers.
+			vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+				const controller = new AbortController();
+				setTimeout(
+					() =>
+						controller.abort(
+							new DOMException('Timed out', 'TimeoutError'),
+						),
+					ms,
+				);
+				return controller.signal;
+			});
+		});
+
+		it.each(['request', 'response body'])(
+			'resumes the same job after a poll %s times out',
+			async (phase) => {
+				fetch_mock
+					.mockResolvedValueOnce(
+						json_response({ status: 'pending', request_id: 'job-1' }),
+					)
+					.mockImplementationOnce(() => {
+						if (phase === 'request') return new Promise(() => {});
+						return Promise.resolve(
+							new Response(new ReadableStream()),
+						);
+					})
+					.mockResolvedValueOnce(
+						json_response({
+							status: 'completed',
+							request_id: 'job-1',
+							content: 'Recovered report',
+						}),
+					);
+				let settled = false;
+				const pending = new TavilyResearchProvider()
+					.search({ query: 'test' })
+					.then(
+						(result) => {
+							settled = true;
+							return result;
+						},
+						(error) => {
+							settled = true;
+							return error;
+						},
+					);
+				await vi.advanceTimersByTimeAsync(20000);
+				expect(fetch_mock).toHaveBeenCalledTimes(2);
+				expect(fetch_mock.mock.calls[1][1].signal.aborted).toBe(true);
+				expect(settled).toBe(false);
+				await vi.advanceTimersByTimeAsync(4999);
+				expect(fetch_mock).toHaveBeenCalledTimes(2);
+				await vi.advanceTimersByTimeAsync(1);
+				await expect(pending).resolves.toMatchObject([
+					{ snippet: 'Recovered report' },
+				]);
+				expect(
+					fetch_mock.mock.calls.map(([url, options]) => [
+						url,
+						options.method,
+					]),
+				).toEqual([
+					[
+						`${config.ai_response.tavily_research.base_url}/research`,
+						'POST',
+					],
+					[
+						`${config.ai_response.tavily_research.base_url}/research/job-1`,
+						'GET',
+					],
+					[
+						`${config.ai_response.tavily_research.base_url}/research/job-1`,
+						'GET',
+					],
+				]);
+			},
+		);
+
+		it('bounds repeated poll timeouts by the original deadline', async () => {
+			config.ai_response.tavily_research.timeout = 35000;
+			fetch_mock
+				.mockResolvedValueOnce(
+					json_response({ status: 'pending', request_id: 'job-1' }),
+				)
+				.mockImplementation(() => new Promise(() => {}));
+			let settled = false;
+			const pending = new TavilyResearchProvider()
+				.search({ query: 'test' })
+				.catch((error) => {
+					settled = true;
+					return error;
+				});
+			await vi.advanceTimersByTimeAsync(34999);
+			expect(settled).toBe(false);
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+			expect(fetch_mock.mock.calls[2][1].signal.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(settled).toBe(true);
+			await expect(pending).resolves.toMatchObject({
+				name: 'TimeoutError',
+			});
+			expect(fetch_mock.mock.calls[2][1].signal.aborted).toBe(true);
+			await vi.advanceTimersByTimeAsync(60000);
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+			expect(
+				fetch_mock.mock.calls.map(([, options]) => options.method),
+			).toEqual(['POST', 'GET', 'GET']);
+		});
+
+		it.each([
+			{ at: 10000, name: 'AbortError' },
+			{ at: 20000, name: 'AbortError' },
+			{ at: 22000, name: 'AbortError' },
+			{ at: 27000, name: 'TimeoutError' },
+		])(
+			'honors caller $name at $at ms without further polls',
+			async ({ at, name }) => {
+				fetch_mock
+					.mockResolvedValueOnce(
+						json_response({ status: 'pending', request_id: 'job-1' }),
+					)
+					.mockImplementation(() => new Promise(() => {}));
+				const caller = new AbortController();
+				setTimeout(
+					() =>
+						caller.abort(new DOMException('Caller stopped', name)),
+					at,
+				);
+				const pending = run_with_request_context(caller.signal, () =>
+					new TavilyResearchProvider().search({ query: 'test' }),
+				).catch((error) => error);
+				await vi.advanceTimersByTimeAsync(at);
+				await expect(pending).resolves.toMatchObject({ name });
+				const expected_calls = at < 25000 ? 2 : 3;
+				expect(fetch_mock).toHaveBeenCalledTimes(expected_calls);
+				await vi.advanceTimersByTimeAsync(60000);
+				expect(fetch_mock).toHaveBeenCalledTimes(expected_calls);
+			},
+		);
+
+		it('does not retry a timed-out paid start request', async () => {
+			fetch_mock.mockImplementation(() => new Promise(() => {}));
+			const pending = new TavilyResearchProvider()
+				.search({ query: 'test' })
+				.catch((error) => error);
+			await vi.advanceTimersByTimeAsync(30000);
+			await expect(pending).resolves.toMatchObject({
+				type: 'API_ERROR',
+				details: { retryable: false, cause: 'timeout' },
+			});
+			await vi.advanceTimersByTimeAsync(60000);
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+		});
+
+		it('does not retry a timeout error unrelated to its poll timer', async () => {
+			fetch_mock
+				.mockResolvedValueOnce(
+					json_response({ status: 'pending', request_id: 'job-1' }),
+				)
+				.mockRejectedValueOnce(
+					new DOMException('Other timeout', 'TimeoutError'),
+				);
+			const pending = new TavilyResearchProvider()
+				.search({ query: 'test' })
+				.catch((error) => error);
+			await vi.advanceTimersByTimeAsync(5000);
+			await expect(pending).resolves.toMatchObject({
+				type: 'API_ERROR',
+				details: { retryable: false, cause: 'timeout' },
+			});
+			await vi.advanceTimersByTimeAsync(60000);
+			expect(fetch_mock).toHaveBeenCalledTimes(2);
+		});
+
+		it('still honors Retry-After following a timed-out poll', async () => {
+			fetch_mock
+				.mockResolvedValueOnce(
+					json_response({ status: 'pending', request_id: 'job-1' }),
+				)
+				.mockImplementationOnce(() => new Promise(() => {}))
+				.mockResolvedValueOnce(
+					new Response('{}', {
+						status: 429,
+						headers: { 'retry-after': '10' },
+					}),
+				)
+				.mockResolvedValueOnce(
+					json_response({
+						status: 'completed',
+						request_id: 'job-1',
+						content: 'Report',
+					}),
+				);
+			const pending = new TavilyResearchProvider().search({
+				query: 'test',
+			});
+			await vi.advanceTimersByTimeAsync(25000);
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+			await vi.advanceTimersByTimeAsync(14999);
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+			await vi.advanceTimersByTimeAsync(1);
+			await expect(pending).resolves.toMatchObject([
+				{ snippet: 'Report' },
+			]);
+			expect(
+				fetch_mock.mock.calls.map(([, options]) => options.method),
+			).toEqual(['POST', 'GET', 'GET', 'GET']);
+		});
+	});
 	it('does not poll before Retry-After or recreate a throttled task', async () => {
 		fetch_mock
 			.mockResolvedValueOnce(
