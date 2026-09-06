@@ -108,7 +108,9 @@ bodies or credentials are collected.
   requests as errors rather than successful empty extraction. No
   fabricated replacement content is returned.
 - Brave local generic/POI/map grounding is retained. Brave Answers,
-  News/Media and Exa deep responses are validated at runtime.
+  News/Media and Exa deep responses are validated at runtime. The
+  Brave context tool description matches the adapter's total snippet
+  maximum of 256; the per-URL maximum remains 100.
 - Firecrawl answer/highlights may be null. Usable other content is
   kept; explicit no-match results retain their original document
   metadata.

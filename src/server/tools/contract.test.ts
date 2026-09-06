@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as v from 'valibot';
+import { ValibotJsonSchemaAdapter } from '@tmcp/adapter-valibot';
 import { config } from '../../config/env.js';
+import {
+	initialize_brave_llm_context,
+	register_brave_llm_context,
+} from './brave_llm_context.js';
 import {
 	initialize_ai_search,
 	register_ai_search,
@@ -126,6 +131,38 @@ describe('Omnisearch tool descriptions', () => {
 });
 
 describe('Omnisearch public tool schemas', () => {
+	it('advertises distinct total and per-URL Brave snippet limits through JSON Schema', async () => {
+		const previous_key = config.processing.brave_llm_context.api_key;
+		try {
+			config.processing.brave_llm_context.api_key =
+				'brave-contract-key';
+			expect(initialize_brave_llm_context()).toBe(true);
+			const schema = capture_schema(
+				register_brave_llm_context,
+				'brave_llm_context',
+			);
+			const json_schema =
+				await new ValibotJsonSchemaAdapter().toJsonSchema(schema);
+			expect(json_schema.properties).toMatchObject({
+				maximum_number_of_snippets: {
+					description: expect.stringContaining('max 256'),
+				},
+				maximum_number_of_snippets_per_url: {
+					description: expect.stringContaining('max 100'),
+				},
+			});
+			expect(
+				v.safeParse(schema, {
+					query: 'snippet contract',
+					maximum_number_of_snippets: 256,
+					maximum_number_of_snippets_per_url: 100,
+				}).success,
+			).toBe(true);
+		} finally {
+			config.processing.brave_llm_context.api_key = previous_key;
+		}
+	});
+
 	it('advertises configured web search providers only', () => {
 		for (const provider of search_keys) {
 			config.search[provider].api_key = `${provider}-contract-key`;

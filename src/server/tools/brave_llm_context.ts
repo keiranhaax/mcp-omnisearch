@@ -78,7 +78,7 @@ export const register_brave_llm_context = (
 					v.pipe(
 						v.number(),
 						v.description(
-							'Max snippets/chunks in context (max 100).',
+							'Max snippets/chunks in context (max 256).',
 						),
 					),
 				),
