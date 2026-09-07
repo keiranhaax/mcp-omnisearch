@@ -6,13 +6,171 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { get_response_metadata } from '../../../common/response_metadata.js';
 import { config } from '../../../config/env.js';
+import { TavilySearchProvider } from '../../search/tavily/index.js';
 import { TavilyExtractProvider } from './index.js';
 
 const fetch_mock = vi.fn();
 const previous_api_key = config.processing.tavily_extract.api_key;
 
 describe('TavilyExtractProvider response validation', () => {
+	it('isolates metadata across overlapping search and extract requests', async () => {
+		const previous_search_key = config.search.tavily.api_key;
+		config.search.tavily.api_key = 'tavily-test-key';
+		let finish_search!: (response: Response) => void;
+		const pending_response = new Promise<Response>((resolve) => {
+			finish_search = resolve;
+		});
+		fetch_mock
+			.mockReturnValueOnce(pending_response)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						results: [
+							{
+								url: 'https://example.test',
+								raw_content: 'Evidence',
+							},
+						],
+						failed_results: [],
+						request_id: 'extract-overlap',
+						usage: { credits: 1 },
+					}),
+				),
+			)
+			.mockResolvedValueOnce(new Response('{"results":[]}'));
+		try {
+			const search_provider = new TavilySearchProvider();
+			const pending_search = search_provider.search({
+				query: 'first',
+			});
+			await vi.waitFor(() => {
+				expect(fetch_mock).toHaveBeenCalledTimes(1);
+			});
+			const extract =
+				await new TavilyExtractProvider().process_content(
+					'https://example.test',
+				);
+			const unreported = await search_provider.search({
+				query: 'second',
+			});
+			finish_search(
+				new Response(
+					JSON.stringify({
+						results: [],
+						request_id: 'search-overlap',
+						usage: { credits: 2 },
+					}),
+				),
+			);
+			const search = await pending_search;
+			expect(get_response_metadata(search)).toEqual({
+				request_id: 'search-overlap',
+				usage: { credits: 2 },
+			});
+			expect(get_response_metadata(extract)).toEqual({
+				request_id: 'extract-overlap',
+				usage: { credits: 1 },
+			});
+			expect(get_response_metadata(unreported)).toBeUndefined();
+			expect(search).not.toBe(unreported);
+		} finally {
+			config.search.tavily.api_key = previous_search_key;
+		}
+	});
+
+	it.each(
+		[null, false, { private_canary: 'secret' }, []].map(
+			(response_time) => ({ response_time }),
+		),
+	)(
+		'ignores malformed optional metadata without rejecting content: %o',
+		async ({ response_time }) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						results: [
+							{
+								url: 'https://example.test',
+								raw_content: 'Evidence',
+							},
+						],
+						failed_results: [],
+						request_id: 'https://private-canary.test',
+						response_time,
+						usage: { credits: 'private-canary' },
+					}),
+				),
+			);
+			const result =
+				await new TavilyExtractProvider().process_content(
+					'https://example.test',
+				);
+			expect(result.content).toBe('Evidence');
+			expect(JSON.stringify(result)).not.toContain('private-canary');
+			expect(get_response_metadata(result)).toBeUndefined();
+		},
+	);
+
+	it('keeps reported metadata on the request result only', async () => {
+		const urls = [
+			'https://example.test/first',
+			'https://example.test/second',
+			'https://example.test/failed',
+		];
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: [
+						{ url: urls[0], raw_content: 'Evidence one' },
+						{ url: urls[1], raw_content: 'Evidence two' },
+					],
+					failed_results: [{ url: urls[2], error: 'Unavailable' }],
+					request_id: 'extract-request-123',
+					response_time: 1.25,
+					usage: { credits: 1, private_canary: 'secret' },
+					private_canary: 'secret',
+				}),
+			),
+		);
+		const result = await new TavilyExtractProvider().process_content(
+			urls,
+		);
+		expect(get_response_metadata(result)).toEqual({
+			request_id: 'extract-request-123',
+			response_time_seconds: 1.25,
+			usage: { credits: 1 },
+		});
+		const legacy = {
+			content: 'Evidence one\n\nEvidence two',
+			raw_contents: [
+				{ url: urls[0], content: 'Evidence one' },
+				{ url: urls[1], content: 'Evidence two' },
+			],
+			metadata: {
+				word_count: 4,
+				failed_urls: [urls[2]],
+				urls_processed: 3,
+				successful_extractions: 2,
+				extract_depth: 'basic',
+			},
+			source_provider: 'tavily_extract',
+		};
+		expect(JSON.stringify(result)).toBe(JSON.stringify(legacy));
+		expect(Reflect.ownKeys(result)).toEqual(Reflect.ownKeys(legacy));
+		expect(get_response_metadata(result.metadata!)).toBeUndefined();
+		for (const entry of result.raw_contents!) {
+			expect(get_response_metadata(entry)).toBeUndefined();
+			expect(Reflect.ownKeys(entry)).toEqual(['url', 'content']);
+		}
+		expect(JSON.parse(fetch_mock.mock.calls[0][1].body)).toEqual({
+			urls,
+			include_images: false,
+			extract_depth: 'basic',
+		});
+	});
+
 	it.each(['markdown', 'text'] as const)(
 		'forwards explicit %s format without changing canonical mapping',
 		async (format) => {

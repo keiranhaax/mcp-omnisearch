@@ -5,6 +5,7 @@ import {
 } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
 import { parse_provider_response } from '../../../common/provider_response.js';
+import { set_response_metadata } from '../../../common/response_metadata.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	apply_search_operators,
@@ -59,9 +60,10 @@ const tavily_search_response_schema = v.object({
 			}),
 		),
 	),
-	// Tavily's docs declare number<float> but real responses have been
-	// observed returning a string (e.g. "1.67"); accept both.
-	response_time: v.optional(v.union([v.string(), v.number()])),
+	// Optional diagnostics must not invalidate otherwise valid content.
+	request_id: v.optional(v.unknown()),
+	response_time: v.optional(v.unknown()),
+	usage: v.optional(v.unknown()),
 });
 
 const normalize_tavily_date = (date: string) => {
@@ -237,13 +239,15 @@ export class TavilySearchProvider implements SearchProvider {
 					raw_data,
 				);
 
-				return (data.results ?? []).map((result) => ({
+				const results = (data.results ?? []).map((result) => ({
 					title: result.title,
 					url: result.url,
 					snippet: result.content,
 					score: result.score,
 					source_provider: this.name,
 				}));
+				set_response_metadata(results, data);
+				return results;
 			} catch (error) {
 				handle_provider_error(
 					error,

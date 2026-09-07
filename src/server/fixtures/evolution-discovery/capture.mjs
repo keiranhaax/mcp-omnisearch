@@ -1,5 +1,6 @@
-// P0 fixture verification; --p1a allows only reviewed optional additions.
-// --update refreshes P0 snapshots and cannot be combined with --p1a.
+// P0 fixture verification; --p1a/--p1b allow reviewed optional additions.
+// --p1b includes P1A. Phase flags cannot be combined with each other or
+// --update, which refreshes P0 snapshots only.
 // Run only in an approved isolated worktree,
 // after building the exact source revision being recorded. No provider calls.
 import assert from 'node:assert/strict';
@@ -13,25 +14,48 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 assert(
 	process.argv
 		.slice(2)
-		.every((argument) => ['--update', '--p1a'].includes(argument)),
+		.every((argument) =>
+			['--update', '--p1a', '--p1b'].includes(argument),
+		),
 );
 const update = process.argv.includes('--update');
 const p1a = process.argv.includes('--p1a');
+const p1b = process.argv.includes('--p1b');
+assert(!(p1a && p1b), 'Choose only one phase: --p1a or --p1b');
 assert(
 	!(update && p1a),
 	'P1A verification must not overwrite P0 fixtures',
 );
-const additions = p1a
-	? JSON.parse(
+assert(
+	!(update && p1b),
+	'P1B verification must not overwrite P0 fixtures',
+);
+const phases = p1b ? ['p1a', 'p1b'] : p1a ? ['p1a'] : [];
+const additions = await Promise.all(
+	phases.map(async (phase) =>
+		JSON.parse(
 			await readFile(
 				new URL(
-					'../evolution-p1a/schema-additions.json',
+					`../evolution-${phase}/schema-additions.json`,
 					import.meta.url,
 				),
 				'utf8',
 			),
-		)
-	: {};
+		),
+	),
+);
+if (p1b) {
+	const delta = additions[1];
+	assert.deepEqual(Object.keys(delta).sort(), [
+		'web_extract',
+		'web_search',
+	]);
+	for (const fields of Object.values(delta))
+		assert.deepEqual(Object.keys(fields).sort(), [
+			'output_budget_bytes',
+			'response_mode',
+		]);
+}
 const keys = [
 	'TAVILY_API_KEY',
 	'BRAVE_API_KEY',
@@ -158,15 +182,17 @@ for (const profile of profiles) {
 		else {
 			const legacy = structuredClone(tools);
 			for (const tool of legacy) {
-				for (const [field, schema] of Object.entries(
-					additions[tool.name] ?? {},
-				)) {
-					assert.deepEqual(
-						tool.inputSchema.properties[field],
-						schema,
-					);
-					assert(!tool.inputSchema.required.includes(field));
-					delete tool.inputSchema.properties[field];
+				for (const delta of additions) {
+					for (const [field, schema] of Object.entries(
+						delta[tool.name] ?? {},
+					)) {
+						assert.deepEqual(
+							tool.inputSchema.properties[field],
+							schema,
+						);
+						assert(!tool.inputSchema.required.includes(field));
+						delete tool.inputSchema.properties[field];
+					}
 				}
 			}
 			assert.deepEqual(

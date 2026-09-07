@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
 import { parse_provider_response } from '../../../common/provider_response.js';
+import { set_response_metadata } from '../../../common/response_metadata.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	ErrorType,
@@ -34,9 +35,10 @@ const tavily_extract_response_schema = v.object({
 			error: v.string(),
 		}),
 	),
-	// Tavily's docs declare number<float> but real responses have been
-	// observed returning a string (e.g. "1.67"); accept both.
-	response_time: v.optional(v.union([v.string(), v.number()])),
+	// Optional diagnostics must not invalidate otherwise valid content.
+	request_id: v.optional(v.unknown()),
+	response_time: v.optional(v.unknown()),
+	usage: v.optional(v.unknown()),
 });
 
 export class TavilyExtractProvider implements ProcessingProvider {
@@ -150,7 +152,7 @@ export class TavilyExtractProvider implements ProcessingProvider {
 						? data.failed_results.map((f) => f.url)
 						: undefined;
 
-				return {
+				const result: ProcessingResult = {
 					content: combined_content,
 					raw_contents,
 					metadata: {
@@ -162,6 +164,8 @@ export class TavilyExtractProvider implements ProcessingProvider {
 					},
 					source_provider: this.name,
 				};
+				set_response_metadata(result, data);
+				return result;
 			} catch (error) {
 				handle_provider_error(error, this.name, 'extract content');
 			}

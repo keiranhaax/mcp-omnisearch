@@ -67,6 +67,7 @@ export const safe_endpoint = (url: string): string => {
 };
 
 const safe_messages = new Set([
+	'Cannot retain complete canonical result; no evidence was returned',
 	'Invalid API key',
 	'Network request failed',
 	'Operation timed out',
@@ -77,6 +78,9 @@ const safe_messages = new Set([
 ]);
 
 const safe_validation_messages = new Set([
+	'output_budget_bytes requires response_mode=compact or full',
+	'Invalid presentation controls',
+	'Output budget cannot fit required result provenance',
 	'Invalid URL provided; use a public HTTP(S) URL without credentials',
 	'Invalid public domain provided',
 	'At least one URL is required',

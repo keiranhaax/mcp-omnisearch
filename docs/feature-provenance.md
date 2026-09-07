@@ -1,5 +1,39 @@
 # Feature provenance
 
+## P1B: local presentation and request metadata
+
+Implemented independently against the fork's existing contracts. No
+code, test bodies, or dependencies were copied from the proposed
+passage-selector or metadata donors. Existing MIT notices remain.
+
+- `src/common/presentation.ts`: opt-in compact/full envelopes, exact
+  serialized tool-result byte sizing, canonical retention, and a
+  duplicate-aggregate normalization that leaves distinct fields
+  intact.
+- `src/common/passages.ts`: bounded lexical ranking, merged exact
+  source slices, Unicode-safe boundaries, and conservative Markdown,
+  URL, and citation-token atoms. No alternative extraction engine.
+- `src/common/response_metadata.ts`: allowlisted request diagnostics
+  associated with adapter result objects through a WeakMap; legacy
+  JSON and source entry shapes remain unchanged.
+- Tavily search/extract adapters associate root diagnostics without
+  adding request fields, including `include_usage`. Public tools
+  expose this only in opt-in output. Other providers' metadata is
+  preserved.
+
+Public GETs of the official Tavily search/extract Markdown API
+references confirmed root `request_id`, numeric `response_time`, and
+`usage.credits`. Retrieved hashes matched the P1A hashes below. Search
+usage is opt-in upstream by default, so this implementation reports
+unknown usage rather than inventing billing. Numeric strings remain
+accepted as optional provider diagnostics but are not reported as
+measured numbers. Invalid optional metadata does not reject valid
+content. This verifies documentation, not live API behavior or spend.
+
+The user explicitly accepted the existing shared trusted-client result
+boundary for P1B. No per-client ownership was introduced or claimed.
+See [P1B evidence](search-gateway-evolution-p1b.md).
+
 ## P1A: Tavily controls
 
 Inspected on 2026-09-06 against local P0 commit

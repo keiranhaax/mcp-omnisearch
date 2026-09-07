@@ -2,7 +2,11 @@ import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
 import { create_error_response } from '../../common/errors.js';
-import { handle_large_result } from '../../common/results.js';
+import {
+	presentation_schema,
+	present_result,
+	validate_presentation,
+} from '../../common/presentation.js';
 import {
 	ErrorType,
 	ProviderError,
@@ -70,6 +74,7 @@ export const register_web_search = (
 				openWorldHint: true,
 			},
 			schema: v.object({
+				...presentation_schema.entries,
 				...tavily_search_controls_schema.entries,
 				query: v.pipe(
 					v.string(),
@@ -181,6 +186,8 @@ export const register_web_search = (
 			}),
 		},
 		async ({
+			response_mode,
+			output_budget_bytes,
 			query,
 			provider,
 			limit,
@@ -198,6 +205,8 @@ export const register_web_search = (
 			time_range,
 		}) => {
 			try {
+				const started = performance.now();
+				validate_presentation({ response_mode, output_budget_bytes });
 				if (
 					provider !== 'tavily' &&
 					[search_depth, topic, time_range].some(
@@ -248,10 +257,14 @@ export const register_web_search = (
 						? { search_depth, topic, time_range }
 						: {}),
 				});
-				const safe_results = handle_large_result(
-					results,
-					'web_search',
-				);
+				const safe_results = present_result(results, {
+					response_mode,
+					output_budget_bytes,
+					query,
+					provider,
+					operation: 'search',
+					elapsed_ms: Math.round(performance.now() - started),
+				});
 				mark_provider_success('search', provider);
 				return {
 					content: [

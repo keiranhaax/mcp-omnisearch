@@ -1,0 +1,197 @@
+{
+	"date_utc": "2026-09-07",
+	"base_commit": "a2fbc86cc8cd5a3c58764b5ea8b0f04d513d36de",
+	"privacy_boundary": "shared trusted clients, no per-client ownership",
+	"tests": {
+		"passed": 908,
+		"failed": 0,
+		"pending": 0,
+		"files": 70
+	},
+	"checks": "passed",
+	"build": "passed node22 target",
+	"http_smoke": {
+		"passed": [
+			"ping",
+			"upstream-readiness",
+			"authentication",
+			"host-origin",
+			"routes",
+			"legacy-and-modern-14-tools",
+			"bounded-validation-and-protocol-errors",
+			"resource-template-dispatch",
+			"utf8-lossless-bounded-pagination",
+			"modern-header-body-validation",
+			"batch-rejection",
+			"invalid-budget-rejected-before-network"
+		],
+		"count": 12
+	},
+	"stdio_discovery": [
+		{
+			"profile": "all-providers",
+			"tools": [
+				"result_read",
+				"web_search",
+				"github_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 14,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-providers",
+			"tools": ["result_read"],
+			"count": 1,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-github",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 13,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "tavily-only",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract"
+			],
+			"count": 4,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		}
+	],
+	"built_positive_smoke": {
+		"protocol": "2025-06-18",
+		"observations": [
+			{
+				"response_mode": "compact",
+				"bytes": 1879,
+				"canonical_reads": 2,
+				"exact_reconstruction": true
+			},
+			{
+				"response_mode": "full",
+				"bytes": 775,
+				"canonical_reads": 2,
+				"exact_reconstruction": true
+			}
+		],
+		"invalid_before_network": true,
+		"mock_provider_calls": 2,
+		"real_provider_calls": 0
+	},
+	"fixture_measurements": [
+		{
+			"name": "long-report",
+			"legacy_bytes": 29087,
+			"compact_bytes": 1714,
+			"canonical_reads": 2,
+			"anchor_retained": true,
+			"legacy_ms": 40.44547499999999,
+			"compact_ms": 10.04976899999997
+		},
+		{
+			"name": "cjk",
+			"legacy_bytes": 25646,
+			"compact_bytes": 2028,
+			"canonical_reads": 2,
+			"anchor_retained": true,
+			"legacy_ms": 2.2084590000000617,
+			"compact_ms": 5.632569999999987
+		},
+		{
+			"name": "code",
+			"legacy_bytes": 16896,
+			"compact_bytes": 1748,
+			"canonical_reads": 1,
+			"anchor_retained": true,
+			"legacy_ms": 2.139179000000013,
+			"compact_ms": 2.248540000000048
+		},
+		{
+			"name": "no-hit",
+			"legacy_bytes": 22832,
+			"compact_bytes": 1859,
+			"canonical_reads": 1,
+			"anchor_retained": true,
+			"legacy_ms": 1.3937329999999974,
+			"compact_ms": 6.163014000000089
+		}
+	],
+	"measurements_scope": "Synthetic upstream HTTP fixture, measured local dispatch/selection only; not live provider latency, quality or billing",
+	"api_references": [
+		{
+			"url": "https://docs.tavily.com/documentation/api-reference/endpoint/search.md",
+			"sha256": "519714b649b85620e4ceed12d29bb24c47d76cb9a020d81cfa8a7c4987b21a51",
+			"bytes": 28417
+		},
+		{
+			"url": "https://docs.tavily.com/documentation/api-reference/endpoint/extract.md",
+			"sha256": "b5e2f4679e3e3da83044ae8f30c54215d2bcb0d4aeb9e46715e3b3cf9fe70a62",
+			"bytes": 15053
+		}
+	],
+	"historical_fixture_hashes": {
+		"src/common/fixtures/evolution-html/README.md": "a89b3a16933142ccb57a075368c2aaaa6909d0424d265b73cbc38751efa04cd1",
+		"src/common/fixtures/evolution-html/article.html.fixture": "2c93f692959df97f2682a3aca5e03e9f00d456f5d7feeb5e06f7ecd81df64386",
+		"src/common/fixtures/evolution-html/challenge.html.fixture": "dbff11ba7da83082fbc3e9f43b54e1f0a407bf3330db41b3443d50fe0a81e978",
+		"src/common/fixtures/evolution-html/cjk.html.fixture": "ddf1c74e164a24e26a0c1e0856e4aee72cbef15d5482a91d32a7a2e100f79bd6",
+		"src/common/fixtures/evolution-html/documentation.html.fixture": "978046b6c1b7c6c0e323fd3d55ce52d6fa762f8c0fc9a08e503ffa2a9945b8fb",
+		"src/common/fixtures/evolution-html/empty.html.fixture": "c25367a8a61dae591bc052704ddca120004c59ffe271e0c4373c90a0c1177595",
+		"src/common/fixtures/evolution-html/fragment.html.fixture": "919a21da5a608fb8c3967bdc783cc5cbb83c22dc9409e3721d7e8e01a3804241",
+		"src/common/fixtures/evolution-html/malformed.html.fixture": "d7ba089585b9fa1aa0776142e01b0897cc7b165e66cc097205de352ccfd57109",
+		"src/common/fixtures/evolution-html/manifest.json": "d357bf7bba07fc0d25cecf714e5aaa4af45cf3ee1ac8803db07119afcc625f46",
+		"src/common/fixtures/evolution-html/untrusted.html.fixture": "dfded85a79031e763b97311d835b5556413f761262bb408b5c5667b50572195c",
+		"src/server/fixtures/evolution-discovery/README.md": "72952f40b8075acbd7c429961e0fdfba7e37e2c8f913c7ef69eefeb7df992a71",
+		"src/server/fixtures/evolution-discovery/all-providers.json": "814c57c51b5a1753e2460e957b4b39b6ebd1a8156a37df15cf951a1b0c0bcdb1",
+		"src/server/fixtures/evolution-discovery/no-github.json": "ed4615c2542e1883d58f9260023172ac0f2005edc46a4ead9c7a3f22bbd36a4d",
+		"src/server/fixtures/evolution-discovery/no-providers.json": "40d40d066cb2a13f56a2c8869459e00ff7eea78b2acb38e172593526534cfcad",
+		"src/server/fixtures/evolution-discovery/tavily-only.json": "e1a6ef257e3a8798b9d417913b2875051d37cabf60264dcb95cc521c3c090d8b",
+		"src/server/fixtures/evolution-p1a/README.md": "9417824401de72c5e8b85d9ae399bc32c23d96a5f3cdd4310c4a288f752156f1",
+		"src/server/fixtures/evolution-p1a/schema-additions.json": "94e05227041fb705aade942d8fab7c2aed662fe38756473ffad1ab8456834e04",
+		"src/server/tools/__snapshots__/evolution_tools.test.ts.snap": "8f1bd0f833e1590964c79c19079c9529da0eec30413b74935ed4453ae31ac2be"
+	},
+	"production_checkout_commit": "047a7e1e3fce8451753e0e8bcffef6dcd13b4554",
+	"production_status": ["?? .hermes/", "?? package-lock.json"],
+	"run_directory": "/tmp/omnisearch-evolution-p1b-HF26M2ho",
+	"not_performed": [
+		"dependency installation",
+		"paid/live provider calls",
+		"commit",
+		"merge",
+		"push",
+		"deployment",
+		"service restart"
+	]
+}

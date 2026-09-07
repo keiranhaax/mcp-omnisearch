@@ -6,6 +6,7 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { get_response_metadata } from '../../../common/response_metadata.js';
 import { config } from '../../../config/env.js';
 import { TavilySearchProvider } from './index.js';
 
@@ -13,6 +14,98 @@ const fetch_mock = vi.fn();
 const previous_api_key = config.search.tavily.api_key;
 
 describe('TavilySearchProvider', () => {
+	it.each(
+		[null, false, { private_canary: 'secret' }, []].map(
+			(response_time) => ({ response_time }),
+		),
+	)(
+		'ignores malformed optional metadata without rejecting content: %o',
+		async ({ response_time }) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						results: [],
+						request_id: 'https://private-canary.test',
+						response_time,
+						usage: { credits: 'private-canary' },
+					}),
+				),
+			);
+			const result = await new TavilySearchProvider().search({
+				query: 'evidence',
+			});
+			expect(JSON.stringify(result)).toBe('[]');
+			expect(get_response_metadata(result)).toBeUndefined();
+		},
+	);
+
+	it('keeps reported metadata on the request result only', async () => {
+		const entries = [
+			{
+				title: 'First',
+				url: 'https://example.test/first',
+				content: 'Evidence one',
+				score: 0.8,
+			},
+			{
+				title: 'Second',
+				url: 'https://example.test/second',
+				content: 'Evidence two',
+				score: 0.5,
+			},
+		];
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					results: entries,
+					request_id: 'search-request-123',
+					response_time: 0.75,
+					usage: { credits: 2, private_canary: 'secret' },
+					private_canary: 'secret',
+				}),
+			),
+		);
+
+		const result = await new TavilySearchProvider().search({
+			query: 'evidence',
+		});
+		expect(get_response_metadata(result)).toEqual({
+			request_id: 'search-request-123',
+			response_time_seconds: 0.75,
+			usage: { credits: 2 },
+		});
+		expect(JSON.stringify(result)).toBe(
+			JSON.stringify(
+				entries.map(({ title, url, content, score }) => ({
+					title,
+					url,
+					snippet: content,
+					score,
+					source_provider: 'tavily',
+				})),
+			),
+		);
+		expect(Reflect.ownKeys(result)).toEqual(['0', '1', 'length']);
+		for (const entry of result) {
+			expect(get_response_metadata(entry)).toBeUndefined();
+			expect(Reflect.ownKeys(entry)).toEqual([
+				'title',
+				'url',
+				'snippet',
+				'score',
+				'source_provider',
+			]);
+		}
+		expect(JSON.parse(fetch_mock.mock.calls[0][1].body)).toEqual({
+			query: 'evidence',
+			max_results: 5,
+			include_domains: [],
+			exclude_domains: [],
+			search_depth: 'basic',
+			topic: 'general',
+		});
+	});
+
 	it.each([
 		{ search_depth: 'extreme' },
 		{ search_depth: null },

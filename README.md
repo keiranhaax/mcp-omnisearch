@@ -171,6 +171,75 @@ See [P1A provenance](docs/feature-provenance.md) for the exact donor
 revisions and verified documentation contracts. Live provider behavior
 and deployment require separate verification.
 
+### Opt-in compact and full evidence
+
+`web_search` and `web_extract` accept `response_mode` and
+`output_budget_bytes`. These are local presentation controls, not
+provider request options. Omission or `response_mode: "legacy"`
+preserves the existing response shape and pagination behavior.
+
+- `compact`: return complete normalized results if they fit; otherwise
+  return selected source passages plus a handle for the full canonical
+  result. Default budget: 12000 bytes.
+- `full`: return complete normalized results, using a retained handle
+  when they exceed the budget. Default budget: 80000 bytes. This does
+  not bypass retention quotas or fetch provider-omitted page content.
+- `output_budget_bytes`: integer 2048–80000, valid only with explicit
+  `compact` or `full`. Counts UTF-8 bytes of the serialized MCP tool
+  result, including escaped text, **excluding JSON-RPC framing**.
+
+```json
+{
+	"provider": "tavily",
+	"url": "https://example.com/manual",
+	"query": "installation requirements",
+	"response_mode": "compact",
+	"output_budget_bytes": 4096
+}
+```
+
+New-mode responses carry `metadata` once per request: provider,
+operation, measured adapter elapsed milliseconds, local completeness,
+provider-page completeness (unknown), and reported Tavily request ID,
+response time, and usage when valid. Unknown usage is `null`, not an
+estimated charge. No `include_usage` request flag is added, so credit
+usage is normally absent unless the provider returns it. Other
+providers' existing result metadata is preserved, not reinterpreted.
+
+Compact selection uses the existing query, deterministic lexical
+ranking, source-order passages, and labelled `leading`/`no_hit`
+fallbacks. Source IDs are JSON Pointers within canonical `result`;
+passage offsets are UTF-16 code units into that source's normalized
+text, not original HTML. Source URL query parameters remain intact.
+Supported headings and top-level fenced code are atomic; oversized
+atoms may be omitted. This is not a complete Markdown parser or a
+semantic-relevance guarantee. Limited budgets can omit whole sources;
+`source_count` and `omitted_sources` make this explicit.
+
+An exact duplicate aggregate `content` is removed only when it equals
+all `raw_contents[].content` joined with two newlines. Distinct
+summaries, fields, metadata, URLs, and citations remain canonical.
+Small complete results avoid storage. Any local omission retains the
+canonical JSON first, even below the old offload threshold. Storage
+failure returns a bounded error, never an unusable handle.
+
+Read `result_id` with `result_read`. Follow `next_offset` and
+`next_byte_offset` (passed as `byte_offset`); insert a newline between
+chunks only when `next_byte_offset` is absent and another page
+remains. The reconstructed JSON has `metadata` and `result`, without a
+second readable copy of the canonical text. Existing `.txt`/`.omr`
+results and legacy readable views remain supported. TTL, oldest-first
+eviction, per-result quotas, and aggregate quotas still apply.
+
+**Privacy boundary:** this instance's clients are mutually trusted.
+Opaque handles and private filesystem permissions do **not** enforce
+per-client ownership. A client with access to this instance and a
+valid handle can read its retained result. Do not expose it as a
+multi-tenant private evidence store.
+
+See the [P1B report](docs/search-gateway-evolution-p1b.md) for offline
+validation and remaining release gates.
+
 ## Configuration
 
 ### Local stdio client

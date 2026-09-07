@@ -3,7 +3,11 @@ import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
 import { create_error_response } from '../../common/errors.js';
 import { firecrawl_format_schema } from '../../common/firecrawl_utils.js';
-import { handle_large_result } from '../../common/results.js';
+import {
+	presentation_schema,
+	present_result,
+	validate_presentation,
+} from '../../common/presentation.js';
 import {
 	ErrorType,
 	ProcessingProvider,
@@ -364,6 +368,7 @@ export const register_web_extract = (
 				openWorldHint: true,
 			},
 			schema: v.object({
+				...presentation_schema.entries,
 				chunks_per_source: v.optional(
 					v.pipe(
 						v.number(),
@@ -456,6 +461,8 @@ export const register_web_extract = (
 			}),
 		},
 		async ({
+			response_mode,
+			output_budget_bytes,
 			url,
 			query,
 			provider,
@@ -467,6 +474,8 @@ export const register_web_extract = (
 			format,
 		}) => {
 			try {
+				const started = performance.now();
+				validate_presentation({ response_mode, output_budget_bytes });
 				if (
 					provider !== 'tavily' &&
 					(chunks_per_source !== undefined || format !== undefined)
@@ -579,10 +588,15 @@ export const register_web_extract = (
 					extract_depth,
 					provider_options,
 				);
-				const safe_result = handle_large_result(
-					result,
-					'web_extract',
-				);
+				const safe_result = present_result(result, {
+					response_mode,
+					output_budget_bytes,
+					query,
+					urls: url,
+					provider,
+					operation: resolved_mode,
+					elapsed_ms: Math.round(performance.now() - started),
+				});
 				mark_provider_success('processing', provider);
 				return {
 					content: [

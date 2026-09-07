@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ValibotJsonSchemaAdapter } from '@tmcp/adapter-valibot';
 import type { GenericSchema } from 'valibot';
 import {
@@ -57,6 +59,15 @@ const p1a_additions = JSON.parse(
 		'utf8',
 	),
 ) as Record<string, Record<string, unknown>>;
+const p1b_additions = JSON.parse(
+	readFileSync(
+		new URL(
+			'./fixtures/evolution-p1b/schema-additions.json',
+			import.meta.url,
+		),
+		'utf8',
+	),
+) as Record<string, Record<string, unknown>>;
 const snapshot = (name: string) =>
 	JSON.parse(
 		readFileSync(
@@ -68,7 +79,7 @@ const snapshot = (name: string) =>
 		),
 	);
 // Preserve the captured P0 schemas byte-for-byte; permit only reviewed
-// optional P1A additions, checking their exact client-visible definitions.
+// optional P1A/P1B additions, checking their exact client-visible definitions.
 const expect_p0_compatibility = (
 	tools: Awaited<ReturnType<typeof discover>>,
 	profile: string,
@@ -79,12 +90,14 @@ const expect_p0_compatibility = (
 			string,
 			unknown
 		>;
-		for (const [field, schema] of Object.entries(
-			p1a_additions[tool.name] ?? {},
-		)) {
-			expect(properties[field]).toEqual(schema);
-			expect(tool.inputSchema.required).not.toContain(field);
-			delete properties[field];
+		for (const additions of [p1a_additions, p1b_additions]) {
+			for (const [field, schema] of Object.entries(
+				additions[tool.name] ?? {},
+			)) {
+				expect(properties[field]).toEqual(schema);
+				expect(tool.inputSchema.required).not.toContain(field);
+				delete properties[field];
+			}
 		}
 	}
 	expect(legacy).toEqual(snapshot(profile));
@@ -188,13 +201,26 @@ describe('P0 configured discovery contract', () => {
 		expect_p0_compatibility(tools, 'tavily-only');
 	});
 
-	it('adds P1A chunks while compact mode and a local extractor remain absent', async () => {
+	it('adds only the two optional P1B presentation fields while retaining P1A chunks and no local extractor', async () => {
 		const tools = await discover();
+		expect(Object.keys(p1b_additions).sort()).toEqual([
+			'web_extract',
+			'web_search',
+		]);
 		for (const name of ['web_search', 'web_extract']) {
+			expect(Object.keys(p1b_additions[name]).sort()).toEqual([
+				'output_budget_bytes',
+				'response_mode',
+			]);
 			const schema = tools.find(
 				(tool) => tool.name === name,
 			)!.inputSchema;
-			expect(schema.properties).not.toHaveProperty('response_mode');
+			for (const [field, definition] of Object.entries(
+				p1b_additions[name],
+			)) {
+				expect(schema.properties).toHaveProperty(field, definition);
+				expect(schema.required).not.toContain(field);
+			}
 		}
 		const extract = tools.find(({ name }) => name === 'web_extract')!;
 		expect(extract.inputSchema.properties).toHaveProperty('query');
@@ -221,6 +247,48 @@ describe('P0 configured discovery contract', () => {
 			'result_read',
 		]);
 	});
+});
+
+describe('built discovery capture phase guards', () => {
+	it.each([
+		{
+			flags: ['--update', '--p1a'],
+			error: 'P1A verification must not overwrite P0 fixtures',
+		},
+		{
+			flags: ['--update', '--p1b'],
+			error: 'P1B verification must not overwrite P0 fixtures',
+		},
+		{
+			flags: ['--p1a', '--p1b'],
+			error: 'Choose only one phase: --p1a or --p1b',
+		},
+	])(
+		'rejects $flags before capture or fixture writes',
+		({ flags, error }) => {
+			const result = spawnSync(
+				process.execPath,
+				[
+					fileURLToPath(
+						new URL(
+							'./fixtures/evolution-discovery/capture.mjs',
+							import.meta.url,
+						),
+					),
+					...flags,
+				],
+				{
+					env: { PATH: process.env.PATH, HOME: home, CI: 'true' },
+					encoding: 'utf8',
+					timeout: 5000,
+				},
+			);
+			expect(result.error).toBeUndefined();
+			expect(result.status).toBe(1);
+			expect(result.stdout).toBe('');
+			expect(result.stderr).toContain(error);
+		},
+	);
 });
 
 describe('P0 result privacy boundary, not tenant isolation', () => {

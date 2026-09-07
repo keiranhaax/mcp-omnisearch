@@ -1,0 +1,28 @@
+{
+	"web_search": {
+		"response_mode": {
+			"enum": ["legacy", "compact", "full"],
+			"type": "string",
+			"description": "Opt-in presentation. Omitted/legacy preserves existing output; compact selects evidence; full retains complete evidence with pagination when needed."
+		},
+		"output_budget_bytes": {
+			"type": "integer",
+			"minimum": 2048,
+			"maximum": 80000,
+			"description": "UTF-8 byte cap for the serialized MCP tool result, including escaped content, excluding JSON-RPC framing. Compact/full only; defaults 12000/80000."
+		}
+	},
+	"web_extract": {
+		"response_mode": {
+			"enum": ["legacy", "compact", "full"],
+			"type": "string",
+			"description": "Opt-in presentation. Omitted/legacy preserves existing output; compact selects evidence; full retains complete evidence with pagination when needed."
+		},
+		"output_budget_bytes": {
+			"type": "integer",
+			"minimum": 2048,
+			"maximum": 80000,
+			"description": "UTF-8 byte cap for the serialized MCP tool result, including escaped content, excluding JSON-RPC framing. Compact/full only; defaults 12000/80000."
+		}
+	}
+}
