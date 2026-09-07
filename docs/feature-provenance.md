@@ -1,5 +1,48 @@
 # Feature provenance
 
+## P3A: controlled local HTML fetching
+
+Implemented independently on P2 commit `c188f5d` with installed Node
+HTTP/TLS, DNS, streams, zlib, TextDecoder and BlockList APIs. No donor
+implementation, parser package, new dependency or license material was
+imported. Existing notices and dependency patches are unchanged.
+
+- `src/common/public_address.ts` uses a conservative snapshot of IANA
+  address/namespace assignments and denies cloud metadata, transition
+  and local destinations.
+- `src/common/safe_fetch.ts` pins DNS results into actual connections,
+  revalidates redirects, bounds plaintext HTTP framing and
+  encoded/decoded/text response bytes, and composes
+  cancellation/deadlines. Decoder completion holds the lease through
+  native work and natural final-flush completion/error. Its injectable
+  transport is a test seam, not a public private-address bypass.
+- `src/common/resource_limits.ts` reuses admission/queue handling for
+  a local-fetch lease and provisional reservation; shared provider
+  defaults remain unchanged. `errors.ts` adds fixed safe failure
+  reasons using existing error kinds.
+- Tests are independently authored synthetic address, HTTP/TLS,
+  compression, charset, cancellation and resource fixtures. They do
+  not demonstrate Defuddle parsing or live extraction quality.
+
+Primary references reviewed on 2026-09-07:
+
+- [IANA IPv4 special-purpose registry](https://www.iana.org/assignments/iana-ipv4-special-registry/)
+- [IANA IPv6 special-purpose registry](https://www.iana.org/assignments/iana-ipv6-special-registry/)
+- [IANA IPv6 unicast assignments](https://www.iana.org/assignments/ipv6-unicast-address-assignments/)
+- [IANA special-use names](https://www.iana.org/assignments/special-use-domain-names/)
+- [Node 22 HTTP API](https://nodejs.org/docs/latest-v22.x/api/http.html)
+- [Node 22 DNS API](https://nodejs.org/docs/latest-v22.x/api/dns.html)
+
+The installed Node `22.23.2` bundled zlib source was inspected for
+native callback, destroy and final-flush ordering. Those
+implementation-sensitive assumptions have offline regressions and must
+be rechecked on runtime upgrades; they are not a promise of hard
+native-memory containment.
+
+P3B dependency provenance and parser/package validation remain
+unapproved and unverified. See the
+[P3A evidence](search-gateway-evolution-p3a.md).
+
 ## P2: typed metadata, lifecycle recovery, and sanitization
 
 Implemented independently on P1B commit `c86e955` using the existing

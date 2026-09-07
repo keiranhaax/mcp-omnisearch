@@ -3,12 +3,53 @@ import {
 	create_error_response,
 	handle_provider_error,
 	handle_rate_limit,
+	local_fetch_error,
 	MAX_PUBLIC_ERROR_LENGTH,
 	public_error_metadata,
 	sanitize_query,
 } from './errors.js';
 import { ErrorType, ProviderError } from './types.js';
 import { is_retryable_error } from './retry.js';
+
+describe('local extraction errors', () => {
+	it.each([
+		'unsafe_address',
+		'dns_failure',
+		'peer_mismatch',
+		'connection_failed',
+		'tls_failed',
+		'redirect_limit',
+		'redirect_downgrade',
+		'invalid_redirect',
+		'headers_too_large',
+		'response_too_large',
+		'unsupported_content',
+		'unsupported_encoding',
+		'invalid_encoding',
+		'upstream_status',
+	] as const)(
+		'keeps %s fixed, typed, non-retryable, and useful publicly',
+		(reason) => {
+			const error = local_fetch_error(reason);
+			expect(error.details).toEqual({
+				cause: reason,
+				retryable: false,
+			});
+			expect(error.cause).toBeUndefined();
+			expect(create_error_response(error).error).toContain(
+				error.message,
+			);
+			expect(public_error_metadata(error)).toEqual({
+				provider: 'defuddle',
+				retryable: false,
+				kind:
+					reason === 'unsafe_address'
+						? 'bad_input'
+						: 'upstream_failure',
+			});
+		},
+	);
+});
 
 it('distinguishes local storage failure from upstream failure', () => {
 	expect(

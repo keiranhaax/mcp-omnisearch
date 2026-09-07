@@ -38,6 +38,8 @@ const busy = (provider: string) =>
 const acquire = async (
 	provider: string,
 	signal?: AbortSignal,
+	concurrency = PROVIDER_CONCURRENCY,
+	queue_limit = PROVIDER_QUEUE_LIMIT,
 ): Promise<ProviderLoad> => {
 	throw_if_aborted(signal);
 	let state = providers.get(provider);
@@ -53,11 +55,11 @@ const acquire = async (
 		};
 		providers.set(provider, state);
 	}
-	if (state.active < PROVIDER_CONCURRENCY) {
+	if (state.active < concurrency) {
 		state.active++;
 		return state;
 	}
-	if (state.queue.length >= PROVIDER_QUEUE_LIMIT) {
+	if (state.queue.length >= queue_limit) {
 		state.rejected++;
 		throw busy(provider);
 	}
@@ -113,6 +115,42 @@ export const with_provider_slot = async <T>(
 		release(state);
 	}
 };
+
+// P3A admission reservation, not a measurement or a process memory limit.
+// Queue entries hold closures/URLs, never fetched HTML. The lease must span
+// fetching AND its consumer; returning retained input escapes this accounting.
+export const LOCAL_FETCH_CONCURRENCY = 1;
+export const LOCAL_FETCH_QUEUE_LIMIT = 8;
+export const LOCAL_FETCH_RESERVATION_BYTES = 32 * 1024 * 1024;
+let local_fetch_reserved_bytes = 0;
+
+export const with_local_fetch_slot = async <T>(
+	signal: AbortSignal | undefined,
+	fn: () => Promise<T>,
+): Promise<T> => {
+	const state = await acquire(
+		'local_fetch',
+		signal,
+		LOCAL_FETCH_CONCURRENCY,
+		LOCAL_FETCH_QUEUE_LIMIT,
+	);
+	local_fetch_reserved_bytes += LOCAL_FETCH_RESERVATION_BYTES;
+	try {
+		throw_if_aborted(signal);
+		const result = await fn();
+		throw_if_aborted(signal);
+		return result;
+	} finally {
+		local_fetch_reserved_bytes -= LOCAL_FETCH_RESERVATION_BYTES;
+		release(state);
+	}
+};
+
+export const get_local_fetch_snapshot = () => ({
+	active: providers.get('local_fetch')?.active ?? 0,
+	queued: providers.get('local_fetch')?.queue.length ?? 0,
+	reserved_bytes: local_fetch_reserved_bytes,
+});
 
 export const get_resource_snapshot = () => ({
 	provider_concurrency: PROVIDER_CONCURRENCY,

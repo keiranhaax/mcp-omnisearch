@@ -1,0 +1,119 @@
+{
+	"date_utc": "2026-09-07",
+	"checkpoint": "implementation verification before subsequent commit/build staging",
+	"promotion_receipt": "/home/ubuntu/backups/mcp-omnisearch-p3a-20260907-EFIkoK/RESULT.md",
+	"base_commit": "c188f5d1f21337cee3ff877b41371bfeebdc4c1d",
+	"state": "uncommitted P3A worktree changes; no production enablement",
+	"runtime": { "node": "22.23.2", "vitest": "4.1.10" },
+	"focused_tests": {
+		"passed": 750,
+		"failed": 0,
+		"files": 4,
+		"fetch_tests": 82
+	},
+	"full_tests": {
+		"passed": 1779,
+		"failed": 0,
+		"pending": 0,
+		"files": 74
+	},
+	"checks": {
+		"format_lint_types": "passed",
+		"build": "passed node22 target",
+		"shellcheck": "passed",
+		"diff_whitespace": "passed"
+	},
+	"http_smoke": { "passed_groups": 12 },
+	"discovery": {
+		"all_providers": 14,
+		"no_providers": 1,
+		"no_github": 13,
+		"tavily_only": 4,
+		"network_attempted": false,
+		"schema_delta": false
+	},
+	"p1b_recovery": {
+		"compact_bytes": 1879,
+		"full_bytes": 775,
+		"exact_reconstruction": true,
+		"reads_each": 2
+	},
+	"p2_recovery": {
+		"exact_reconstruction": true,
+		"reads": [20, 78, 20, 39],
+		"compact_bytes": [1779, 1698]
+	},
+	"candidate_limits": {
+		"encoded_body_bytes": 5242880,
+		"decoded_body_bytes": 5242880,
+		"utf8_text_bytes": 5242880,
+		"plaintext_http_bytes_per_hop": 6291456,
+		"header_bytes": 16384,
+		"redirects": 5,
+		"informational_responses": 4,
+		"dns_answers": 32,
+		"total_ms": 20000,
+		"dns_ms": 3000,
+		"connect_tls_ms": 5000,
+		"headers_ms": 5000,
+		"body_idle_ms": 3000,
+		"concurrency": 1,
+		"queue": 8,
+		"reservation_bytes": 33554432
+	},
+	"measurement": {
+		"scope": "final focused passing loopback fixture; not a worst-case memory or production latency claim",
+		"decoded_bytes": 4194007,
+		"elapsed_ms": 79,
+		"independent_ticks": 71,
+		"event_loop_max_ms": 10.068,
+		"sampled_rss_delta": 12582912,
+		"sampled_external_delta": 6095261
+	},
+	"native_decoder_lifecycle": {
+		"pending_write_lease_checks": "passed for gzip, deflate, Brotli",
+		"final_flush_lease_checks": "passed for gzip, deflate, Brotli",
+		"truncated_trailer_checks": "passed for gzip, deflate, Brotli; no consumer invocation",
+		"final_flush_regressions_observed_red_then_green": 6,
+		"independent_review": "no remaining findings in the final-flush correction; static review, not an additional test run",
+		"hard_native_cpu_or_memory_containment": false,
+		"deadline_may_be_exceeded_while_awaiting_native_settlement": true
+	},
+	"production": {
+		"head": "c188f5d1f21337cee3ff877b41371bfeebdc4c1d",
+		"artifact_hashes_match_prior_checkpoint": true,
+		"prior_guard_pid_exists": true,
+		"dirty_untracked_path_list_preserved": true,
+		"modified": false
+	},
+	"not_performed": [
+		"dependency installation",
+		"Defuddle parser or registration",
+		"real provider calls",
+		"public-page staging",
+		"production writes",
+		"configuration or retention changes",
+		"workflow changes",
+		"staging Git changes",
+		"commits",
+		"pushes",
+		"deployment",
+		"service restart"
+	],
+	"unverified": [
+		"Defuddle production imports and dependency resolution",
+		"terminable parser and auxiliary-network denial",
+		"packaged worker",
+		"P3 canonical evidence integration",
+		"public-page extraction",
+		"hard OS network and memory containment",
+		"final operating thresholds",
+		"live provider entitlement and billing",
+		"live citation fidelity",
+		"Firecrawl lifecycle and cancellation",
+		"Context transaction-identification failure",
+		"P2 hosted CI provenance"
+	],
+	"test_report_directory": "/tmp/omnisearch-p3a-gate-yNfmVZ",
+	"test_report_file": "tests-final.json"
+}

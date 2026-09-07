@@ -196,7 +196,42 @@ export const safe_endpoint = (url: string): string => {
 	}
 };
 
+const local_fetch_messages = {
+	unsafe_address: 'Local extraction destination is not public',
+	dns_failure: 'Local extraction DNS resolution failed',
+	peer_mismatch:
+		'Local extraction connection did not match its approved address',
+	connection_failed: 'Local extraction connection failed',
+	tls_failed: 'Local extraction TLS verification failed',
+	redirect_limit: 'Local extraction redirect limit exceeded',
+	redirect_downgrade:
+		'Local extraction HTTPS downgrade is not allowed',
+	invalid_redirect: 'Local extraction redirect is invalid',
+	headers_too_large:
+		'Local extraction response headers exceed limits',
+	response_too_large: 'Local extraction response exceeds byte limits',
+	unsupported_content: 'Local extraction requires HTML or XHTML',
+	unsupported_encoding: 'Local extraction encoding is unsupported',
+	invalid_encoding: 'Local extraction response could not be decoded',
+	upstream_status:
+		'Local extraction target returned an unsuccessful status',
+} as const;
+
+export type LocalFetchFailure = keyof typeof local_fetch_messages;
+
+// No URL, address, page text, or upstream exception is attached.
+export const local_fetch_error = (reason: LocalFetchFailure) =>
+	new ProviderError(
+		reason === 'unsafe_address'
+			? ErrorType.INVALID_INPUT
+			: ErrorType.PROVIDER_ERROR,
+		local_fetch_messages[reason],
+		'defuddle',
+		{ retryable: false, cause: reason },
+	);
+
 const safe_messages = new Set([
+	...Object.values(local_fetch_messages),
 	'Cannot retain complete canonical result; no evidence was returned',
 	'Invalid API key',
 	'Network request failed',
@@ -208,6 +243,7 @@ const safe_messages = new Set([
 ]);
 
 const safe_validation_messages = new Set([
+	local_fetch_messages.unsafe_address,
 	'output_budget_bytes requires response_mode=compact or full',
 	'Invalid presentation controls',
 	'Output budget cannot fit required result provenance',
