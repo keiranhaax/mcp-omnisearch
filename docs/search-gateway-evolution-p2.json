@@ -1,0 +1,355 @@
+{
+	"date_utc": "2026-09-07",
+	"base_commit": "c86e955fe8d5687b62e576b4b46ea2ebf3465d71",
+	"scope": "P2 source implementation and offline validation; uncommitted and unstaged",
+	"privacy_boundary": "shared trusted clients; no per-client job/result ownership",
+	"execution": {
+		"host": "vnic-keiran",
+		"node": "v22.23.2",
+		"platform": "linux",
+		"arch": "arm64",
+		"worktree": "/home/ubuntu/worktrees/mcp-omnisearch-evolution-p0-20260906"
+	},
+	"baseline": {
+		"report": "baseline-tests.json",
+		"success": true,
+		"passed": 908,
+		"failed": 0,
+		"filtered_or_pending": 0,
+		"files": 70
+	},
+	"final_tests": {
+		"report": "final-tests.json",
+		"success": true,
+		"passed": 1119,
+		"failed": 0,
+		"filtered_or_pending": 0,
+		"files": 72
+	},
+	"regression_runs": [
+		{
+			"report": "lifecycle-red.json",
+			"success": false,
+			"passed": 0,
+			"failed": 12,
+			"filtered_or_pending": 0,
+			"files": 1
+		},
+		{
+			"report": "typed-errors-health-red.json",
+			"success": false,
+			"passed": 66,
+			"failed": 84,
+			"filtered_or_pending": 0,
+			"files": 3
+		},
+		{
+			"report": "typed-errors-health-green.json",
+			"success": true,
+			"passed": 150,
+			"failed": 0,
+			"filtered_or_pending": 0,
+			"files": 3
+		},
+		{
+			"report": "typed-errors-health-compatibility.json",
+			"success": true,
+			"passed": 49,
+			"failed": 0,
+			"filtered_or_pending": 0,
+			"files": 2
+		},
+		{
+			"report": "provider-sanitization-red-validated.json",
+			"success": false,
+			"passed": 49,
+			"failed": 33,
+			"filtered_or_pending": 0,
+			"files": 6
+		},
+		{
+			"report": "provider-sanitization-green.json",
+			"success": true,
+			"passed": 132,
+			"failed": 0,
+			"filtered_or_pending": 0,
+			"files": 7
+		},
+		{
+			"report": "review-regressions-red.json",
+			"success": false,
+			"passed": 18,
+			"failed": 9,
+			"filtered_or_pending": 0,
+			"files": 1
+		},
+		{
+			"report": "review-regressions-green.json",
+			"success": true,
+			"passed": 203,
+			"failed": 0,
+			"filtered_or_pending": 0,
+			"files": 7
+		},
+		{
+			"report": "storage-classification-red.json",
+			"success": false,
+			"passed": 0,
+			"failed": 2,
+			"filtered_or_pending": 106,
+			"files": 2
+		},
+		{
+			"report": "observation-regressions-red.json",
+			"success": false,
+			"passed": 0,
+			"failed": 2,
+			"filtered_or_pending": 27,
+			"files": 1
+		},
+		{
+			"report": "final-retention-red.json",
+			"success": false,
+			"passed": 1,
+			"failed": 1,
+			"filtered_or_pending": 28,
+			"files": 1
+		},
+		{
+			"report": "final-retention-green.json",
+			"success": true,
+			"passed": 62,
+			"failed": 0,
+			"filtered_or_pending": 0,
+			"files": 2
+		}
+	],
+	"http_smoke": {
+		"passed": [
+			"ping",
+			"upstream-readiness",
+			"authentication",
+			"host-origin",
+			"routes",
+			"legacy-and-modern-14-tools",
+			"bounded-validation-and-protocol-errors",
+			"resource-template-dispatch",
+			"utf8-lossless-bounded-pagination",
+			"modern-header-body-validation",
+			"batch-rejection",
+			"invalid-budget-rejected-before-network"
+		],
+		"count": 12
+	},
+	"stdio_discovery": [
+		{
+			"profile": "all-providers",
+			"tools": [
+				"result_read",
+				"web_search",
+				"github_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 14,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-providers",
+			"tools": ["result_read"],
+			"count": 1,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "no-github",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract",
+				"brave_llm_context",
+				"brave_media_search",
+				"brave_news_search",
+				"firecrawl_agent",
+				"context_web_extract",
+				"context_brand_intel",
+				"context_styleguide",
+				"context_classify",
+				"context_transaction_identify"
+			],
+			"count": 13,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		},
+		{
+			"profile": "tavily-only",
+			"tools": [
+				"result_read",
+				"web_search",
+				"ai_search",
+				"web_extract"
+			],
+			"count": 4,
+			"protocol": "2025-06-18",
+			"network_attempted": false
+		}
+	],
+	"p1b_built_smoke": {
+		"protocol": "2025-06-18",
+		"observations": [
+			{
+				"response_mode": "compact",
+				"bytes": 1879,
+				"canonical_reads": 2,
+				"exact_reconstruction": true
+			},
+			{
+				"response_mode": "full",
+				"bytes": 775,
+				"canonical_reads": 2,
+				"exact_reconstruction": true
+			}
+		],
+		"invalid_before_network": true,
+		"mock_provider_calls": 2,
+		"real_provider_calls": 0
+	},
+	"p2_built_smoke": {
+		"protocol": "2025-06-18",
+		"observations": [
+			{
+				"name": "ai_search",
+				"partial_failure": true,
+				"canonical_reads": 20,
+				"exact_reconstruction": true
+			},
+			{
+				"name": "firecrawl_agent",
+				"partial_failure": true,
+				"canonical_reads": 78,
+				"exact_reconstruction": true
+			},
+			{
+				"name": "web_search",
+				"sanitized": true,
+				"bytes": 1779,
+				"canonical_reads": 20,
+				"exact_reconstruction": true
+			},
+			{
+				"name": "web_extract",
+				"sanitized": true,
+				"bytes": 1698,
+				"canonical_reads": 39,
+				"exact_reconstruction": true
+			}
+		],
+		"mock_provider_calls": 6,
+		"real_provider_calls": 0
+	},
+	"checks": {
+		"format_lint_types": "passed",
+		"build": "passed node22 target",
+		"shellcheck": "passed",
+		"diff_whitespace": "passed"
+	},
+	"historical_fixtures": {
+		"count": 22,
+		"all_byte_identical_to_base": true,
+		"matched_snapshots": 8,
+		"superseded_snapshots_archived": 10,
+		"updated_snapshots": 0,
+		"hashes": {
+			"src/common/fixtures/evolution-html/README.md": "a89b3a16933142ccb57a075368c2aaaa6909d0424d265b73cbc38751efa04cd1",
+			"src/common/fixtures/evolution-html/article.html.fixture": "2c93f692959df97f2682a3aca5e03e9f00d456f5d7feeb5e06f7ecd81df64386",
+			"src/common/fixtures/evolution-html/challenge.html.fixture": "dbff11ba7da83082fbc3e9f43b54e1f0a407bf3330db41b3443d50fe0a81e978",
+			"src/common/fixtures/evolution-html/cjk.html.fixture": "ddf1c74e164a24e26a0c1e0856e4aee72cbef15d5482a91d32a7a2e100f79bd6",
+			"src/common/fixtures/evolution-html/documentation.html.fixture": "978046b6c1b7c6c0e323fd3d55ce52d6fa762f8c0fc9a08e503ffa2a9945b8fb",
+			"src/common/fixtures/evolution-html/empty.html.fixture": "c25367a8a61dae591bc052704ddca120004c59ffe271e0c4373c90a0c1177595",
+			"src/common/fixtures/evolution-html/fragment.html.fixture": "919a21da5a608fb8c3967bdc783cc5cbb83c22dc9409e3721d7e8e01a3804241",
+			"src/common/fixtures/evolution-html/malformed.html.fixture": "d7ba089585b9fa1aa0776142e01b0897cc7b165e66cc097205de352ccfd57109",
+			"src/common/fixtures/evolution-html/manifest.json": "d357bf7bba07fc0d25cecf714e5aaa4af45cf3ee1ac8803db07119afcc625f46",
+			"src/common/fixtures/evolution-html/untrusted.html.fixture": "dfded85a79031e763b97311d835b5556413f761262bb408b5c5667b50572195c",
+			"src/server/fixtures/evolution-discovery/README.md": "72952f40b8075acbd7c429961e0fdfba7e37e2c8f913c7ef69eefeb7df992a71",
+			"src/server/fixtures/evolution-discovery/all-providers.json": "814c57c51b5a1753e2460e957b4b39b6ebd1a8156a37df15cf951a1b0c0bcdb1",
+			"src/server/fixtures/evolution-discovery/capture.mjs": "e7348886ae297907c082f3d732aa22d4b07d392fbd514310a700e7dd1b04e911",
+			"src/server/fixtures/evolution-discovery/no-github.json": "ed4615c2542e1883d58f9260023172ac0f2005edc46a4ead9c7a3f22bbd36a4d",
+			"src/server/fixtures/evolution-discovery/no-providers.json": "40d40d066cb2a13f56a2c8869459e00ff7eea78b2acb38e172593526534cfcad",
+			"src/server/fixtures/evolution-discovery/tavily-only.json": "e1a6ef257e3a8798b9d417913b2875051d37cabf60264dcb95cc521c3c090d8b",
+			"src/server/fixtures/evolution-p1a/README.md": "9417824401de72c5e8b85d9ae399bc32c23d96a5f3cdd4310c4a288f752156f1",
+			"src/server/fixtures/evolution-p1a/schema-additions.json": "94e05227041fb705aade942d8fab7c2aed662fe38756473ffad1ab8456834e04",
+			"src/server/fixtures/evolution-p1b/README.md": "2626e023c1b1ee7ab103e81b4728075b9fe5849619c0b261400b4082d0fad48e",
+			"src/server/fixtures/evolution-p1b/schema-additions.json": "71ccb36592517b9f9162b82581cbb9e9e20711a4c67f195faddc2c95d5db929b",
+			"src/server/fixtures/evolution-p1b/smoke.mjs": "7d328d1dc103b60c3c1649b186d771327a73d0155e18412288e50b4cb2ec7c44",
+			"src/server/tools/__snapshots__/evolution_tools.test.ts.snap": "8f1bd0f833e1590964c79c19079c9529da0eec30413b74935ed4453ae31ac2be"
+		}
+	},
+	"runtime_snapshot_sha256": {
+		"src/common/errors.test.ts": "392d7e0d987110d53b1a249d78362af2a48545e8f0eeda86a149921d0a63a56b",
+		"src/common/errors.ts": "a0e2f8b043678c761589760ffa566eee49e6d8ac48d305286a6521a68463bbb2",
+		"src/common/firecrawl_utils.ts": "68d20d5830085853a800559d8d6b94acd0c94bd009b73f39af7f4bd97d9ad6dd",
+		"src/common/http.test.ts": "3a6688f8334258d83f85778c6ac6c14f1d10b8316c1e5e2bd2e8f4f6c000ebab",
+		"src/common/job_state.ts": "8fad73436d8ea4069d580b4b0a9d98214238d578f9640e367e6c516ccb015b6e",
+		"src/common/provider_sanitization.test.ts": "114c36150aa0c188a57c211baa689aa89a050f1d2b6b0bf688c8479a673fad7e",
+		"src/common/provider_sanitization.ts": "44ccf7712378a6b06c7c13abc21ddaa6a92c1c3abaebc12471b9044109f7ed41",
+		"src/common/response_metadata.test.ts": "7c3527dfd961af0edc2a764e7cfb175264f331f56b2ca8bb790a184bab11e103",
+		"src/common/response_metadata.ts": "f7c0cee435b03192b17edfd8b96f7609258f8f45aa042f7917d5ad1c86c44e79",
+		"src/common/results.ts": "a0fce6a676ae189813bb4db9f7c597de369a7937702e7c9f20e0439a45dbd643",
+		"src/providers/ai_response/exa_answer/index.test.ts": "e0f83729fb3a9d3a761cb0117738502d602df46094378ae484ddb5e6de4f1ad9",
+		"src/providers/ai_response/exa_answer/index.ts": "091df1b90faf2b97b1c211095f2b6e619d5d11ee721be4527333233e7c4c196a",
+		"src/providers/ai_response/exa_deep_research/index.test.ts": "ec4a075c06c020fa570bd1fb809e97ab9546631f7f38aa948828162bd4288b5e",
+		"src/providers/ai_response/exa_deep_research/index.ts": "43c213383b82f8d1dfbd49514a766ebd3804b15d7d67fa13373c8173031d317a",
+		"src/providers/ai_response/tavily_research/index.test.ts": "97d4c3cb52234eeab341d7f1ec99ec96221522bea125da531ae32e467b86c794",
+		"src/providers/ai_response/tavily_research/index.ts": "2085cf310ef2794caa801fe4aa368100cb434cfba3108bd5491bf62121a30339",
+		"src/providers/processing/exa_contents/index.test.ts": "264232684ae247fb6fba45727caf663e2c5b150796c11cf248c746a6e96fe9c3",
+		"src/providers/processing/exa_contents/index.ts": "40b7b7a3ddff55ab08ba2b8c4379c505bcafd8acd4528dfabecb8598210d3322",
+		"src/providers/processing/exa_similar/index.test.ts": "59f1bef2f67283398d99c82cd95cf2f5f0fc2f48b96ddfad8df12bcd58554a1d",
+		"src/providers/processing/exa_similar/index.ts": "02336073ed611f2a73a7f2ca641c11697ecf2f2d643fdac203a19fa7f47c92e3",
+		"src/providers/processing/firecrawl_agent/index.test.ts": "545daa0df5056bfd9b39ea166ee8355f4b481a0d5c228a8bc0c60b0a07e2086e",
+		"src/providers/processing/firecrawl_agent/index.ts": "25a9b25c584a0832d4ac92701b7f9c796420da79be8bc02f27a6f39b9bf8eb18",
+		"src/providers/processing/firecrawl_scrape/index.test.ts": "109b33fefcf99b26f2cdbaf216dcd0922922555343f75b9882b4d668d936066f",
+		"src/providers/processing/firecrawl_scrape/index.ts": "ca2c6cfd51d9a5744d06d13265c87b88650b87d76c16d2ad7a8970ceb0fb40d4",
+		"src/providers/search/exa/index.test.ts": "934c5c52c9b24ec387dc2ff0dd3e4cd9906f91388eb2fe370e0e6481ae8a28e2",
+		"src/providers/search/exa/index.ts": "d72e7abf1eed8e8a65c88788afe99ef67694c9ae11b8bb1c11c9802ce9ba3761",
+		"src/server/fixtures/evolution-p2/smoke.mjs": "a88431b2d940715114407d209d2eee634cd1dcfbe0fe96f9a17060368d789f2e",
+		"src/server/provider_health.test.ts": "81693349a1ce82882f7bc61e17a33ddc5e3e253db509e5de0311b4e4b56ba3a6",
+		"src/server/provider_health.ts": "b4dd3b1c008a809dead9b25d762eec4e144d975374a8afd03fadd0fbc2bd512b",
+		"src/server/tools/ai_search.test.ts": "8c7b1eec39eaa166253240f25ff190cd46b31ffbbb17485fc7e3adbf22f5e855",
+		"src/server/tools/ai_search.ts": "fa0eebb97c115b4235ad9198c3fe0ed414cd6038ae3c92f4cee5e04c13e2b013",
+		"src/server/tools/evolution_tools.test.ts": "74ad1bc9f3efb84249f6ec617b9674a90f676282663d2d28996774cbd27a3a79",
+		"src/server/tools/firecrawl_agent.test.ts": "f3e214140d16ae1e96df5faa53c9cf45878668dfcea7c4a3bfc31254530378e2",
+		"src/server/tools/firecrawl_agent.ts": "38f22276e20c90a86cf84f35a650f734d575af1ed379b51989633707b78a9f1c",
+		"src/server/tools/lifecycle.test.ts": "f6f2273b627c7a824ecff591bff9b4b2d5e7b7eb12ba5de362294a638146801c"
+	},
+	"production_checkout_commit": "047a7e1e3fce8451753e0e8bcffef6dcd13b4554",
+	"production_effect": "none; existing documentation edits and untracked files preserved; running artifact identity not audited",
+	"unverified": [
+		"live entitlement and billing",
+		"live citation fidelity",
+		"current Firecrawl Agent lifecycle and cancellation",
+		"historical Context transaction-identification failure",
+		"deployment"
+	],
+	"not_performed": [
+		"dependency installation",
+		"staging or commit",
+		"merge or push",
+		"real provider calls",
+		"deployment or service restart",
+		"production writes",
+		"config or credential changes",
+		"memory or skill edits"
+	],
+	"run_directory": "/tmp/omnisearch-evolution-p2-PsHVP7aD"
+}

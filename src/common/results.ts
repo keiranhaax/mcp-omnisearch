@@ -3,6 +3,12 @@ import {
 	store_result,
 } from './result_store.js';
 import { ErrorType, ProviderError } from './types.js';
+import { create_error_response } from './errors.js';
+import { get_job_failure, set_job_failure } from './job_state.js';
+import {
+	copy_response_metadata,
+	get_response_metadata,
+} from './response_metadata.js';
 
 const CHARS_PER_TOKEN = 4;
 const MAX_SAFE_TOKENS = 20000;
@@ -126,6 +132,7 @@ const format_as_text = (
 export const handle_large_result = <T>(
 	result: T,
 	_provider_name: string,
+	options: { force_storage?: boolean } = {},
 ): T | LargeResultResponse => {
 	const json = JSON.stringify(result, null, 2);
 	const char_count = json.length;
@@ -134,7 +141,10 @@ export const handle_large_result = <T>(
 	const payload = JSON.stringify({
 		content: [{ type: 'text', text: json }],
 	});
-	if (Buffer.byteLength(payload, 'utf8') <= MAX_SAFE_BYTES) {
+	if (
+		!options.force_storage &&
+		Buffer.byteLength(payload, 'utf8') <= MAX_SAFE_BYTES
+	) {
 		return result;
 	}
 
@@ -206,6 +216,137 @@ export interface ProcessedUrlResult {
 	success: boolean;
 	error?: string;
 }
+
+const async_result_bytes = (
+	text: string,
+	metadata: Record<string, unknown>,
+	local_completeness: string,
+	failed: boolean,
+) =>
+	Buffer.byteLength(
+		JSON.stringify({
+			_meta: { omnisearch: { ...metadata, local_completeness } },
+			content: [{ type: 'text', text }],
+			...(failed ? { isError: true } : {}),
+		}),
+	);
+
+export const present_job_result = (
+	result: object,
+	provider: string,
+	operation: string,
+	metadata: Record<string, unknown>,
+) => {
+	try {
+		let presented = handle_large_result(result, operation);
+		let local_completeness =
+			'result_id' in presented ? 'retained' : 'complete';
+		let text = JSON.stringify(presented, null, 2);
+		if (
+			async_result_bytes(text, metadata, local_completeness, false) >
+			MAX_SAFE_BYTES
+		) {
+			presented = handle_large_result(result, operation, {
+				force_storage: true,
+			});
+			local_completeness = 'retained';
+			text = JSON.stringify(presented, null, 2);
+		}
+		return { text, local_completeness };
+	} catch {
+		const reported = get_response_metadata(result);
+		const job = reported?.job;
+		const error = new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'Cannot retain complete canonical result; no evidence was returned',
+			provider,
+			{
+				retryable: false,
+				cause: 'storage',
+				...(job
+					? provider === 'tavily_research'
+						? { request_id: job.id }
+						: { job_id: job.id }
+					: {}),
+			},
+		);
+		copy_response_metadata(result, error);
+		if (job) set_job_failure(error, job);
+		throw error;
+	}
+};
+
+export const present_job_error = (
+	error: unknown,
+	operation: string,
+	metadata: Record<string, unknown> = {},
+) => {
+	const message = create_error_response(error, {
+		include_recovery: true,
+	}).error;
+	const failure = get_job_failure(error);
+	const storage_failed =
+		error instanceof ProviderError &&
+		error.details?.cause === 'storage';
+	if (!failure)
+		return {
+			text: message,
+			local_completeness: storage_failed ? 'unavailable' : 'complete',
+		};
+	try {
+		if (storage_failed) throw error;
+		let result =
+			failure.result === undefined
+				? undefined
+				: handle_large_result(failure.result, operation);
+		let retained =
+			result && typeof result === 'object' && 'result_id' in result;
+		const render = () =>
+			JSON.stringify(
+				{
+					error: message,
+					job: failure.job,
+					...(result !== undefined ? { result } : {}),
+				},
+				null,
+				2,
+			);
+		let text = render();
+		if (
+			failure.result !== undefined &&
+			async_result_bytes(
+				text,
+				metadata,
+				retained ? 'retained' : 'complete',
+				true,
+			) > MAX_SAFE_BYTES
+		) {
+			result = handle_large_result(failure.result, operation, {
+				force_storage: true,
+			});
+			retained = true;
+			text = render();
+		}
+		return {
+			text,
+			local_completeness: retained ? 'retained' : 'complete',
+		};
+	} catch {
+		return {
+			text: JSON.stringify(
+				{
+					error: message,
+					job: failure.job,
+					warning:
+						'Partial evidence could not be retained; no result handle was issued.',
+				},
+				null,
+				2,
+			),
+			local_completeness: 'unavailable',
+		};
+	}
+};
 
 export const aggregate_url_results = (
 	results: ProcessedUrlResult[],

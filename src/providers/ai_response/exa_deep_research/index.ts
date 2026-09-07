@@ -1,6 +1,11 @@
 import * as v from 'valibot';
 import { parse_provider_response } from '../../../common/provider_response.js';
 import {
+	sanitize_exa_control_metadata,
+	sanitize_exa_grounding,
+} from '../../../common/provider_sanitization.js';
+import { set_response_metadata } from '../../../common/response_metadata.js';
+import {
 	handle_provider_error,
 	sanitize_query,
 } from '../../../common/errors.js';
@@ -23,7 +28,7 @@ interface ExaDeepResearchRequest {
 }
 
 const exa_deep_response_schema = v.object({
-	requestId: v.optional(v.string()),
+	requestId: v.optional(v.unknown()),
 	output: v.object({
 		content: v.pipe(
 			v.unknown(),
@@ -115,6 +120,7 @@ export class ExaDeepResearchProvider implements SearchProvider {
 					exa_deep_response_schema,
 					raw_data,
 				);
+				const controls = sanitize_exa_control_metadata(data);
 				const answer = stringify_content(data.output.content);
 				const results: SearchResult[] = [
 					{
@@ -124,10 +130,11 @@ export class ExaDeepResearchProvider implements SearchProvider {
 						score: 1.0,
 						source_provider: this.name,
 						metadata: {
-							requestId: data.requestId,
+							...controls,
 							type: 'deep_research',
-							grounding: data.output?.grounding,
-							costDollars: data.costDollars,
+							grounding: sanitize_exa_grounding(
+								data.output.grounding,
+							),
 							results_count: data.results?.length ?? 0,
 						},
 					},
@@ -152,6 +159,7 @@ export class ExaDeepResearchProvider implements SearchProvider {
 					);
 				}
 
+				set_response_metadata(results, controls, this.name);
 				return results;
 			} catch (error) {
 				handle_provider_error(error, this.name, 'run deep research');

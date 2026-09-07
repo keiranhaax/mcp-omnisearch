@@ -1,5 +1,43 @@
 # Feature provenance
 
+## P2: typed metadata, lifecycle recovery, and sanitization
+
+Implemented independently on P1B commit `c86e955` using the existing
+provider adapters, installed Valibot, error/retry helpers, WeakMap
+metadata, and bounded result store. No donor code, dependency, or
+license material was imported; existing notices remain unchanged.
+
+- `src/common/response_metadata.ts` extends request metadata with Exa
+  reported USD, Firecrawl Agent credits, and typed job observations.
+  Missing usage remains unknown; poll observations are not summed.
+- `src/common/job_state.ts` maps known statuses and associates partial
+  evidence with failures without placing it in generic error details.
+- `src/common/errors.ts` and `src/server/provider_health.ts` expose
+  safe classifications without changing shared HTTP/retry behavior.
+  Local cancellation and storage failure do not degrade upstream
+  health.
+- Tavily Research and Firecrawl Agent preserve accepted IDs and
+  partial evidence through bounded waits, failures, and cancellation
+  ambiguity. Their public wrappers use the existing result store and
+  reader, with complete tool-result byte accounting including request
+  metadata.
+- `src/common/provider_sanitization.ts` projects provider-owned
+  Firecrawl scrape and Exa metadata before rendering/storage, while
+  preserving actual extracted content and citations. Existing adapters
+  continue validating their other response fields.
+
+The projections are based on local contracts and synthetic regression
+fixtures, not a new live API or billing audit. No live provider calls
+were made for P2. Safe legacy provider fields remain where already
+present; new metadata is request-level. P0 fixtures are archived
+byte-for-byte, with explicit P2 assertions replacing ten superseded
+error/lifecycle snapshot checks.
+
+The approved shared trusted-client boundary remains unchanged, with no
+per-client job/result ownership claim. See the
+[P2 report](search-gateway-evolution-p2.md) and
+[machine-readable evidence](search-gateway-evolution-p2.json).
+
 ## P1B: local presentation and request metadata
 
 Implemented independently against the fork's existing contracts. No

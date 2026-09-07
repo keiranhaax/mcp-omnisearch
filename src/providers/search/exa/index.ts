@@ -5,6 +5,11 @@ import {
 } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
 import { parse_provider_response } from '../../../common/provider_response.js';
+import {
+	sanitize_exa_control_metadata,
+	sanitize_exa_output,
+} from '../../../common/provider_sanitization.js';
+import { set_response_metadata } from '../../../common/response_metadata.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
@@ -29,10 +34,10 @@ interface ExaSearchRequest {
 }
 
 const exa_search_response_schema = v.object({
-	requestId: v.optional(v.string()),
-	autopromptString: v.optional(v.string()),
-	resolvedSearchType: v.optional(v.string()),
-	searchType: v.optional(v.string()),
+	requestId: v.optional(v.unknown()),
+	autopromptString: v.optional(v.unknown()),
+	resolvedSearchType: v.optional(v.unknown()),
+	searchType: v.optional(v.unknown()),
 	results: v.optional(
 		v.array(
 			v.object({
@@ -120,32 +125,28 @@ export class ExaSearchProvider implements SearchProvider {
 					raw_data,
 				);
 
-				return (data.results ?? []).map((result) => ({
-					title: result.title || result.url || 'Untitled result',
-					url: result.url || '',
-					snippet:
-						result.text || result.summary || 'No content available',
-					score: result.score ?? undefined,
-					source_provider: this.name,
-					metadata: {
-						id: result.id,
-						author: result.author,
-						publishedDate: result.publishedDate,
-						highlights: result.highlights,
-						requestId: data.requestId,
-						...(data.autopromptString
-							? { autopromptString: data.autopromptString }
-							: {}),
-						...((data.resolvedSearchType ?? data.searchType)
-							? {
-									resolvedSearchType:
-										data.resolvedSearchType ?? data.searchType,
-								}
-							: {}),
-						output: data.output,
-						costDollars: data.costDollars,
-					},
-				}));
+				const controls = sanitize_exa_control_metadata(data);
+				const output = sanitize_exa_output(data.output);
+				const results: SearchResult[] = (data.results ?? []).map(
+					(result) => ({
+						title: result.title || result.url || 'Untitled result',
+						url: result.url || '',
+						snippet:
+							result.text || result.summary || 'No content available',
+						score: result.score ?? undefined,
+						source_provider: this.name,
+						metadata: {
+							id: result.id,
+							author: result.author,
+							publishedDate: result.publishedDate,
+							highlights: result.highlights,
+							...controls,
+							output,
+						},
+					}),
+				);
+				set_response_metadata(results, controls, this.name);
+				return results;
 			} catch (error) {
 				handle_provider_error(
 					error,

@@ -7,6 +7,7 @@ import {
 	vi,
 } from 'vitest';
 import { config } from '../../../config/env.js';
+import { get_response_metadata } from '../../../common/response_metadata.js';
 import { ExaSearchProvider } from './index.js';
 
 const fetch_mock = vi.fn();
@@ -23,6 +24,148 @@ describe('ExaSearchProvider', () => {
 		config.search.exa.api_key = previous_api_key;
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+	});
+
+	it('allowlists costs and output envelopes without filtering extracted evidence', async () => {
+		const url = 'https://example.com/docs?token=syntax&q=a%2Bb#math';
+		const content = {
+			token: 'source-token',
+			api_key: 'example',
+			nested: { config: { token: 'source' } },
+		};
+		const citation = {
+			id: 'doc:1',
+			url,
+			text: '~~~js\nconst api_key = "example";\n~~~ $x^2$ [1]',
+		};
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					requestId: 'req-1',
+					autopromptString: 'token and api_key syntax',
+					searchType: 'auto',
+					costDollars: {
+						total: 0.007,
+						search: {
+							neural: 0.007,
+							config: { api_key: 'CONTROL_CANARY' },
+						},
+						headers: { authorization: 'CONTROL_CANARY' },
+						rawError: { message: 'CONTROL_CANARY' },
+					},
+					output: {
+						content,
+						grounding: [
+							{
+								field: 'token',
+								citations: [
+									{
+										...citation,
+										headers: { authorization: 'CONTROL_CANARY' },
+									},
+								],
+								config: { token: 'CONTROL_CANARY' },
+							},
+						],
+						config: { api_key: 'CONTROL_CANARY' },
+					},
+					results: [{ ...citation, title: 'API key syntax' }],
+				}),
+			),
+		);
+		const [result] = await new ExaSearchProvider().search({
+			query: 'syntax',
+		});
+		expect(JSON.stringify(result)).not.toContain('CONTROL_CANARY');
+		expect(result).toMatchObject({
+			url,
+			snippet: citation.text,
+			metadata: {
+				id: 'doc:1',
+				requestId: 'req-1',
+				autopromptString: 'token and api_key syntax',
+				resolvedSearchType: 'auto',
+				costDollars: { total: 0.007, search: { neural: 0.007 } },
+				output: {
+					content,
+					grounding: [{ field: 'token', citations: [citation] }],
+				},
+			},
+		});
+	});
+
+	it.each([
+		'Bearer CONTROL_CANARY',
+		'x'.repeat(129),
+		{ config: 'CONTROL_CANARY' },
+	])(
+		'drops malformed request IDs and control strings: %j',
+		async (requestId) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						requestId,
+						searchType: 'CONTROL_CANARY',
+						autopromptString: 'x'.repeat(4097),
+						results: [{ url: 'https://example.com', text: 'source' }],
+					}),
+				),
+			);
+			const results = await new ExaSearchProvider().search({
+				query: 'test',
+			});
+			const [result] = results;
+			expect(get_response_metadata(results)).toBeUndefined();
+			expect(result.metadata?.requestId).toBeUndefined();
+			expect(result.metadata?.resolvedSearchType).toBeUndefined();
+			expect(result.metadata?.autopromptString).toBeUndefined();
+			expect(result.snippet).toBe('source');
+		},
+	);
+
+	it.each([-1, '0.01', 1e100, null, { token: 'CONTROL_CANARY' }])(
+		'drops malformed cost leaves without losing valid measurements: %j',
+		async (total) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						costDollars: {
+							total,
+							contents: { text: 0.001, summary: total },
+						},
+						results: [{ url: 'https://example.com', text: 'source' }],
+					}),
+				),
+			);
+			const results = await new ExaSearchProvider().search({
+				query: 'test',
+			});
+			const [result] = results;
+			expect(get_response_metadata(results)).toBeUndefined();
+			expect(result.metadata?.costDollars).toEqual({
+				contents: { text: 0.001 },
+			});
+		},
+	);
+
+	it('attaches safe response metadata to the root array, including empty results', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					requestId: 'req-usage',
+					costDollars: { total: 0.007 },
+					results: [],
+				}),
+			),
+		);
+		const results = await new ExaSearchProvider().search({
+			query: 'usage',
+		});
+		expect(results).toEqual([]);
+		expect(get_response_metadata(results)).toEqual({
+			request_id: 'req-usage',
+			usage: { usd: 0.007 },
+		});
 	});
 
 	it('uses auto search and text contents by default', async () => {
@@ -64,6 +207,10 @@ describe('ExaSearchProvider', () => {
 			snippet: 'Text content',
 			metadata: { requestId: 'req-1' },
 		});
+		expect(get_response_metadata(results)).toEqual({
+			request_id: 'req-1',
+		});
+		expect(get_response_metadata(results[0])).toBeUndefined();
 	});
 
 	it('maps modern Exa fields into the search request', async () => {

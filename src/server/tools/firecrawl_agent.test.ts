@@ -195,8 +195,19 @@ describe('firecrawl_agent job lifecycle', () => {
 				});
 				await vi.advanceTimersByTimeAsync(3000);
 				const response = await pending;
+				if (body.status === 'cancelled') {
+					expect(response.isError).toBeUndefined();
+					expect(response._meta.omnisearch.job).toMatchObject({
+						id: job_id,
+						state: 'cancelled',
+						cancellation: 'confirmed',
+						resumable: false,
+					});
+					expect(fetch_mock).toHaveBeenCalledTimes(2);
+					return;
+				}
 				expect(response.isError).toBe(true);
-				const text = response.content[0].text;
+				const text = JSON.parse(response.content[0].text).error;
 				expect(text).toContain(job_id);
 				expect(text).toContain('action="status"');
 				expect(text).toContain('action="cancel"');

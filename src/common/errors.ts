@@ -1,3 +1,5 @@
+import * as v from 'valibot';
+import { is_retryable_error } from './retry.js';
 import { ErrorType, ProviderError } from './types.js';
 
 export const handle_rate_limit = (
@@ -53,6 +55,134 @@ export const sanitize_query = (query: string): string => {
 };
 
 export const MAX_PUBLIC_ERROR_LENGTH = 1024;
+
+export type PublicErrorKind =
+	| 'authentication'
+	| 'entitlement'
+	| 'rate_limit'
+	| 'timeout'
+	| 'cancelled'
+	| 'endpoint_mismatch'
+	| 'bad_input'
+	| 'storage_failure'
+	| 'upstream_failure';
+
+export interface PublicErrorMetadata {
+	kind: PublicErrorKind;
+	/** Mirrors the existing retry predicate, not a promise to retry. */
+	retryable: boolean;
+	provider?: string;
+	http_status?: number;
+	job_id?: string;
+	request_id?: string;
+}
+
+const safe_identifier = (
+	value: unknown,
+	max_length: number,
+): value is string =>
+	typeof value === 'string' &&
+	value.length > 0 &&
+	value.length <= max_length &&
+	!/[^a-z0-9_-]/i.test(value);
+
+const job_id_schema = v.pipe(v.string(), v.uuid());
+
+// Only bounded identifiers and classifications cross the public boundary.
+// Never infer a kind from arbitrary messages or serialize upstream details.
+export const public_error_metadata = (
+	error: unknown,
+): PublicErrorMetadata => {
+	const metadata: PublicErrorMetadata = {
+		kind: 'upstream_failure',
+		retryable: is_retryable_error(error),
+	};
+	if (!(error instanceof ProviderError)) {
+		if (error instanceof Error) {
+			if (error.name === 'TimeoutError') metadata.kind = 'timeout';
+			if (error.name === 'AbortError') metadata.kind = 'cancelled';
+		}
+		return metadata;
+	}
+
+	const details: Record<string, unknown> | undefined =
+		error.details !== null &&
+		typeof error.details === 'object' &&
+		!Array.isArray(error.details)
+			? error.details
+			: undefined;
+	if (safe_identifier(error.provider, 64))
+		metadata.provider = error.provider;
+	const status = details?.status;
+	if (
+		typeof status === 'number' &&
+		Number.isInteger(status) &&
+		status >= 100 &&
+		status <= 599
+	) {
+		metadata.http_status = status;
+	}
+
+	if (
+		details?.cause === 'cancelled' ||
+		details?.cause === 'timeout'
+	) {
+		metadata.kind = details.cause;
+	} else if (details?.cause === 'storage') {
+		metadata.kind = 'storage_failure';
+	} else {
+		switch (error.type) {
+			case ErrorType.ENTITLEMENT_REQUIRED:
+				metadata.kind = 'entitlement';
+				break;
+			case ErrorType.ENDPOINT_NOT_FOUND:
+				metadata.kind = 'endpoint_mismatch';
+				break;
+			case ErrorType.RATE_LIMIT:
+				metadata.kind = 'rate_limit';
+				break;
+			case ErrorType.INVALID_INPUT:
+				metadata.kind = 'bad_input';
+				break;
+			default:
+				switch (metadata.http_status) {
+					case 401:
+						metadata.kind = 'authentication';
+						break;
+					case 403:
+						metadata.kind = 'entitlement';
+						break;
+					case 429:
+						metadata.kind = 'rate_limit';
+						break;
+					case 408:
+					case 504:
+						metadata.kind = 'timeout';
+						break;
+					case 400:
+					case 422:
+						metadata.kind = 'bad_input';
+				}
+		}
+	}
+
+	const job_id = details?.job_id;
+	if (
+		metadata.provider === 'firecrawl_agent' &&
+		typeof job_id === 'string' &&
+		job_id.length === 36 &&
+		v.safeParse(job_id_schema, job_id).success
+	) {
+		metadata.job_id = job_id;
+	}
+	if (
+		metadata.provider === 'tavily_research' &&
+		safe_identifier(details?.request_id, 200)
+	) {
+		metadata.request_id = details.request_id;
+	}
+	return metadata;
+};
 
 // Paths can also contain bearer tokens; retain only the API origin.
 export const safe_endpoint = (url: string): string => {
@@ -167,6 +297,7 @@ export const public_error_message = (
 
 export const create_error_response = (
 	error: unknown,
+	options: { include_recovery?: boolean } = {},
 ): { error: string } => {
 	if (error instanceof Error && error.name === 'TimeoutError')
 		return { error: 'Operation timed out' };
@@ -183,22 +314,21 @@ export const create_error_response = (
 				: error.type === ErrorType.ENDPOINT_NOT_FOUND
 					? ' Verify endpoint configuration or set FIRECRAWL_AGENT_URL.'
 					: '';
-		const provider = /^[a-z0-9_-]{1,64}$/i.test(error.provider)
-			? error.provider
-			: 'provider';
-		const request_id = error.details?.request_id;
-		const recovery =
-			provider === 'tavily_research' &&
-			typeof request_id === 'string' &&
-			/^[a-zA-Z0-9_-]{1,200}$/.test(request_id)
-				? ` Resume with ai_search provider="tavily_research", action="status", request_id="${request_id}"; do not start a new research task.`
+		const metadata = public_error_metadata(error);
+		const provider = metadata.provider ?? 'provider';
+		// Tavily guidance remains automatic for existing callers. Firecrawl
+		// callers opt in when replacing their manual recovery suffix.
+		const recovery = metadata.request_id
+			? ` Resume with ai_search provider="tavily_research", action="status", request_id="${metadata.request_id}"; do not start a new research task.`
+			: options.include_recovery && metadata.job_id
+				? ` job_id=${metadata.job_id}. Use firecrawl_agent action="status" or action="cancel" with this job_id; do not start a new job.`
 				: '';
 		return {
 			error:
-				`${provider} error [${error.type}]: ${public_error_message(error)}${detail_suffix}${guidance}${recovery}`.slice(
+				`${provider} error [${error.type}]: ${public_error_message(error)}${detail_suffix}${guidance}`.slice(
 					0,
-					MAX_PUBLIC_ERROR_LENGTH,
-				),
+					MAX_PUBLIC_ERROR_LENGTH - recovery.length,
+				) + recovery,
 		};
 	}
 	return { error: 'Unexpected error: operation failed' };

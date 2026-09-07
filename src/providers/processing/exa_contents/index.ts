@@ -2,6 +2,11 @@ import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
 import { parse_provider_response } from '../../../common/provider_response.js';
+import {
+	sanitize_exa_control_metadata,
+	sanitize_exa_statuses,
+} from '../../../common/provider_sanitization.js';
+import { set_response_metadata } from '../../../common/response_metadata.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	ErrorType,
@@ -42,17 +47,12 @@ const exa_contents_response_schema = v.object({
 			v.object({
 				id: v.string(),
 				status: v.picklist(['success', 'error']),
-				source: v.optional(v.picklist(['cached', 'crawled'])),
-				error: v.nullish(
-					v.object({
-						tag: v.optional(v.string()),
-						httpStatusCode: v.nullish(v.number()),
-					}),
-				),
+				source: v.optional(v.unknown()),
+				error: v.optional(v.unknown()),
 			}),
 		),
 	),
-	requestId: v.optional(v.string()),
+	requestId: v.optional(v.unknown()),
 	costDollars: v.optional(v.unknown()),
 });
 
@@ -130,13 +130,16 @@ export class ExaContentsProvider implements ProcessingProvider {
 					raw_data,
 				);
 
+				const controls = sanitize_exa_control_metadata(data);
+				const statuses = sanitize_exa_statuses(data.statuses);
+
 				// Combine all content
 				let combined_content = '';
 				const raw_contents: Array<{ url: string; content: string }> =
 					[];
 				let total_word_count = 0;
 				const failed_urls = new Set(
-					(data.statuses ?? [])
+					(statuses ?? [])
 						.filter((item) => item.status === 'error')
 						.map((item) => item.id),
 				);
@@ -207,7 +210,7 @@ export class ExaContentsProvider implements ProcessingProvider {
 					);
 				}
 
-				return {
+				const result: ProcessingResult = {
 					content: combined_content,
 					raw_contents,
 					metadata: {
@@ -218,12 +221,14 @@ export class ExaContentsProvider implements ProcessingProvider {
 						failed_urls: failed_urls.size
 							? [...failed_urls]
 							: undefined,
-						statuses: data.statuses,
+						statuses,
 						extract_depth,
-						requestId: data.requestId,
+						requestId: controls.requestId,
 					},
 					source_provider: this.name,
 				};
+				set_response_metadata(result, controls, this.name);
+				return result;
 			} catch (error) {
 				handle_provider_error(error, this.name, 'extract contents');
 			}

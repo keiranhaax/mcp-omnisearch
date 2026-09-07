@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	get_response_metadata,
 	set_response_metadata,
+	request_metadata,
+	set_response_job,
 } from './response_metadata.js';
 
 describe('request-level response metadata', () => {
@@ -111,4 +113,85 @@ describe('request-level response metadata', () => {
 		expect(get_response_metadata(result[0])).toBeUndefined();
 		expect(get_response_metadata([])).toBeUndefined();
 	});
+});
+
+describe('P2 metadata provenance', () => {
+	it.each([0, 2.5])(
+		'captures finite Exa USD without inventing credits: %s',
+		(usd) => {
+			const result: unknown[] = [];
+			set_response_metadata(
+				result,
+				{
+					requestId: 'safe-id',
+					costDollars: { total: usd, header: 'private' },
+					usage: { credits: 42 },
+				},
+				'exa',
+			);
+			expect(
+				request_metadata(result, 'exa', 'search', 3),
+			).toMatchObject({
+				request_id: 'safe-id',
+				usage: { usd },
+				usage_source: 'provider_reported',
+				usage_scope: 'request',
+				elapsed_ms: 3,
+			});
+			expect(
+				JSON.stringify(request_metadata(result, 'exa', 'search', 3)),
+			).not.toContain('private');
+		},
+	);
+	it.each(['1', -1, Infinity, NaN, null, {}, []])(
+		'does not coerce malformed Exa costs: %o',
+		(total) => {
+			const result = {};
+			set_response_metadata(
+				result,
+				{ costDollars: { total } },
+				'exa',
+			);
+			expect(
+				request_metadata(result, 'exa', 'search', 1),
+			).toMatchObject({
+				usage: null,
+				usage_source: 'unknown',
+				usage_scope: 'unknown',
+			});
+		},
+	);
+	it('treats repeated Agent observations as job usage, not additional charges', () => {
+		const result = {};
+		set_response_job(result, {
+			id: 'safe-id',
+			state: 'running',
+			partial: false,
+			resumable: true,
+		});
+		set_response_metadata(
+			result,
+			{ creditsUsed: 0 },
+			'firecrawl_agent',
+		);
+		expect(
+			request_metadata(result, 'firecrawl_agent', 'status', 0),
+		).toMatchObject({
+			usage: { credits: 0 },
+			usage_scope: 'job',
+			job: { state: 'running' },
+		});
+		expect(
+			request_metadata(result, 'firecrawl_agent', 'status', 0).usage,
+		).toEqual({ credits: 0 });
+	});
+	it.each([-1, NaN, Infinity])(
+		'labels unmeasurable local elapsed time honestly: %s',
+		(elapsed) => {
+			expect(
+				request_metadata(undefined, 'fixture', 'operation', elapsed)
+					.elapsed_ms,
+			).toBeNull();
+		},
+	);
 });

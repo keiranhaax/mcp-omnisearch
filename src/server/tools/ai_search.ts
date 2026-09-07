@@ -1,12 +1,17 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import { create_error_response } from '../../common/errors.js';
+import { public_error_metadata } from '../../common/errors.js';
+import { request_metadata } from '../../common/response_metadata.js';
+import { get_job_failure } from '../../common/job_state.js';
 import {
 	get_request_signal,
 	throw_if_aborted,
 } from '../../common/request_context.js';
-import { handle_large_result } from '../../common/results.js';
+import {
+	present_job_result,
+	present_job_error,
+} from '../../common/results.js';
 import {
 	ErrorType,
 	ProviderError,
@@ -175,6 +180,7 @@ export const register_ai_search = (
 			exa_deep_search_type,
 			system_prompt,
 		}) => {
+			const started = performance.now();
 			try {
 				throw_if_aborted(get_request_signal());
 				if (action === 'status') {
@@ -224,29 +230,64 @@ export const register_ai_search = (
 								search_type: exa_deep_search_type,
 								system_prompt,
 							} as any);
-				throw_if_aborted(get_request_signal());
-				const safe_results = handle_large_result(
+				if (provider !== 'tavily_research')
+					throw_if_aborted(get_request_signal());
+				const metadata = request_metadata(
 					results,
+					provider,
+					action,
+					performance.now() - started,
+				);
+				const presented = present_job_result(
+					results,
+					provider,
 					'ai_search',
+					metadata,
 				);
 				mark_provider_success('ai_response', provider);
 				return {
+					_meta: {
+						omnisearch: {
+							...metadata,
+							local_completeness: presented.local_completeness,
+						},
+					},
 					content: [
 						{
 							type: 'text' as const,
-							text: JSON.stringify(safe_results, null, 2),
+							text: presented.text,
 						},
 					],
 				};
 			} catch (error) {
-				throw_if_aborted(get_request_signal());
+				if (!get_job_failure(error))
+					throw_if_aborted(get_request_signal());
 				mark_provider_error('ai_response', provider, error);
-				const error_response = create_error_response(error as Error);
+				const metadata = {
+					...request_metadata(
+						error,
+						provider,
+						action,
+						performance.now() - started,
+					),
+					error: public_error_metadata(error),
+				};
+				const error_response = present_job_error(
+					error,
+					'ai_search',
+					metadata,
+				);
 				return {
+					_meta: {
+						omnisearch: {
+							...metadata,
+							local_completeness: error_response.local_completeness,
+						},
+					},
 					content: [
 						{
 							type: 'text' as const,
-							text: error_response.error,
+							text: error_response.text,
 						},
 					],
 					isError: true,

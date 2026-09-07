@@ -1,7 +1,9 @@
 import { ErrorType, ProviderError } from '../common/types.js';
 import {
 	public_error_message,
+	public_error_metadata,
 	safe_endpoint,
+	type PublicErrorKind,
 } from '../common/errors.js';
 
 export type ProviderCategory =
@@ -25,6 +27,7 @@ export interface ProviderHealthState {
 	last_error_at?: string;
 	last_error?: string;
 	last_error_type?: string;
+	last_error_kind?: PublicErrorKind;
 	last_endpoint?: string;
 	last_success_at?: string;
 }
@@ -71,6 +74,7 @@ export const mark_provider_success = (
 	delete state.last_error;
 	delete state.last_error_at;
 	delete state.last_error_type;
+	delete state.last_error_kind;
 	delete state.last_endpoint;
 };
 
@@ -100,6 +104,8 @@ export const mark_provider_error = (
 		);
 	}
 	if (!(error instanceof ProviderError)) return;
+	const { kind } = public_error_metadata(error);
+	if (kind === 'cancelled' || kind === 'storage_failure') return;
 	if (error.type === ErrorType.INVALID_INPUT) return;
 
 	const state = ensure_state(category, provider);
@@ -107,6 +113,7 @@ export const mark_provider_error = (
 	state.active_error = true;
 	state.last_error = public_error_message(error);
 	state.last_error_type = error.type;
+	state.last_error_kind = kind;
 	state.last_error_at = new Date().toISOString();
 	delete state.last_endpoint;
 	if (

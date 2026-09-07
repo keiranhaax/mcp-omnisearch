@@ -132,9 +132,18 @@ it.each([
 );
 
 it.each(['AbortError', 'TimeoutError'])(
-	'suppresses a status response for caller %s',
+	'retains accepted task recovery for caller %s',
 	async (name) => {
-		fetch_mock.mockImplementation(() => new Promise(() => {}));
+		fetch_mock.mockImplementation(
+			(_url, init) =>
+				new Promise((_resolve, reject) => {
+					init.signal.addEventListener(
+						'abort',
+						() => reject(init.signal.reason),
+						{ once: true },
+					);
+				}),
+		);
 		const caller = new AbortController();
 		const pending = run_with_request_context(caller.signal, () =>
 			registered().handler({
@@ -146,7 +155,18 @@ it.each(['AbortError', 'TimeoutError'])(
 		await vi.advanceTimersByTimeAsync(0);
 		expect(fetch_mock).toHaveBeenCalledTimes(1);
 		caller.abort(new DOMException('private cancellation', name));
-		expect(await pending).toMatchObject({ name });
+		expect(await pending).toMatchObject({
+			isError: true,
+			_meta: {
+				omnisearch: {
+					error: {
+						kind: name === 'TimeoutError' ? 'timeout' : 'cancelled',
+						retryable: false,
+					},
+					job: { id: 'job-1', state: 'unknown', resumable: true },
+				},
+			},
+		});
 		await vi.advanceTimersByTimeAsync(100);
 		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	},

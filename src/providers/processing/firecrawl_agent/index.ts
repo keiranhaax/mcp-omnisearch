@@ -1,6 +1,5 @@
 import * as v from 'valibot';
 import {
-	firecrawl_poll_status_schema,
 	create_firecrawl_budget,
 	make_firecrawl_request,
 	poll_firecrawl_job,
@@ -16,6 +15,15 @@ import { config } from '../../../config/env.js';
 import { http_json } from '../../../common/http.js';
 import { parse_provider_response } from '../../../common/provider_response.js';
 import { validate_firecrawl_response } from '../../../common/firecrawl_utils.js';
+import {
+	get_job_failure,
+	job_metadata,
+	set_job_failure,
+} from '../../../common/job_state.js';
+import {
+	set_response_job,
+	set_response_metadata,
+} from '../../../common/response_metadata.js';
 
 const firecrawl_agent_start_schema = v.object({
 	success: v.boolean(),
@@ -25,11 +33,11 @@ const firecrawl_agent_start_schema = v.object({
 
 const firecrawl_agent_status_schema = v.object({
 	success: v.optional(v.boolean()),
-	status: firecrawl_poll_status_schema,
+	status: v.pipe(v.string(), v.maxLength(64)),
 	data: v.optional(v.unknown()),
-	model: v.optional(v.string()),
-	creditsUsed: v.optional(v.number()),
-	expiresAt: v.optional(v.string()),
+	model: v.optional(v.unknown()),
+	creditsUsed: v.optional(v.unknown()),
+	expiresAt: v.optional(v.unknown()),
 	error: v.optional(v.string()),
 });
 
@@ -54,15 +62,44 @@ export class FirecrawlAgentProvider {
 		const start_url =
 			config.processing.firecrawl_agent.override_url ||
 			config.processing.firecrawl_agent.base_url;
-		const start_response = await make_firecrawl_request(
+		const raw_start = await make_firecrawl_request(
 			this.name,
 			start_url,
 			api_key,
 			request_body,
 			config.processing.firecrawl_agent.timeout,
-			firecrawl_agent_start_schema,
+			v.unknown(),
 			signal,
 		);
+		const identity = v.safeParse(
+			v.object({
+				success: v.literal(true),
+				id: v.pipe(v.string(), v.uuid()),
+			}),
+			raw_start,
+		);
+		let start_response: FirecrawlAgentStartResponse;
+		try {
+			start_response = parse_provider_response(
+				this.name,
+				firecrawl_agent_start_schema,
+				raw_start,
+			);
+		} catch (error) {
+			if (identity.success && error instanceof ProviderError) {
+				const job_id = identity.output.id;
+				error.details = { ...error.details, job_id };
+				const job = job_metadata(
+					'firecrawl_agent',
+					job_id,
+					'unknown',
+					false,
+				);
+				set_response_job(error, job);
+				set_job_failure(error, job);
+			}
+			throw error;
+		}
 		if (!start_response.success || !start_response.id) {
 			throw new ProviderError(
 				ErrorType.PROVIDER_ERROR,
@@ -78,32 +115,50 @@ export class FirecrawlAgentProvider {
 		job_id: string,
 		status: v.InferOutput<typeof firecrawl_agent_status_schema>,
 	): ProcessingResult {
-		if (
-			status.success === false ||
-			status.status === 'failed' ||
-			status.status === 'error'
-		) {
-			throw new ProviderError(
-				ErrorType.PROVIDER_ERROR,
-				`Agent job ${job_id} failed`,
-				this.name,
-				{ retryable: false, job_id, status: status.status },
-			);
+		const job = job_metadata(
+			'firecrawl_agent',
+			job_id,
+			status.status,
+			status.status !== 'completed' &&
+				status.data !== undefined &&
+				status.data !== null,
+		);
+		if (status.success === false) {
+			job.state = 'failed';
+			job.resumable = false;
+			job.partial = status.data !== undefined && status.data !== null;
+			delete job.cancellation;
 		}
+		const known = job.state !== 'unknown';
+		const data = known ? status.data : undefined;
 		const metadata = {
 			job_id,
-			status: status.status,
-			model: status.model,
-			structured_data: status.data,
-			credits_used: status.creditsUsed,
-			expires_at: status.expiresAt,
+			status: job.provider_status ?? 'unknown',
+			model:
+				typeof status.model === 'string' &&
+				/^[a-zA-Z0-9_-]{1,64}$/.test(status.model)
+					? status.model
+					: undefined,
+			structured_data: data,
+			credits_used:
+				typeof status.creditsUsed === 'number' &&
+				Number.isFinite(status.creditsUsed) &&
+				status.creditsUsed >= 0
+					? status.creditsUsed
+					: undefined,
+			expires_at:
+				typeof status.expiresAt === 'string' &&
+				status.expiresAt.length <= 64 &&
+				Number.isFinite(Date.parse(status.expiresAt))
+					? status.expiresAt
+					: undefined,
 			title: `Firecrawl agent job ${job_id}`,
 		};
 		const content =
-			status.status === 'completed'
-				? typeof status.data === 'string'
-					? status.data
-					: JSON.stringify(status.data, null, 2)
+			status.status === 'completed' || job.partial
+				? typeof data === 'string'
+					? data
+					: JSON.stringify(data, null, 2)
 				: JSON.stringify(
 						{
 							...metadata,
@@ -115,21 +170,38 @@ export class FirecrawlAgentProvider {
 						null,
 						2,
 					);
-		if (content === undefined)
-			throw new ProviderError(
-				ErrorType.PROVIDER_ERROR,
-				'Agent completed but returned no data',
-				this.name,
-				{ retryable: false },
-			);
-		return {
-			content,
+		const result: ProcessingResult = {
+			content: content ?? '',
 			metadata: {
 				...metadata,
-				word_count: content.split(/\s+/).filter(Boolean).length,
+				word_count: (content ?? '').split(/\s+/).filter(Boolean)
+					.length,
 			},
 			source_provider: this.name,
 		};
+		set_response_metadata(result, status, this.name);
+		if (content === undefined) {
+			job.state = 'unknown';
+			job.resumable = true;
+		}
+		if (!known || content === undefined) job.partial = false;
+		set_response_job(result, job);
+		if (job.state === 'failed' || job.state === 'unknown') {
+			const error = new ProviderError(
+				ErrorType.PROVIDER_ERROR,
+				'Agent job did not complete successfully',
+				this.name,
+				{ retryable: false, job_id, status: job.provider_status },
+			);
+			set_response_metadata(error, status, this.name);
+			set_response_job(error, job);
+			throw set_job_failure(
+				error,
+				job,
+				job.partial ? result : undefined,
+			);
+		}
+		return result;
 	}
 
 	async manage_job(
@@ -188,7 +260,25 @@ export class FirecrawlAgentProvider {
 				),
 			);
 		} catch (error) {
-			handle_provider_error(error, this.name, 'manage agent job');
+			try {
+				handle_provider_error(error, this.name, 'manage agent job');
+			} catch (wrapped) {
+				if (
+					!(wrapped instanceof ProviderError) ||
+					get_job_failure(wrapped)
+				)
+					throw wrapped;
+				wrapped.details = { ...wrapped.details, job_id };
+				const job = job_metadata(
+					'firecrawl_agent',
+					job_id,
+					'unknown',
+					false,
+				);
+				if (action === 'cancel') job.cancellation = 'unconfirmed';
+				set_response_job(wrapped, job);
+				throw set_job_failure(wrapped, job);
+			}
 		}
 	}
 
@@ -231,6 +321,10 @@ export class FirecrawlAgentProvider {
 				config.processing.firecrawl_agent.timeout,
 			);
 			let accepted_job_id: string | undefined;
+			let last_observed:
+				| v.InferOutput<typeof firecrawl_agent_status_schema>
+				| undefined;
+			let last_evidence: unknown;
 			try {
 				const request_body: Record<string, any> = {
 					prompt: prompt.trim(),
@@ -254,8 +348,18 @@ export class FirecrawlAgentProvider {
 
 				const job_id = start_response.id;
 				accepted_job_id = job_id;
-				if (options?.wait_for_completion === false)
-					return this.job_result(job_id, { status: 'processing' });
+				if (options?.wait_for_completion === false) {
+					const result = this.job_result(job_id, {
+						status: 'processing',
+					});
+					// The legacy body says processing; creation alone does not
+					// establish a provider-observed queued/running state.
+					set_response_job(
+						result,
+						job_metadata('firecrawl_agent', job_id, undefined, false),
+					);
+					return result;
+				}
 				const status_url = `${start_url}/${job_id}`;
 
 				const poll_result = await poll_firecrawl_job(
@@ -268,25 +372,56 @@ export class FirecrawlAgentProvider {
 						timeout: 30000,
 						signal: budget.signal,
 						return_on_exhaustion: true,
+						return_terminal_status: true,
+						on_status: (raw) => {
+							const next = raw as v.InferOutput<
+								typeof firecrawl_agent_status_schema
+							>;
+							const known =
+								job_metadata(
+									'firecrawl_agent',
+									job_id,
+									next.status,
+									false,
+								).state !== 'unknown';
+							if (
+								known &&
+								next.data !== undefined &&
+								next.data !== null
+							)
+								last_evidence = next.data;
+							last_observed =
+								next.status !== 'completed' &&
+								known &&
+								next.data === undefined
+									? { ...next, data: last_evidence }
+									: next;
+						},
 					},
 					firecrawl_agent_status_schema,
 				);
 
-				return this.job_result(job_id, poll_result);
+				if (budget.signal.aborted) throw budget.signal.reason;
+				return this.job_result(job_id, last_observed ?? poll_result);
 			} catch (error) {
 				if (accepted_job_id && budget.signal.aborted) {
-					const wait_interrupted =
+					const wait_interrupted: 'timeout' | 'cancelled' =
 						budget.signal.reason?.name === 'TimeoutError'
 							? 'timeout'
 							: 'cancelled';
-					return {
-						content: JSON.stringify({
-							job_id: accepted_job_id,
-							status: 'unknown',
-							wait_interrupted,
-							message:
-								'Local wait stopped; the remote job may still be running. Use firecrawl_agent action="status" or action="cancel" with this job_id, not a new start.',
-						}),
+					const partial = last_evidence !== undefined;
+					const result: ProcessingResult = {
+						content: partial
+							? typeof last_evidence === 'string'
+								? last_evidence
+								: JSON.stringify(last_evidence)
+							: JSON.stringify({
+									job_id: accepted_job_id,
+									status: 'unknown',
+									wait_interrupted,
+									message:
+										'Local wait stopped; the remote job may still be running. Use firecrawl_agent action="status" or action="cancel" with this job_id, not a new start.',
+								}),
 						metadata: {
 							job_id: accepted_job_id,
 							status: 'unknown',
@@ -294,6 +429,18 @@ export class FirecrawlAgentProvider {
 						},
 						source_provider: this.name,
 					};
+					const job = {
+						...job_metadata(
+							'firecrawl_agent',
+							accepted_job_id,
+							'unknown',
+							partial,
+						),
+						wait_interrupted,
+					};
+					set_response_metadata(result, last_observed, this.name);
+					set_response_job(result, job);
+					return result;
 				}
 				try {
 					handle_provider_error(
@@ -309,6 +456,36 @@ export class FirecrawlAgentProvider {
 							recovery:
 								'Use firecrawl_agent action="status" or action="cancel" with this job_id; do not start a new job.',
 						};
+						const prior_failure = get_job_failure(failure);
+						if (
+							!prior_failure ||
+							(!prior_failure.result && last_evidence !== undefined)
+						) {
+							const partial = last_evidence !== undefined;
+							const job = prior_failure
+								? { ...prior_failure.job, partial }
+								: job_metadata(
+										'firecrawl_agent',
+										accepted_job_id,
+										'unknown',
+										partial,
+									);
+							const result = partial
+								? this.job_result(accepted_job_id, {
+										...last_observed!,
+										data: last_evidence,
+										status: 'processing',
+										success: true,
+									})
+								: undefined;
+							set_response_metadata(
+								failure,
+								last_observed,
+								this.name,
+							);
+							set_response_job(failure, job);
+							set_job_failure(failure, job, result);
+						}
 					}
 					throw failure;
 				}

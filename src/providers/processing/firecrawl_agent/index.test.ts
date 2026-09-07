@@ -217,6 +217,15 @@ describe('FirecrawlAgentProvider', () => {
 				.catch((error: unknown) => error);
 			await vi.advanceTimersByTimeAsync(3000);
 			const error = await promise;
+			if (fixture.body?.status === 'cancelled') {
+				expect(error).toMatchObject({
+					metadata: { job_id, status: 'cancelled' },
+				});
+				expect(
+					fetch_mock.mock.calls.map(([, options]) => options.method),
+				).toEqual(['POST', 'GET']);
+				return;
+			}
 			expect(error).toBeInstanceOf(Error);
 			expect(error).toMatchObject({
 				type: fixture.type,
@@ -257,11 +266,10 @@ describe('FirecrawlAgentProvider', () => {
 
 		expect(JSON.parse(result.content)).toMatchObject({
 			message:
-				'Firecrawl agent job is still processing. Call firecrawl_agent with action="status" and this job_id; do not start a new job.',
+				'Local wait stopped; the remote job may still be running. Use firecrawl_agent action="status" or action="cancel" with this job_id, not a new start.',
 			job_id: '12345678-1234-4123-8123-123456789ab2',
-			status: 'processing',
-			model: 'spark-1-mini',
-			credits_used: 12,
+			status: 'unknown',
+			wait_interrupted: 'timeout',
 		});
 		// One start plus 59 polls; the deadline prevents a GET at expiry.
 		expect(fetch_mock).toHaveBeenCalledTimes(60);

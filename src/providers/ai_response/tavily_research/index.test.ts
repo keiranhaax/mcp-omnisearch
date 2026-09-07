@@ -231,7 +231,15 @@ describe('Tavily research polling', () => {
 					new TavilyResearchProvider().search({ query: 'test' }),
 				).catch((error) => error);
 				await vi.advanceTimersByTimeAsync(at);
-				await expect(pending).resolves.toMatchObject({ name });
+				await expect(pending).resolves.toMatchObject({
+					name: 'ProviderError',
+					type: 'API_ERROR',
+					details: {
+						request_id: 'job-1',
+						cause: name === 'TimeoutError' ? 'timeout' : 'cancelled',
+						retryable: false,
+					},
+				});
 				const expected_calls = at < 25000 ? 2 : 3;
 				expect(fetch_mock).toHaveBeenCalledTimes(expected_calls);
 				await vi.advanceTimersByTimeAsync(60000);
@@ -369,7 +377,12 @@ describe('Tavily research polling', () => {
 		await vi.advanceTimersByTimeAsync(1);
 		caller.abort();
 		await expect(pending).resolves.toMatchObject({
-			name: 'AbortError',
+			name: 'ProviderError',
+			details: {
+				request_id: 'job-1',
+				cause: 'cancelled',
+				retryable: false,
+			},
 		});
 		await vi.advanceTimersByTimeAsync(6000);
 		expect(fetch_mock).toHaveBeenCalledTimes(1);

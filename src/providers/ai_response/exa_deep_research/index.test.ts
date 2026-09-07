@@ -7,6 +7,7 @@ import {
 	vi,
 } from 'vitest';
 import { config } from '../../../config/env.js';
+import { get_response_metadata } from '../../../common/response_metadata.js';
 import { ExaDeepResearchProvider } from './index.js';
 
 const fetch_mock = vi.fn();
@@ -23,6 +24,110 @@ describe('ExaDeepResearchProvider', () => {
 		config.ai_response.exa_deep_research.api_key = previous_api_key;
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+	});
+
+	it('allowlists deep research controls while preserving structured synthesis and grounding', async () => {
+		const content = {
+			token: 'source-token',
+			api_key: 'example',
+			config: { api_key: 'source-example' },
+		};
+		const citation = {
+			id: 'doc:1',
+			url: 'https://example.com/docs?token=syntax&q=a%2Bb',
+			text: 'const api_key = "example"; $x^2$ [1]',
+		};
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					requestId: 'Bearer CONTROL_CANARY',
+					output: {
+						content,
+						grounding: [
+							{
+								field: 'api_key',
+								confidence: 0.9,
+								citations: [
+									{
+										...citation,
+										config: { api_key: 'CONTROL_CANARY' },
+									},
+								],
+								headers: { authorization: 'CONTROL_CANARY' },
+							},
+						],
+						config: { api_key: 'CONTROL_CANARY' },
+					},
+					costDollars: {
+						total: 0.012,
+						search: { neural: -1, headers: 'CONTROL_CANARY' },
+						rawError: { message: 'CONTROL_CANARY' },
+					},
+					results: [citation],
+				}),
+			),
+		);
+		const results = await new ExaDeepResearchProvider().search({
+			query: 'syntax',
+		});
+		expect(JSON.stringify(results)).not.toContain('CONTROL_CANARY');
+		expect(results[0].snippet).toBe(JSON.stringify(content, null, 2));
+		expect(results[0].metadata).toMatchObject({
+			costDollars: { total: 0.012 },
+			grounding: [
+				{ field: 'api_key', confidence: 0.9, citations: [citation] },
+			],
+		});
+		expect(results[0].metadata?.requestId).toBeUndefined();
+		expect(get_response_metadata(results)).toEqual({
+			usage: { usd: 0.012 },
+		});
+		expect(results[1]).toMatchObject({
+			url: citation.url,
+			snippet: citation.text,
+			metadata: { id: 'doc:1' },
+		});
+	});
+
+	it.each(['x'.repeat(129), { rawError: 'CONTROL_CANARY' }])(
+		'discards malformed request IDs without rejecting synthesis: %j',
+		async (requestId) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						requestId,
+						output: { content: 'Source synthesis' },
+					}),
+				),
+			);
+			const [result] = await new ExaDeepResearchProvider().search({
+				query: 'test',
+			});
+			expect(result.metadata?.requestId).toBeUndefined();
+			expect(result.snippet).toBe('Source synthesis');
+		},
+	);
+
+	it('attaches safe response metadata only to the root array', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					requestId: 'req-usage',
+					costDollars: { total: 0.012 },
+					output: { content: 'source' },
+					results: [{ id: 'doc-1', url: 'https://example.com' }],
+				}),
+			),
+		);
+		const results = await new ExaDeepResearchProvider().search({
+			query: 'usage',
+		});
+		expect(get_response_metadata(results)).toEqual({
+			request_id: 'req-usage',
+			usage: { usd: 0.012 },
+		});
+		for (const result of results)
+			expect(get_response_metadata(result)).toBeUndefined();
 	});
 
 	it.each([

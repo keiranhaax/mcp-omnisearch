@@ -9,6 +9,11 @@ import {
 import { http_json, safe_endpoint } from './http.js';
 import { run_with_request_context } from './request_context.js';
 import { ErrorType } from './types.js';
+import {
+	create_error_response,
+	public_error_metadata,
+} from './errors.js';
+import { is_retryable_error } from './retry.js';
 
 const fetch_mock = vi.fn();
 
@@ -31,6 +36,137 @@ describe('http_json', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+	});
+
+	it.each([
+		[400, 'bad request', ErrorType.API_ERROR, 'bad_input', false],
+		[
+			401,
+			'not authorized',
+			ErrorType.API_ERROR,
+			'authentication',
+			false,
+		],
+		[
+			403,
+			'forbidden',
+			ErrorType.ENTITLEMENT_REQUIRED,
+			'entitlement',
+			false,
+		],
+		[
+			404,
+			'Cannot POST /private-route',
+			ErrorType.ENDPOINT_NOT_FOUND,
+			'endpoint_mismatch',
+			false,
+		],
+		[
+			404,
+			'document missing',
+			ErrorType.API_ERROR,
+			'upstream_failure',
+			false,
+		],
+		[408, 'request timeout', ErrorType.API_ERROR, 'timeout', true],
+		[422, 'invalid request', ErrorType.API_ERROR, 'bad_input', false],
+		[425, 'too early', ErrorType.API_ERROR, 'upstream_failure', true],
+		[429, 'slow down', ErrorType.RATE_LIMIT, 'rate_limit', true],
+		[
+			500,
+			'server error',
+			ErrorType.PROVIDER_ERROR,
+			'upstream_failure',
+			false,
+		],
+		[
+			501,
+			'not implemented',
+			ErrorType.PROVIDER_ERROR,
+			'upstream_failure',
+			false,
+		],
+		[
+			502,
+			'bad gateway',
+			ErrorType.PROVIDER_ERROR,
+			'upstream_failure',
+			true,
+		],
+		[
+			503,
+			'unavailable',
+			ErrorType.PROVIDER_ERROR,
+			'upstream_failure',
+			true,
+		],
+		[
+			504,
+			'gateway timeout',
+			ErrorType.PROVIDER_ERROR,
+			'timeout',
+			true,
+		],
+		[
+			400,
+			'requires a subscription',
+			ErrorType.ENTITLEMENT_REQUIRED,
+			'entitlement',
+			false,
+		],
+	] as const)(
+		'exposes safe HTTP %s metadata for %s while preserving the raw enum',
+		async (status, message, type, kind, retryable) => {
+			fetch_mock.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({ message, private: 'PRIVATE_BODY' }),
+					{
+						status,
+						headers: { 'X-Private': 'SECRET_HEADER' },
+					},
+				),
+			);
+			const error = await http_json(
+				'test_provider',
+				'https://user:password@api.example.com/PRIVATE_PATH?token=SECRET',
+			).catch((failure: unknown) => failure);
+			expect(fetch_mock).toHaveBeenCalledTimes(1);
+			expect(error).toMatchObject({ type, details: { status } });
+			expect(public_error_metadata(error)).toEqual({
+				kind,
+				retryable,
+				provider: 'test_provider',
+				http_status: status,
+			});
+			expect(is_retryable_error(error)).toBe(retryable);
+			expect(
+				JSON.stringify({
+					error,
+					metadata: public_error_metadata(error),
+					response: create_error_response(error),
+				}),
+			).not.toMatch(/PRIVATE|SECRET|password|private-route/);
+		},
+	);
+
+	it('preserves Retry-After overflow as a non-retryable rate limit', async () => {
+		fetch_mock.mockResolvedValueOnce(
+			new Response('PRIVATE_BODY', {
+				status: 429,
+				headers: { 'Retry-After': '9'.repeat(100) },
+			}),
+		);
+		const error = await http_json(
+			'test_provider',
+			'https://api.example.com',
+		).catch((failure: unknown) => failure);
+		expect(public_error_metadata(error)).toEqual({
+			kind: 'rate_limit',
+			retryable: false,
+			provider: 'test_provider',
+			http_status: 429,
+		});
+		expect(is_retryable_error(error)).toBe(false);
 	});
 
 	it.each(['request', 'call'] as const)(
@@ -90,6 +226,11 @@ describe('http_json', () => {
 				message: 'Network request failed',
 				provider: 'test_provider',
 				details: { retryable: true, cause: 'network' },
+			});
+			expect(public_error_metadata(error)).toEqual({
+				kind: 'upstream_failure',
+				retryable: true,
+				provider: 'test_provider',
 			});
 			expect(JSON.stringify(error)).not.toMatch(
 				/PRIVATE_PATH|SECRET/,

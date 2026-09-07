@@ -27,6 +27,10 @@ import {
 } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 import { throw_if_aborted } from '../../../common/request_context.js';
+import {
+	sanitize_firecrawl_document,
+	type SanitizedFirecrawlDocument,
+} from '../../../common/provider_sanitization.js';
 
 type FirecrawlScrapeFormat =
 	| string
@@ -60,17 +64,13 @@ const firecrawl_scrape_response_schema = v.object({
 			answer: v.nullish(v.string()),
 			highlights: v.nullish(v.string()),
 			links: v.optional(v.array(v.string())),
-			metadata: v.optional(v.record(v.string(), v.unknown())),
+			metadata: v.optional(v.unknown()),
 			llm_extraction: v.optional(v.unknown()),
-			warning: v.optional(v.nullable(v.string())),
+			warning: v.optional(v.unknown()),
 		}),
 	),
 	error: v.optional(v.string()),
 });
-
-type FirecrawlScrapeResponse = v.InferOutput<
-	typeof firecrawl_scrape_response_schema
->;
 
 const normalize_options = (
 	options?: Record<string, unknown>,
@@ -170,7 +170,7 @@ const build_scrape_body = (
 	return body;
 };
 
-const extract_content = (data: FirecrawlScrapeResponse['data']) => {
+const extract_content = (data: SanitizedFirecrawlDocument) => {
 	if (!data) return '';
 	if (data.markdown) return data.markdown;
 	if (data.summary) return data.summary;
@@ -243,12 +243,13 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 							);
 						}
 
-						const content = extract_content(data.data);
+						const document = sanitize_firecrawl_document(data.data);
+						const content = extract_content(document);
 
 						// A null answer/highlights is an explicit, valid "no match".
 						const no_match =
-							data.data.answer === null ||
-							data.data.highlights === null;
+							document.answer === null ||
+							document.highlights === null;
 						if (!content && !no_match) {
 							throw new ProviderError(
 								ErrorType.PROVIDER_ERROR,
@@ -261,9 +262,9 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 							url: single_url,
 							content,
 							metadata: {
-								...data.data.metadata,
-								warning: data.data.warning,
-								document: data.data,
+								...document.metadata,
+								warning: document.warning,
+								document,
 							},
 							success: true,
 						};

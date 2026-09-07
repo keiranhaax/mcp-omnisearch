@@ -69,9 +69,11 @@ const firecrawl_polling_response_schema = v.object({
 	error: v.optional(v.string()),
 });
 
-type FirecrawlPollingResponse = v.InferOutput<
-	typeof firecrawl_polling_response_schema
->;
+interface FirecrawlPollingResponse {
+	success?: boolean;
+	status: string;
+	error?: string;
+}
 
 export const make_firecrawl_request = async <
 	const TSchema extends v.BaseSchema<
@@ -167,6 +169,9 @@ export interface PollingConfig {
 	 * (all transient failures), the timeout is still thrown.
 	 */
 	return_on_exhaustion?: boolean;
+	/** Agent callers own terminal-state interpretation and evidence recovery. */
+	return_terminal_status?: boolean;
+	on_status?: (status: unknown) => void;
 	/** Overall operation budget, separate from each GET timeout. */
 	signal?: AbortSignal;
 }
@@ -224,7 +229,12 @@ export const poll_firecrawl_job = async <
 				);
 				const polling_output = parse_provider_response(
 					config.provider_name,
-					firecrawl_polling_response_schema,
+					config.return_terminal_status
+						? v.object({
+								...firecrawl_polling_response_schema.entries,
+								status: v.pipe(v.string(), v.maxLength(64)),
+							})
+						: firecrawl_polling_response_schema,
 					raw_status_result,
 				);
 				const caller_output = parse_provider_response(
@@ -270,6 +280,15 @@ export const poll_firecrawl_job = async <
 				attempt.dispose();
 			}
 
+			config.on_status?.(status_result);
+			if (
+				config.return_terminal_status &&
+				(status_result.success === false ||
+					!['scraping', 'processing', 'queued'].includes(
+						status_result.status,
+					))
+			)
+				return status_result;
 			if (
 				status_result.success === false ||
 				['error', 'failed', 'cancelled'].includes(

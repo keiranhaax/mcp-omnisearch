@@ -29,6 +29,105 @@ describe('FirecrawlScrapeProvider', () => {
 		vi.restoreAllMocks();
 	});
 
+	it('sanitizes document controls before returning any representation', async () => {
+		const url = 'https://example.com/docs?token=syntax&q=a%2Bb#math';
+		const markdown =
+			'# token\n\n~~~js\nconst api_key = "example";\n~~~\n$E=mc^2$ [1]';
+		const extracted = {
+			token: 'source-token',
+			api_key: 'documented-example',
+			nested: { headers: { authorization: 'source-example' } },
+		};
+		const controls = {
+			headers: { authorization: 'CONTROL_CANARY' },
+			config: { nested: { api_key: 'CONTROL_CANARY' } },
+			rawError: { message: 'CONTROL_CANARY' },
+		};
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					success: true,
+					data: {
+						markdown,
+						json: extracted,
+						llm_extraction: extracted,
+						links: [url],
+						screenshot: 'https://example.com/image.png?width=800',
+						metadata: {
+							title: 'API token reference',
+							sourceURL: url,
+							statusCode: 200,
+							scrapeId: 'scrape-1',
+							creditsUsed: 1,
+							...controls,
+						},
+						warning: 'Authorization: Bearer CONTROL_CANARY',
+						...controls,
+						documents: [{ config: controls }],
+					},
+				}),
+			),
+		);
+		const result =
+			await new FirecrawlScrapeProvider().process_content(url);
+		expect(JSON.stringify(result)).not.toContain('CONTROL_CANARY');
+		expect(result.content).toBe(markdown);
+		expect(result.raw_contents).toEqual([{ url, content: markdown }]);
+		expect(result.metadata.documents).toEqual([
+			{
+				url,
+				markdown,
+				json: extracted,
+				llm_extraction: extracted,
+				links: [url],
+				screenshot: 'https://example.com/image.png?width=800',
+				metadata: {
+					title: 'API token reference',
+					sourceURL: url,
+					statusCode: 200,
+					scrapeId: 'scrape-1',
+					creditsUsed: 1,
+				},
+				warning: 'Provider reported a scrape warning',
+			},
+		]);
+	});
+
+	it.each(['200', -1, 200.5, 1e100, { token: 'CONTROL_CANARY' }])(
+		'discards malformed numeric scrape controls: %j',
+		async (value) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						success: true,
+						data: {
+							markdown: 'Actual source',
+							metadata: {
+								statusCode: value,
+								creditsUsed: value,
+								scrapeId: 'x'.repeat(129),
+							},
+							warning: { error: { config: 'CONTROL_CANARY' } },
+						},
+					}),
+				),
+			);
+			const result =
+				await new FirecrawlScrapeProvider().process_content(
+					'https://example.com',
+				);
+			expect(result.content).toBe('Actual source');
+			expect(result.metadata.documents).toEqual([
+				{
+					url: 'https://example.com',
+					markdown: 'Actual source',
+					metadata: {},
+					warning: 'Provider reported a scrape warning',
+				},
+			]);
+		},
+	);
+
 	it.each(['answer', 'highlights'])(
 		'preserves nullable %s without fabricating page content',
 		async (field) => {

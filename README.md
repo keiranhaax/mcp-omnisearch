@@ -176,7 +176,8 @@ and deployment require separate verification.
 `web_search` and `web_extract` accept `response_mode` and
 `output_budget_bytes`. These are local presentation controls, not
 provider request options. Omission or `response_mode: "legacy"`
-preserves the existing response shape and pagination behavior.
+preserves the existing envelope and pagination behavior. P2's
+provider-control sanitization applies in every mode.
 
 - `compact`: return complete normalized results if they fit; otherwise
   return selected source passages plus a handle for the full canonical
@@ -200,11 +201,12 @@ preserves the existing response shape and pagination behavior.
 
 New-mode responses carry `metadata` once per request: provider,
 operation, measured adapter elapsed milliseconds, local completeness,
-provider-page completeness (unknown), and reported Tavily request ID,
-response time, and usage when valid. Unknown usage is `null`, not an
-estimated charge. No `include_usage` request flag is added, so credit
-usage is normally absent unless the provider returns it. Other
-providers' existing result metadata is preserved, not reinterpreted.
+provider-page completeness (unknown), and safe reported request IDs
+and usage when valid. Tavily response time and credits, and Exa
+`costDollars.total` as USD, are reported without coercing numeric
+strings. Unknown usage is `null`, not an estimated charge. No
+`include_usage` request flag is added. Provider-owned metadata is
+allowlisted before rendering or storage; source evidence is retained.
 
 Compact selection uses the existing query, deterministic lexical
 ranking, source-order passages, and labelled `leading`/`no_hit`
@@ -239,6 +241,49 @@ multi-tenant private evidence store.
 
 See the [P1B report](docs/search-gateway-evolution-p1b.md) for offline
 validation and remaining release gates.
+
+### Research metadata and recovery
+
+`ai_search` and `firecrawl_agent` handlers add request-level
+`_meta.omnisearch`: provider, operation, measured elapsed
+milliseconds, reported usage or explicit unknown usage, local
+completeness, and typed job/error metadata where applicable. Schema
+and protocol errors that reject before dispatch retain their existing
+response format.
+
+Job states are `queued`, `running`, `completed`, `failed`,
+`cancelled`, or `unknown`. `partial` identifies observed unfinished
+evidence. Unknown states and interrupted local waits do not prove
+completion or remote cancellation. Firecrawl creation alone reports
+typed state `unknown`; its legacy body still says `processing`.
+Cancellation is confirmed only by acknowledgement or a cancelled
+status observation. Job-scoped usage is an observation, not another
+charge on every poll.
+
+An error with a known job ID has JSON text `{error, job, result?}`;
+`result` contains available partial evidence or a `result_read`
+handle. These responses retain `isError: true`. The entire serialized
+async tool result, including `_meta` and escaped text, is capped at
+80000 UTF-8 bytes, excluding JSON-RPC framing. Retention failure
+reports `local_completeness: "unavailable"`, keeps job recovery
+information, and never issues a false handle. `complete` means all
+locally returned evidence is inline, not that the remote job or
+original page is complete.
+
+Resume Tavily with `action: "status"` and `request_id`; use Firecrawl
+`action: "status"` or `"cancel"` with `job_id`. These actions never
+create replacement jobs. Partial observations survive failures within
+the current bounded wait, not through a new persistent job registry.
+The shared trusted-client boundary also applies to job IDs; there are
+no per-client ownership checks.
+
+P2 strips provider-owned headers, configuration, and raw diagnostics
+from supported Firecrawl/Exa envelopes before inline output or
+storage. It preserves document text, citation IDs, URLs, and extracted
+JSON fields such as `token` or `api_key`. It is not a general secret
+scanner for source content. See the
+[P2 report](docs/search-gateway-evolution-p2.md) for exact scope,
+compatibility changes, and unverified live gates.
 
 ## Configuration
 

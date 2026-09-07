@@ -4,7 +4,6 @@ import { http_json } from '../../../common/http.js';
 import {
 	combine_request_signal,
 	get_request_signal,
-	with_abort_signal,
 	throw_if_aborted,
 } from '../../../common/request_context.js';
 import {
@@ -21,6 +20,15 @@ import {
 import { delay, is_retryable_error } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
+import {
+	job_metadata,
+	set_job_failure,
+} from '../../../common/job_state.js';
+import {
+	get_response_metadata,
+	set_response_job,
+	set_response_metadata,
+} from '../../../common/response_metadata.js';
 
 export const tavily_request_id_schema = v.pipe(
 	v.string(),
@@ -28,18 +36,13 @@ export const tavily_request_id_schema = v.pipe(
 );
 
 const research_start_schema = v.object({
-	status: v.picklist([
-		'pending',
-		'in_progress',
-		'completed',
-		'failed',
-		'error',
-	]),
+	status: v.pipe(v.string(), v.maxLength(64)),
 	request_id: tavily_request_id_schema,
 });
 const research_poll_schema = v.object({
 	...research_start_schema.entries,
-	response_time: v.optional(v.union([v.number(), v.string()])),
+	response_time: v.optional(v.unknown()),
+	usage: v.optional(v.unknown()),
 	content: v.optional(v.string()),
 	sources: v.optional(
 		v.array(
@@ -91,22 +94,115 @@ export class TavilyResearchProvider implements SearchProvider {
 		);
 
 		let request_id = params.request_id;
-		let last_status = 'pending';
-		const pending_result = (): SearchResult[] => [
-			{
-				title: 'Research pending',
-				url: '',
-				snippet:
-					'Research is still pending. Resume with ai_search provider="tavily_research", action="status" and this request_id; do not start a new research task.',
-				source_provider: this.name,
-				metadata: {
-					type: 'research_status',
-					request_id,
-					status: last_status,
+		let last_status = params.request_id ? 'unknown' : 'pending';
+		type Report = v.InferOutput<typeof research_poll_schema>;
+		let last_response: Report | undefined;
+		let last_report: Report | undefined;
+		const has_evidence = (report?: Report) =>
+			Boolean(report?.content || report?.sources?.length);
+		const pending_result = (
+			interrupted?: 'timeout' | 'cancelled',
+		): SearchResult[] => {
+			const report = last_report;
+			const partial =
+				last_status !== 'completed' && has_evidence(report);
+			const job = job_metadata(
+				'tavily_research',
+				request_id!,
+				last_status,
+				partial,
+			);
+			const display_status = job.provider_status ?? 'unknown';
+			const raw_time = last_response?.response_time;
+			const legacy_time =
+				(typeof raw_time === 'number' &&
+					Number.isFinite(raw_time) &&
+					raw_time >= 0) ||
+				(typeof raw_time === 'string' &&
+					raw_time.length <= 32 &&
+					/^\d+(?:\.\d+)?$/.test(raw_time))
+					? raw_time
+					: undefined;
+			if (interrupted)
+				Object.assign(job, {
+					state: 'unknown',
 					resumable: true,
+					wait_interrupted: interrupted,
+					partial: has_evidence(report),
+				});
+			const results: SearchResult[] = [
+				{
+					title: report ? 'Research Report' : 'Research pending',
+					url: '',
+					snippet:
+						report?.content ||
+						'Research is still pending. Resume with ai_search provider="tavily_research", action="status" and this request_id; do not start a new research task.',
+					...(report ? { score: 1.0 } : {}),
+					source_provider: this.name,
+					metadata: report
+						? {
+								type: 'research_report',
+								request_id,
+								response_time: legacy_time,
+								sources_count: report.sources?.length || 0,
+								...(last_status !== 'completed' || interrupted
+									? {
+											status: display_status,
+											partial: job.partial,
+											resumable: job.resumable,
+										}
+									: {}),
+							}
+						: {
+								type: 'research_status',
+								request_id,
+								status: display_status,
+								resumable: job.resumable,
+							},
 				},
-			},
-		];
+			];
+			if (report?.sources)
+				results.push(
+					...report.sources.map((source, index) => ({
+						title: source.title || 'Source',
+						url: source.url,
+						snippet:
+							source.content ||
+							source.raw_content ||
+							'Source reference',
+						score: 0.9 - index * 0.05,
+						source_provider: this.name,
+						metadata: { type: 'source' },
+					})),
+				);
+			const limited =
+				params.limit && params.limit > 0
+					? results.slice(0, params.limit)
+					: results;
+			set_response_metadata(limited, last_response, this.name);
+			set_response_job(limited, job);
+			return limited;
+		};
+		const failure = (
+			error: ProviderError,
+			interrupted?: 'timeout' | 'cancelled',
+		): ProviderError => {
+			if (!request_id) return error;
+			error.details = { ...error.details, request_id };
+			const result = pending_result(interrupted);
+			const job = get_response_metadata(result)!.job!;
+			if (!['failed', 'error'].includes(last_status)) {
+				job.state = 'unknown';
+				job.resumable = true;
+			}
+			set_response_metadata(error, last_response, this.name);
+			set_response_job(error, job);
+			return set_job_failure(
+				error,
+				job,
+				has_evidence(last_report) ? result : undefined,
+			);
+		};
 		const research_request = async () => {
 			try {
 				const base_url = config.ai_response.tavily_research.base_url;
@@ -135,6 +231,14 @@ export class TavilyResearchProvider implements SearchProvider {
 						},
 					);
 
+					const identity = v.safeParse(
+						v.object({ request_id: tavily_request_id_schema }),
+						start_data,
+					);
+					if (identity.success) {
+						request_id = identity.output.request_id;
+						last_status = 'unknown';
+					}
 					const start_response = parse_provider_response(
 						this.name,
 						research_start_schema,
@@ -143,7 +247,16 @@ export class TavilyResearchProvider implements SearchProvider {
 
 					request_id = start_response.request_id;
 					last_status = start_response.status;
-					if (last_status === 'failed' || last_status === 'error') {
+					if (
+						last_status === 'failed' ||
+						last_status === 'error' ||
+						job_metadata(
+							'tavily_research',
+							request_id,
+							last_status,
+							false,
+						).state === 'unknown'
+					) {
 						throw new ProviderError(
 							ErrorType.PROVIDER_ERROR,
 							'Research task failed',
@@ -228,8 +341,39 @@ export class TavilyResearchProvider implements SearchProvider {
 					}
 
 					last_status = poll_result.status;
+					if (
+						job_metadata(
+							'tavily_research',
+							request_id!,
+							last_status,
+							false,
+						).state === 'unknown'
+					) {
+						throw new ProviderError(
+							ErrorType.PROVIDER_ERROR,
+							'Unknown research task status',
+							this.name,
+							{ retryable: false },
+						);
+					}
+					last_response = poll_result;
+					if (has_evidence(poll_result)) {
+						last_report =
+							poll_result.status === 'completed' &&
+							poll_result.content
+								? poll_result
+								: {
+										...poll_result,
+										content:
+											poll_result.content || last_report?.content,
+										sources: poll_result.sources?.length
+											? poll_result.sources
+											: last_report?.sources,
+									};
+					}
 					if (poll_result.status === 'completed') {
 						if (!poll_result.content) {
+							last_status = 'unknown';
 							throw new ProviderError(
 								ErrorType.PROVIDER_ERROR,
 								'Research completed but no content returned',
@@ -238,49 +382,7 @@ export class TavilyResearchProvider implements SearchProvider {
 							);
 						}
 
-						const results: SearchResult[] = [
-							{
-								title: 'Research Report',
-								url: '',
-								snippet: poll_result.content,
-								score: 1.0,
-								source_provider: this.name,
-								metadata: {
-									type: 'research_report',
-									request_id,
-									response_time: poll_result.response_time,
-									sources_count: poll_result.sources?.length || 0,
-								},
-							},
-						];
-
-						if (
-							poll_result.sources &&
-							poll_result.sources.length > 0
-						) {
-							const source_results = poll_result.sources.map(
-								(source, index) => ({
-									title: source.title || 'Source',
-									url: source.url,
-									snippet:
-										source.content ||
-										source.raw_content ||
-										'Source reference',
-									score: 0.9 - index * 0.05,
-									source_provider: this.name,
-									metadata: {
-										type: 'source',
-									},
-								}),
-							);
-							results.push(...source_results);
-						}
-
-						if (params.limit && params.limit > 0) {
-							return results.slice(0, params.limit);
-						}
-
-						return results;
+						return pending_result();
 					}
 
 					if (
@@ -297,11 +399,29 @@ export class TavilyResearchProvider implements SearchProvider {
 					if (params.request_id) return pending_result();
 				}
 
-				return pending_result();
+				return pending_result('timeout');
 			} catch (error) {
-				throw_if_aborted(get_request_signal());
+				const caller = get_request_signal();
+				if (caller?.aborted) {
+					if (!request_id) throw_if_aborted(caller);
+					const cause =
+						caller.reason?.name === 'TimeoutError'
+							? 'timeout'
+							: 'cancelled';
+					throw failure(
+						new ProviderError(
+							ErrorType.API_ERROR,
+							cause === 'timeout'
+								? 'Operation timed out'
+								: 'Operation cancelled',
+							this.name,
+							{ cause, retryable: false },
+						),
+						cause,
+					);
+				}
 				if (overall_timeout.aborted && request_id)
-					return pending_result();
+					return pending_result('timeout');
 				try {
 					handle_provider_error(
 						error,
@@ -310,12 +430,7 @@ export class TavilyResearchProvider implements SearchProvider {
 					);
 				} catch (wrapped) {
 					if (wrapped instanceof ProviderError && request_id) {
-						throw new ProviderError(
-							wrapped.type,
-							wrapped.message,
-							this.name,
-							{ ...wrapped.details, request_id },
-						);
+						throw failure(wrapped);
 					}
 					throw wrapped;
 				}
@@ -328,6 +443,6 @@ export class TavilyResearchProvider implements SearchProvider {
 		const signal = combine_request_signal(overall_timeout)!;
 		// Do not race the owned wait deadline outside the recovery catch:
 		// it would discard the accepted ID before pending_result can run.
-		return with_abort_signal(research_request, get_request_signal());
+		return research_request();
 	}
 }

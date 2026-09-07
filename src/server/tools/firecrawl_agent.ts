@@ -1,9 +1,13 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import { create_error_response } from '../../common/errors.js';
+import { public_error_metadata } from '../../common/errors.js';
+import { request_metadata } from '../../common/response_metadata.js';
 import { ErrorType, ProviderError } from '../../common/types.js';
-import { handle_large_result } from '../../common/results.js';
+import {
+	present_job_result,
+	present_job_error,
+} from '../../common/results.js';
 import { is_api_key_valid } from '../../common/validation.js';
 import { config } from '../../config/env.js';
 import { FirecrawlAgentProvider } from '../../providers/processing/firecrawl_agent/index.js';
@@ -105,6 +109,7 @@ export const register_firecrawl_agent = (
 			max_credits,
 			wait_for_completion,
 		}) => {
+			const started = performance.now();
 			try {
 				const valid =
 					action === 'start'
@@ -129,39 +134,60 @@ export const register_firecrawl_agent = (
 								max_credits,
 								wait_for_completion: wait_for_completion ?? false,
 							});
-				const safe_result = handle_large_result(
+				const metadata = request_metadata(
 					result,
 					'firecrawl_agent',
+					action,
+					performance.now() - started,
+				);
+				const presented = present_job_result(
+					result,
+					'firecrawl_agent',
+					'firecrawl_agent',
+					metadata,
 				);
 				mark_provider_success('processing', 'firecrawl_agent');
 				return {
+					_meta: {
+						omnisearch: {
+							...metadata,
+							local_completeness: presented.local_completeness,
+						},
+					},
 					content: [
 						{
 							type: 'text' as const,
-							text: JSON.stringify(safe_result, null, 2),
+							text: presented.text,
 						},
 					],
 				};
 			} catch (error) {
 				mark_provider_error('processing', 'firecrawl_agent', error);
-				const error_response = create_error_response(error as Error);
-				const accepted_job_id =
-					error instanceof ProviderError &&
-					error.provider === 'firecrawl_agent' &&
-					v.safeParse(
-						v.pipe(v.string(), v.uuid()),
-						error.details?.job_id,
-					).success
-						? (error.details.job_id as string)
-						: undefined;
-				const recovery = accepted_job_id
-					? ` job_id=${accepted_job_id}. Use firecrawl_agent action="status" or action="cancel" with this job_id; do not start a new job.`
-					: '';
+				const metadata = {
+					...request_metadata(
+						error,
+						'firecrawl_agent',
+						action,
+						performance.now() - started,
+					),
+					error: public_error_metadata(error),
+				};
+				const error_response = present_job_error(
+					error,
+					'firecrawl_agent',
+					metadata,
+				);
 				return {
+					_meta: {
+						omnisearch: {
+							...metadata,
+							local_completeness: error_response.local_completeness,
+						},
+					},
 					content: [
 						{
 							type: 'text' as const,
-							text: error_response.error + recovery,
+							text: error_response.text,
 						},
 					],
 					isError: true,

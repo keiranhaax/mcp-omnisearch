@@ -2,6 +2,8 @@ import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
 import { parse_provider_response } from '../../../common/provider_response.js';
+import { sanitize_exa_control_metadata } from '../../../common/provider_sanitization.js';
+import { set_response_metadata } from '../../../common/response_metadata.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	ErrorType,
@@ -41,7 +43,7 @@ const exa_similar_response_schema = v.object({
 			score: v.nullish(v.number()),
 		}),
 	),
-	requestId: v.optional(v.string()),
+	requestId: v.optional(v.unknown()),
 	costDollars: v.optional(v.unknown()),
 });
 
@@ -117,6 +119,8 @@ export class ExaSimilarProvider implements ProcessingProvider {
 					raw_data,
 				);
 
+				const controls = sanitize_exa_control_metadata(data);
+
 				// Combine all content
 				let combined_content = `# Similar Pages to ${target_url}\n\n`;
 				combined_content += `Found ${data.results.length} similar pages:\n\n`;
@@ -175,7 +179,7 @@ export class ExaSimilarProvider implements ProcessingProvider {
 					});
 				}
 
-				return {
+				const result: ProcessingResult = {
 					content: combined_content,
 					raw_contents,
 					metadata: {
@@ -185,10 +189,12 @@ export class ExaSimilarProvider implements ProcessingProvider {
 						successful_extractions: data.results.length,
 						extract_depth,
 						original_url: target_url,
-						requestId: data.requestId,
+						requestId: controls.requestId,
 					},
 					source_provider: this.name,
 				};
+				set_response_metadata(result, controls, this.name);
+				return result;
 			} catch (error) {
 				handle_provider_error(error, this.name, 'find similar pages');
 			}

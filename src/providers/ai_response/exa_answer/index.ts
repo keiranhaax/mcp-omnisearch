@@ -5,6 +5,8 @@ import {
 } from '../../../common/errors.js';
 import { http_json } from '../../../common/http.js';
 import { parse_provider_response } from '../../../common/provider_response.js';
+import { sanitize_exa_control_metadata } from '../../../common/provider_sanitization.js';
+import { set_response_metadata } from '../../../common/response_metadata.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
@@ -29,7 +31,7 @@ const exa_answer_response_schema = v.object({
 			}),
 		),
 	),
-	requestId: v.string(),
+	requestId: v.optional(v.unknown()),
 	costDollars: v.optional(v.unknown()),
 });
 
@@ -69,6 +71,7 @@ export class ExaAnswerProvider implements SearchProvider {
 					raw_data,
 				);
 
+				const controls = sanitize_exa_control_metadata(data);
 				const results: SearchResult[] = [
 					{
 						title: 'AI Answer',
@@ -77,7 +80,7 @@ export class ExaAnswerProvider implements SearchProvider {
 						score: 1.0,
 						source_provider: this.name,
 						metadata: {
-							requestId: data.requestId,
+							requestId: controls.requestId,
 							type: 'ai_answer',
 							citations_count: data.citations?.length || 0,
 						},
@@ -103,6 +106,7 @@ export class ExaAnswerProvider implements SearchProvider {
 					results.push(...citation_results);
 				}
 
+				set_response_metadata(results, controls, this.name);
 				return results;
 			} catch (error) {
 				handle_provider_error(error, this.name, 'fetch AI response');

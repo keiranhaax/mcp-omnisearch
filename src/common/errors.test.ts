@@ -3,10 +3,25 @@ import {
 	create_error_response,
 	handle_provider_error,
 	handle_rate_limit,
+	MAX_PUBLIC_ERROR_LENGTH,
+	public_error_metadata,
 	sanitize_query,
 } from './errors.js';
 import { ErrorType, ProviderError } from './types.js';
 import { is_retryable_error } from './retry.js';
+
+it('distinguishes local storage failure from upstream failure', () => {
+	expect(
+		public_error_metadata(
+			new ProviderError(
+				ErrorType.PROVIDER_ERROR,
+				'private',
+				'fixture',
+				{ cause: 'storage', retryable: false },
+			),
+		),
+	).toMatchObject({ kind: 'storage_failure', retryable: false });
+});
 
 describe('handle_rate_limit', () => {
 	it('preserves a safe timeout message from an outer operation deadline', () => {
@@ -119,7 +134,307 @@ describe('sanitize_query', () => {
 	});
 });
 
+describe('public_error_metadata', () => {
+	it.each([
+		[ErrorType.API_ERROR, { status: 401 }, 'authentication', false],
+		[
+			ErrorType.ENTITLEMENT_REQUIRED,
+			{ status: 400 },
+			'entitlement',
+			false,
+		],
+		[ErrorType.RATE_LIMIT, {}, 'rate_limit', true],
+		[ErrorType.RATE_LIMIT, { retryable: false }, 'rate_limit', false],
+		[
+			ErrorType.ENDPOINT_NOT_FOUND,
+			{ status: 404 },
+			'endpoint_mismatch',
+			false,
+		],
+		[ErrorType.INVALID_INPUT, {}, 'bad_input', false],
+		[
+			ErrorType.API_ERROR,
+			{ cause: 'timeout', retryable: false },
+			'timeout',
+			false,
+		],
+		[
+			ErrorType.API_ERROR,
+			{ cause: 'cancelled', retryable: false },
+			'cancelled',
+			false,
+		],
+		[
+			ErrorType.API_ERROR,
+			{ cause: 'network', retryable: true },
+			'upstream_failure',
+			true,
+		],
+		[
+			ErrorType.API_ERROR,
+			{ retryable: true },
+			'upstream_failure',
+			false,
+		],
+		[ErrorType.PROVIDER_ERROR, {}, 'upstream_failure', true],
+		[
+			ErrorType.PROVIDER_ERROR,
+			{ status: 503, retryable: false },
+			'upstream_failure',
+			false,
+		],
+	] as const)(
+		'classifies %s with %j without changing retry policy',
+		(type, details, kind, retryable) => {
+			const error = new ProviderError(
+				type,
+				'PRIVATE_BODY',
+				'test_provider',
+				details,
+			);
+			const metadata = public_error_metadata(error);
+			expect(metadata).toMatchObject({
+				kind,
+				retryable,
+				provider: 'test_provider',
+			});
+			expect(metadata.retryable).toBe(is_retryable_error(error));
+		},
+	);
+
+	it.each([
+		'401',
+		'403',
+		'429',
+		NaN,
+		Infinity,
+		-1,
+		0,
+		99,
+		600,
+		401.5,
+		{},
+		null,
+		undefined,
+	])(
+		'ignores malformed HTTP status %j without changing legacy retry semantics',
+		(status) => {
+			for (const type of [
+				ErrorType.API_ERROR,
+				ErrorType.PROVIDER_ERROR,
+			]) {
+				const error = new ProviderError(
+					type,
+					'Invalid API key',
+					'test_provider',
+					{ status },
+				);
+				expect(public_error_metadata(error)).toEqual({
+					kind: 'upstream_failure',
+					retryable: is_retryable_error(error),
+					provider: 'test_provider',
+				});
+			}
+		},
+	);
+
+	it.each([100, 200, 599])(
+		'retains valid HTTP status %s',
+		(status) => {
+			expect(
+				public_error_metadata(
+					new ProviderError(
+						ErrorType.PROVIDER_ERROR,
+						'PRIVATE_BODY',
+						'test_provider',
+						{ status },
+					),
+				),
+			).toEqual({
+				kind: 'upstream_failure',
+				retryable: false,
+				provider: 'test_provider',
+				http_status: status,
+			});
+		},
+	);
+
+	it.each([
+		null,
+		undefined,
+		'PRIVATE_BODY',
+		new Error('PRIVATE_BODY'),
+		{ name: 'TimeoutError', status: 401 },
+	])('does not trust arbitrary thrown values: %j', (error) =>
+		expect(public_error_metadata(error)).toEqual({
+			kind: 'upstream_failure',
+			retryable: false,
+		}),
+	);
+
+	it.each([
+		['AbortError', 'cancelled'],
+		['TimeoutError', 'timeout'],
+	] as const)(
+		'classifies a native %s without exposing its reason',
+		(name, kind) =>
+			expect(
+				public_error_metadata(
+					new DOMException('PRIVATE_REASON', name),
+				),
+			).toEqual({ kind, retryable: false }),
+	);
+
+	it.each([
+		'',
+		'a'.repeat(65),
+		'../PRIVATE_PATH',
+		'test_provider\n',
+		401,
+		null,
+		{},
+	])('omits an invalid provider identifier: %j', (provider) => {
+		const error = Object.assign(
+			new ProviderError(
+				ErrorType.API_ERROR,
+				'private',
+				'test_provider',
+			),
+			{ provider },
+		);
+		expect(public_error_metadata(error)).not.toHaveProperty(
+			'provider',
+		);
+	});
+
+	it('returns only bounded, provider-specific recovery IDs and safe fields', () => {
+		const job_id = '12345678-1234-4234-8234-123456789abc';
+		const details = {
+			status: 503,
+			job_id,
+			request_id: 'a'.repeat(200),
+			url: 'https://user:password@api.example.com/PRIVATE_PATH?token=SECRET',
+			response: 'PRIVATE_BODY'.repeat(10_000),
+			headers: { authorization: 'SECRET' },
+			recovery: 'PRIVATE_RECOVERY',
+		};
+		for (const provider of [
+			'firecrawl_agent',
+			'tavily_research',
+			'test_provider',
+		]) {
+			const metadata = public_error_metadata(
+				new ProviderError(
+					ErrorType.PROVIDER_ERROR,
+					'PRIVATE_MESSAGE',
+					provider,
+					details,
+				),
+			);
+			expect(metadata).toEqual({
+				kind: 'upstream_failure',
+				retryable: true,
+				provider,
+				http_status: 503,
+				...(provider === 'firecrawl_agent' ? { job_id } : {}),
+				...(provider === 'tavily_research'
+					? { request_id: details.request_id }
+					: {}),
+			});
+			expect(JSON.stringify(metadata).length).toBeLessThanOrEqual(
+				MAX_PUBLIC_ERROR_LENGTH,
+			);
+		}
+	});
+
+	it.each([
+		'',
+		'../PRIVATE_PATH',
+		'id with spaces',
+		'id\n',
+		'a'.repeat(201),
+		12,
+		null,
+		{},
+	])('omits invalid recovery IDs: %j', (id) => {
+		for (const provider of ['firecrawl_agent', 'tavily_research']) {
+			const metadata = public_error_metadata(
+				new ProviderError(ErrorType.API_ERROR, 'private', provider, {
+					job_id: id,
+					request_id: id,
+				}),
+			);
+			expect(metadata).not.toHaveProperty('job_id');
+			expect(metadata).not.toHaveProperty('request_id');
+		}
+	});
+
+	it('does not accept a malformed Firecrawl UUID or a trailing newline', () => {
+		for (const job_id of [
+			'job-1',
+			'12345678-1234-4234-8234-123456789abc\n',
+		]) {
+			expect(
+				public_error_metadata(
+					new ProviderError(
+						ErrorType.API_ERROR,
+						'private',
+						'firecrawl_agent',
+						{ job_id },
+					),
+				),
+			).not.toHaveProperty('job_id');
+		}
+	});
+});
+
 describe('create_error_response', () => {
+	it('opts into bounded Firecrawl recovery without trusting upstream guidance', () => {
+		const job_id = '12345678-1234-4234-8234-123456789abc';
+		const error = new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'PRIVATE_BODY'.repeat(10_000),
+			'firecrawl_agent',
+			{
+				job_id,
+				recovery: 'PRIVATE_RECOVERY'.repeat(10_000),
+				url: 'https://user:password@api.example.com/PRIVATE_PATH?token=SECRET',
+			},
+		);
+		const legacy = create_error_response(error).error;
+		expect(legacy).toBe(
+			'firecrawl_agent error [PROVIDER_ERROR]: Provider request failed (endpoint: https://api.example.com)',
+		);
+		const message = create_error_response(error, {
+			include_recovery: true,
+		}).error;
+		expect(message).toBe(
+			`${legacy} job_id=${job_id}. Use firecrawl_agent action="status" or action="cancel" with this job_id; do not start a new job.`,
+		);
+		expect(message.length).toBeLessThanOrEqual(
+			MAX_PUBLIC_ERROR_LENGTH,
+		);
+		expect(message).not.toMatch(/PRIVATE|SECRET|password/);
+	});
+
+	it('does not render invalid or wrong-provider Firecrawl recovery IDs', () => {
+		for (const [provider, job_id] of [
+			['firecrawl_agent', '../PRIVATE_PATH'],
+			['firecrawl_agent', '12345678-1234-4234-8234-123456789abc\n'],
+			['test_provider', '12345678-1234-4234-8234-123456789abc'],
+		]) {
+			const error = new ProviderError(
+				ErrorType.API_ERROR,
+				'private',
+				provider,
+				{ job_id },
+			);
+			expect(
+				create_error_response(error, { include_recovery: true }),
+			).toEqual(create_error_response(error));
+		}
+	});
+
 	it('preserves only a validated Tavily task ID in safe recovery guidance', () => {
 		const error = new ProviderError(
 			ErrorType.RATE_LIMIT,
@@ -128,6 +443,12 @@ describe('create_error_response', () => {
 			{ request_id: 'job-1' },
 		);
 		const message = create_error_response(error).error;
+		expect(message).toBe(
+			'tavily_research error [RATE_LIMIT]: Rate limit exceeded Resume with ai_search provider="tavily_research", action="status", request_id="job-1"; do not start a new research task.',
+		);
+		expect(
+			create_error_response(error, { include_recovery: true }).error,
+		).toBe(message);
 		expect(message).toContain('job-1');
 		expect(message).toContain('action="status"');
 		expect(message).not.toContain('PRIVATE_PROMPT');

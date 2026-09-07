@@ -7,6 +7,7 @@ import {
 	vi,
 } from 'vitest';
 import { config } from '../../../config/env.js';
+import { get_response_metadata } from '../../../common/response_metadata.js';
 import { ExaContentsProvider } from './index.js';
 
 const fetch_mock = vi.fn();
@@ -23,6 +24,92 @@ describe('ExaContentsProvider', () => {
 		config.processing.exa_contents.api_key = previous_api_key;
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
+	});
+
+	it.each([-1, 404.5, '404', 1e100])(
+		'sanitizes status controls while keeping source IDs and content: %j',
+		async (httpStatusCode) => {
+			const url = 'https://example.com/docs?token=syntax&q=a%2Bb';
+			const content =
+				'~~~js\nconst api_key = "example";\n~~~ $x^2$ [1]';
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						requestId: 'Bearer CONTROL_CANARY',
+						results: [
+							{ id: 'doc:1', url: url + '&page=1', text: content },
+						],
+						statuses: [
+							{
+								id: 'doc:1',
+								status: 'success',
+								source: 'cached',
+								error: null,
+							},
+							{
+								id: url,
+								status: 'error',
+								error: {
+									tag: 'Bearer CONTROL_CANARY',
+									httpStatusCode,
+									headers: { authorization: 'CONTROL_CANARY' },
+								},
+								config: { api_key: 'CONTROL_CANARY' },
+							},
+						],
+						costDollars: { total: { config: 'CONTROL_CANARY' } },
+					}),
+				),
+			);
+			const result = await new ExaContentsProvider().process_content([
+				'doc-1',
+				'doc-2',
+			]);
+			expect(JSON.stringify(result)).not.toContain('CONTROL_CANARY');
+			expect(result.raw_contents).toEqual([
+				{ url: url + '&page=1', content },
+			]);
+			expect(result.metadata.requestId).toBeUndefined();
+			expect(get_response_metadata(result)).toBeUndefined();
+			expect(result.metadata.statuses).toEqual([
+				{
+					id: 'doc:1',
+					status: 'success',
+					source: 'cached',
+					error: null,
+				},
+				{ id: url, status: 'error', error: {} },
+			]);
+			expect(result.metadata.failed_urls).toEqual([url]);
+		},
+	);
+
+	it('attaches safe response metadata to the root object', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					requestId: 'req-usage',
+					costDollars: { total: 0.001 },
+					results: [
+						{
+							id: 'doc-1',
+							url: 'https://example.com',
+							text: 'source',
+						},
+					],
+				}),
+			),
+		);
+		const result = await new ExaContentsProvider().process_content(
+			'doc-1',
+		);
+		expect(get_response_metadata(result)).toEqual({
+			request_id: 'req-usage',
+			usage: { usd: 0.001 },
+		});
+		expect(
+			get_response_metadata(result.raw_contents![0]),
+		).toBeUndefined();
 	});
 
 	it.each([
