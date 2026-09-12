@@ -41,7 +41,10 @@ const all_tool_names = [
 	'github_search',
 	'result_read',
 	'search_and_read',
+	'web_crawl',
 	'web_extract',
+	'web_map',
+	'web_read',
 	'web_search',
 ];
 let home: string;
@@ -124,8 +127,27 @@ const expect_p0_compatibility = async (
 			),
 		);
 	}
+	const focused_names = ['web_read', 'web_crawl', 'web_map'];
+	for (const tool of tools.filter(({ name }) =>
+		focused_names.includes(name),
+	)) {
+		const definition = registered_definitions().find(
+			({ name }) => name === tool.name,
+		)!;
+		expect(tool.inputSchema).toEqual(
+			await adapter.toJsonSchema(definition.schema),
+		);
+		expect(tool.outputSchema).toEqual(
+			await adapter.toJsonSchema(output_schema),
+		);
+		expect(tool.inputSchema.additionalProperties).toBe(false);
+		expect(tool.inputSchema.properties).not.toHaveProperty('mode');
+	}
 	const legacy = structuredClone(
-		tools.filter(({ name }) => name !== 'search_and_read'),
+		tools.filter(
+			({ name }) =>
+				name !== 'search_and_read' && !focused_names.includes(name),
+		),
 	);
 	for (const tool of legacy) {
 		if (tool.name === 'web_search' || tool.name === 'web_extract') {
@@ -246,6 +268,7 @@ describe('P0 configured discovery contract', () => {
 			'result_read',
 			'search_and_read',
 			'web_extract',
+			'web_read',
 			'web_search',
 		]);
 		await expect_p0_compatibility(tools, 'tavily-only');
@@ -368,6 +391,14 @@ describe('built discovery capture phase guards', () => {
 		{
 			flags: ['--p1b', '--workflow'],
 			error: 'Use --workflow without --p1a or --p1b',
+		},
+		{
+			flags: ['--focused', '--update'],
+			error: 'Focused verification must not overwrite P0 fixtures',
+		},
+		{
+			flags: ['--focused', '--workflow'],
+			error: 'Use --focused without other phase flags',
 		},
 	])(
 		'rejects $flags before capture or fixture writes',

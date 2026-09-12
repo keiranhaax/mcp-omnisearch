@@ -23,7 +23,7 @@ const evidence = ${JSON.stringify(text)};
 const url = 'https://example.test/report?edition=2';
 let attempts = 0;
 globalThis.fetch = async (target, options) => {
-  if (++attempts > 6) throw new Error('FIXTURE_REQUEST_CAP');
+  if (++attempts > 8) throw new Error('FIXTURE_REQUEST_CAP');
   const path = String(target);
   if (path === 'https://api.tavily.com/search') {
     return Response.json({ results: [
@@ -35,6 +35,20 @@ globalThis.fetch = async (target, options) => {
     const body = JSON.parse(options.body);
     if (body.urls.length !== 1 || body.urls[0] !== url) throw new Error('FIXTURE_BAD_URL');
     return Response.json({results:[{url,raw_content:evidence}],failed_results:[]});
+  }
+  if (path === 'https://api.firecrawl.dev/v2/map') {
+    const body = JSON.parse(options.body);
+    if (body.url !== url || body.limit !== 50) throw new Error('FIXTURE_BAD_MAP');
+    return Response.json({success:true,links:[{url,title:'Mapped fixture'}]});
+  }
+  if (path === 'https://api.firecrawl.dev/v2/crawl') {
+    const body = JSON.parse(options.body);
+    if (body.url !== url || body.limit !== 20) throw new Error('FIXTURE_BAD_CRAWL');
+    return Response.json({success:true,id:'focused-fixture-job'});
+  }
+  if (path === 'https://api.firecrawl.dev/v2/crawl/focused-fixture-job') {
+    if (options.method !== 'GET') throw new Error('FIXTURE_BAD_POLL');
+    return Response.json({status:'completed',total:1,completed:1,data:[{url,markdown:'Crawled fixture'}]});
   }
   throw new Error('FIXTURE_UNEXPECTED_NETWORK');
 };
@@ -50,6 +64,7 @@ const child = spawn(
 			NODE_ENV: 'test',
 			OMNISEARCH_RESULT_DIR: join(home, 'results'),
 			TAVILY_API_KEY: 'workflow-offline-fixture',
+			FIRECRAWL_API_KEY: 'focused-offline-fixture',
 		},
 		stdio: ['pipe', 'pipe', 'pipe'],
 	},
@@ -91,7 +106,7 @@ const rpc = (method, params = {}) =>
 		const timer = setTimeout(() => {
 			pending.delete(id);
 			reject(new Error('Offline RPC deadline'));
-		}, 5000);
+		}, 15000);
 		pending.set(id, (response) => {
 			clearTimeout(timer);
 			if (response.error) reject(new Error(response.error.message));
@@ -114,7 +129,13 @@ try {
 		(tool) => tool.name === 'search_and_read',
 	);
 	assert(workflow.outputSchema);
-	for (const name of ['web_search', 'web_extract'])
+	for (const name of [
+		'web_search',
+		'web_extract',
+		'web_read',
+		'web_map',
+		'web_crawl',
+	])
 		assert(
 			listing.tools.find((tool) => tool.name === name).outputSchema,
 		);
@@ -183,6 +204,20 @@ try {
 		extract.structuredContent.data,
 		JSON.parse(extract.content[0].text),
 	);
+	for (const name of ['web_read', 'web_map', 'web_crawl']) {
+		const focused = await call(name, {
+			url: 'https://example.test/report?edition=2',
+			...(name === 'web_read' ? { provider: 'tavily' } : {}),
+			response_mode: 'full',
+			output_budget_bytes: 2048,
+		});
+		assert(!focused.isError);
+		assert(Buffer.byteLength(JSON.stringify(focused)) <= 2048);
+		assert.deepEqual(
+			focused.structuredContent.data,
+			JSON.parse(focused.content[0].text),
+		);
+	}
 	console.log(
 		JSON.stringify(
 			{
@@ -195,6 +230,7 @@ try {
 					'lossless-evidence-pages',
 					'typed-handler-error',
 					'structured-primitives',
+					'focused-read-map-crawl',
 				],
 				evidence_pages: pages,
 				provider_network: 'fixture-only',

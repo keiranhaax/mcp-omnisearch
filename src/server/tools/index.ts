@@ -51,6 +51,16 @@ import {
 } from './web_search.js';
 import { register_result_read } from './result_read.js';
 import { register_search_and_read } from './search_and_read.js';
+import {
+	register_web_read,
+	register_web_crawl,
+	register_web_map,
+} from './focused_web.js';
+import {
+	configured_tool_groups,
+	tool_allowed,
+	type CapabilityGroup,
+} from '../capability_groups.js';
 
 // Track available providers by category for the status resource
 export const available_providers = {
@@ -155,16 +165,29 @@ export const initialize_providers = () => {
 	}
 };
 
-export const register_tools = (server: McpServer<GenericSchema>) => {
-	register_result_read(server);
-	register_web_search(server);
-	register_github_search(server);
-	register_ai_search(server);
-	register_web_extract(server);
-	register_search_and_read(server);
-	register_brave_llm_context(server);
-	register_brave_media_search(server);
-	register_brave_news_search(server);
-	register_firecrawl_agent(server);
-	register_context_dev_tools(server);
+export const register_tools = (
+	server: McpServer<GenericSchema>,
+	groups: ReadonlySet<CapabilityGroup> = configured_tool_groups(),
+) => {
+	const registrations = [
+		['result_read', register_result_read],
+		['web_search', register_web_search],
+		['github_search', register_github_search],
+		['ai_search', register_ai_search],
+		['web_extract', register_web_extract],
+		['search_and_read', register_search_and_read],
+		['web_read', register_web_read],
+		['web_crawl', register_web_crawl],
+		['web_map', register_web_map],
+		['brave_llm_context', register_brave_llm_context],
+		['brave_media_search', register_brave_media_search],
+		['brave_news_search', register_brave_news_search],
+		['firecrawl_agent', register_firecrawl_agent],
+	] as const;
+	for (const [name, register] of registrations) {
+		if (tool_allowed(name, groups)) register(server);
+	}
+	register_context_dev_tools(server, (name) =>
+		tool_allowed(name, groups),
+	);
 };

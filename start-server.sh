@@ -82,6 +82,12 @@ clean_env=(
   "NODE_ENV=production"
 )
 
+# An explicitly empty group setting must reach the server and fail closed,
+# rather than becoming an unset value that enables the default full catalog.
+if [[ -v OMNISEARCH_TOOL_GROUPS ]]; then
+  clean_env+=("OMNISEARCH_TOOL_GROUPS=${OMNISEARCH_TOOL_GROUPS}")
+fi
+
 # Pass only credentials and runtime controls used by Omnisearch. This prevents
 # PM2 or an interactive deployment shell from leaking unrelated model secrets
 # into the MCP process.

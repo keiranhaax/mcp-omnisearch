@@ -3,6 +3,7 @@ import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import { run_with_request_context } from '../common/request_context.js';
 import { validate_config } from '../config/env.js';
+import { configured_tool_groups } from './capability_groups.js';
 import { setup_handlers } from './handlers.js';
 import {
 	initialize_providers,
@@ -13,6 +14,7 @@ export const create_server = (identity: {
 	name: string;
 	version: string;
 }) => {
+	const groups = configured_tool_groups();
 	const server = new McpServer<GenericSchema>(
 		{
 			...identity,
@@ -35,7 +37,7 @@ export const create_server = (identity: {
 
 	validate_config();
 	initialize_providers();
-	register_tools(server);
+	register_tools(server, groups);
 	setup_handlers(server);
 	return server;
 };

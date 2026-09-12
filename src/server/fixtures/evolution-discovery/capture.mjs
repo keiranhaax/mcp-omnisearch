@@ -2,7 +2,8 @@
 // --p1b includes P1A. Phase flags cannot be combined with each other or
 // --update, which refreshes P0 snapshots only.
 // --workflow verifies P1B plus structured output and search_and_read,
-// without changing any historical schema fixture.
+// without changing any historical schema fixture. --focused includes
+// workflow plus the three focused tools, with unchanged historic schemas.
 // Run only in an approved isolated worktree,
 // after building the exact source revision being recorded. No provider calls.
 import assert from 'node:assert/strict';
@@ -17,13 +18,28 @@ assert(
 	process.argv
 		.slice(2)
 		.every((argument) =>
-			['--update', '--p1a', '--p1b', '--workflow'].includes(argument),
+			[
+				'--update',
+				'--p1a',
+				'--p1b',
+				'--workflow',
+				'--focused',
+			].includes(argument),
 		),
 );
 const update = process.argv.includes('--update');
 const p1a = process.argv.includes('--p1a');
 const p1b = process.argv.includes('--p1b');
-const workflow = process.argv.includes('--workflow');
+const focused = process.argv.includes('--focused');
+const workflow = process.argv.includes('--workflow') || focused;
+assert(
+	!(focused && update),
+	'Focused verification must not overwrite P0 fixtures',
+);
+assert(
+	!(focused && (p1a || p1b || process.argv.includes('--workflow'))),
+	'Use --focused without other phase flags',
+);
 assert(!(p1a && p1b), 'Choose only one phase: --p1a or --p1b');
 assert(
 	!(workflow && (p1a || p1b)),
@@ -185,7 +201,13 @@ for (const profile of profiles) {
 		);
 		const { tools } = await rpc('tools/list', {});
 		const count =
-			profile.count + (workflow && profile.workflow ? 1 : 0);
+			profile.count +
+			(workflow && profile.workflow ? 1 : 0) +
+			(focused && profile.workflow
+				? profile.name === 'tavily-only'
+					? 1
+					: 3
+				: 0);
 		assert.equal(tools.length, count);
 		assert.equal(new Set(tools.map((tool) => tool.name)).size, count);
 		assert(!logs.includes('P0_NETWORK_ATTEMPT'));
@@ -197,6 +219,34 @@ for (const profile of profiles) {
 			);
 		else {
 			const legacy = structuredClone(tools);
+			if (focused) {
+				const expected = profile.workflow
+					? profile.name === 'tavily-only'
+						? ['web_read']
+						: ['web_crawl', 'web_map', 'web_read']
+					: [];
+				const added = legacy.filter((tool) =>
+					['web_read', 'web_crawl', 'web_map'].includes(tool.name),
+				);
+				assert.deepEqual(
+					added.map((tool) => tool.name).sort(),
+					expected,
+				);
+				for (const tool of added) {
+					assert.deepEqual(
+						tool.outputSchema,
+						legacy.find((item) => item.name === 'web_extract')
+							.outputSchema,
+					);
+					assert.equal(tool.inputSchema.additionalProperties, false);
+					assert(!Object.hasOwn(tool.inputSchema.properties, 'mode'));
+					assert.deepEqual(
+						tool.inputSchema.required,
+						tool.name === 'web_read' ? ['provider', 'url'] : ['url'],
+					);
+					legacy.splice(legacy.indexOf(tool), 1);
+				}
+			}
 			if (workflow) {
 				const index = legacy.findIndex(
 					(tool) => tool.name === 'search_and_read',

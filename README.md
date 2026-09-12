@@ -16,13 +16,13 @@ news and media search, web automation, and business intelligence.
 
 The current fork integrates Tavily, Brave, Exa, GitHub, You.com,
 Linkup, Firecrawl, and Context.dev through four consolidated tools,
-ten focused tools, and one bounded search/read workflow. Tools and
-providers are registered only when their required API keys are
+thirteen focused tools, and one bounded search/read workflow. Tools
+and providers are registered only when their required API keys are
 available.
 
 ## What this fork adds
 
-- **Expanded MCP surface:** 15 tools covering search, research,
+- **Expanded MCP surface:** 18 tools covering search, research,
   extraction, news, media, autonomous web tasks, brand intelligence,
   style guides, business classification, and transaction
   identification.
@@ -96,6 +96,11 @@ for limits, compatibility boundaries, and the measured tradeoffs.
 
 ### Focused tools
 
+- `web_read`: basic public-URL reading via Tavily, Exa, or Firecrawl,
+  without mode selection, crawling, or synthesis.
+- `web_crawl`: a Firecrawl crawl from one public URL, using existing
+  depth presets and bounded polling.
+- `web_map`: Firecrawl URL discovery without page-content crawling.
 - `brave_llm_context`: retrieve LLM-ready Brave grounding chunks.
 - `brave_news_search`: search recent news with freshness, locale,
   SafeSearch, pagination, and extra snippets.
@@ -113,6 +118,18 @@ for limits, compatibility boundaries, and the measured tradeoffs.
 
 The exact tool list is dynamic. A tool is omitted from MCP discovery
 when its required provider key is unavailable.
+
+### Optional capability groups
+
+`OMNISEARCH_TOOL_GROUPS` selects process-wide startup groups:
+`research`, `media`, `business`, and `automation`. Unset/`all`
+preserves the full configured catalog; `none` leaves only
+`result_read`. Excluded tools cannot be discovered or called.
+Mixed-purpose legacy tools require every relevant group. Empty/invalid
+values reject startup. See
+[focused-tool and group contracts](docs/focused-tools-and-groups.md)
+for mappings, examples, and limits of this control. It is not per-user
+authorization or a provider-spend limit.
 
 ## Search operators and provider options
 

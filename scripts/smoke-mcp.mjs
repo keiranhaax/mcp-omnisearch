@@ -41,7 +41,10 @@ const toolNames = [
 	'github_search',
 	'result_read',
 	'search_and_read',
+	'web_crawl',
 	'web_extract',
+	'web_map',
+	'web_read',
 	'web_search',
 ];
 const env = {
@@ -212,13 +215,20 @@ try {
 		new Set(legacy.map((t) => t.name)).size,
 		toolNames.length,
 	);
-	checks.push('legacy-and-modern-15-tools');
+	checks.push('legacy-and-modern-18-tools');
 	assert.deepEqual(
 		legacy
 			.filter((t) => t.outputSchema !== undefined)
 			.map((t) => t.name)
 			.sort(),
-		['search_and_read', 'web_extract', 'web_search'],
+		[
+			'search_and_read',
+			'web_crawl',
+			'web_extract',
+			'web_map',
+			'web_read',
+			'web_search',
+		],
 	);
 	const webOutput = legacy.find(
 		(t) => t.name === 'web_search',
@@ -227,6 +237,12 @@ try {
 		legacy.find((t) => t.name === 'web_extract').outputSchema,
 		webOutput,
 	);
+	for (const name of ['web_read', 'web_crawl', 'web_map']) {
+		const tool = legacy.find((t) => t.name === name);
+		assert.deepEqual(tool.outputSchema, webOutput);
+		assert.equal(tool.inputSchema.additionalProperties, false);
+		assert(!Object.hasOwn(tool.inputSchema.properties, 'mode'));
+	}
 	for (const tool of legacy.filter(
 		(t) => t.outputSchema !== undefined,
 	)) {

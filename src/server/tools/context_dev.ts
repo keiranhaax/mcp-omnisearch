@@ -513,11 +513,16 @@ const register_context_transaction_identify = (
 
 export const register_context_dev_tools = (
 	server: McpServer<GenericSchema>,
+	allow: (name: string) => boolean = () => true,
 ) => {
 	if (!enabled) return;
-	register_context_web_extract(server);
-	register_context_brand_intel(server);
-	register_context_styleguide(server);
-	register_context_classify(server);
-	register_context_transaction_identify(server);
+	if (allow('context_web_extract'))
+		register_context_web_extract(server);
+	if (allow('context_brand_intel'))
+		register_context_brand_intel(server);
+	if (allow('context_styleguide'))
+		register_context_styleguide(server);
+	if (allow('context_classify')) register_context_classify(server);
+	if (allow('context_transaction_identify'))
+		register_context_transaction_identify(server);
 };
