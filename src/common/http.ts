@@ -2,6 +2,7 @@ import { handle_rate_limit, safe_endpoint } from './errors.js';
 export { safe_endpoint } from './errors.js';
 import {
 	combine_request_signal,
+	consume_http_request,
 	consume_response_bytes,
 	throw_if_aborted,
 	with_abort_signal,
@@ -122,7 +123,13 @@ export const http_json = async <T = any>(
 			() =>
 				with_provider_slot(provider, signal, async () => {
 					// Keep the permit until fetch itself settles, not just its abort race.
-					const res = await fetch(url, { ...options, signal });
+					throw_if_aborted(signal);
+					const bounded_requests = consume_http_request();
+					const res = await fetch(url, {
+						...options,
+						signal,
+						...(bounded_requests ? { redirect: 'error' } : {}),
+					});
 					if (signal?.aborted) {
 						void res.body?.cancel().catch(() => {});
 						throw_if_aborted(signal);

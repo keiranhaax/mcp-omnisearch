@@ -15,13 +15,14 @@ for web search, cited research, GitHub discovery, content extraction,
 news and media search, web automation, and business intelligence.
 
 The current fork integrates Tavily, Brave, Exa, GitHub, You.com,
-Linkup, Firecrawl, and Context.dev through four consolidated tools and
-ten focused tools. Tools and providers are registered only when their
-required API keys are available.
+Linkup, Firecrawl, and Context.dev through four consolidated tools,
+ten focused tools, and one bounded search/read workflow. Tools and
+providers are registered only when their required API keys are
+available.
 
 ## What this fork adds
 
-- **Expanded MCP surface:** 14 tools covering search, research,
+- **Expanded MCP surface:** 15 tools covering search, research,
   extraction, news, media, autonomous web tasks, brand intelligence,
   style guides, business classification, and transaction
   identification.
@@ -63,6 +64,22 @@ Provider availability depends on configuration and provider-side
 entitlements. Missing keys disable only the affected capabilities.
 
 ## MCP tools
+
+### Structured outputs and bounded workflow
+
+`web_search` and `web_extract` now return schema-declared
+`structuredContent` alongside their existing JSON text. Full
+serialized result budgets count both copies; oversized evidence
+remains recoverable through `result_read`.
+
+`search_and_read` bundles explicit-provider search and sequential
+reading of a bounded set of unique URLs, with request limits,
+cancellation, deadlines, and per-source failures. It does not
+synthesize answers or silently fall back to another provider. Separate
+search/extract tools remain preferable when selection needs judgment
+or batch efficiency. See
+[contracts and offline evaluation](docs/structured-search-workflow.md)
+for limits, compatibility boundaries, and the measured tradeoffs.
 
 ### Consolidated tools
 

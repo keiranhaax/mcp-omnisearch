@@ -50,6 +50,7 @@ import {
 	register_web_search,
 } from './web_search.js';
 import { register_result_read } from './result_read.js';
+import { register_search_and_read } from './search_and_read.js';
 
 // Track available providers by category for the status resource
 export const available_providers = {
@@ -160,6 +161,7 @@ export const register_tools = (server: McpServer<GenericSchema>) => {
 	register_github_search(server);
 	register_ai_search(server);
 	register_web_extract(server);
+	register_search_and_read(server);
 	register_brave_llm_context(server);
 	register_brave_media_search(server);
 	register_brave_news_search(server);

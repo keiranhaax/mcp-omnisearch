@@ -134,6 +134,18 @@ const without_request_metadata = (result: any) => {
 	const { _meta, ...legacy } = result;
 	return legacy;
 };
+// Check the entire new wire envelope before removing only the approved
+// additive field. The historical snapshots still guard the exact text.
+const without_structured_content = (
+	result: any,
+	expected: Record<string, unknown>,
+) => {
+	expect(
+		JSON.parse(JSON.stringify(result.structuredContent)),
+	).toStrictEqual(expected);
+	const { structuredContent: _structuredContent, ...legacy } = result;
+	return legacy;
+};
 // Only call after the replacement P2 assertions pass. These P0 snapshots
 // document superseded error/lifecycle behavior, not a current contract.
 // Guard their bytes and keep Vitest from treating them as deletable debris;
@@ -263,7 +275,14 @@ for (const scenario of cases) {
 			expect(scenario.extracted(parsed(response))).toBe(content);
 			expect(attempts).toHaveLength(1);
 			expect({
-				response: without_request_metadata(response.result),
+				response:
+					scenario.name === 'web_search' ||
+					scenario.name === 'web_extract'
+						? without_structured_content(response.result, {
+								ok: true,
+								data: parsed(response),
+							})
+						: without_request_metadata(response.result),
 				requests: attempts,
 			}).toMatchSnapshot();
 		});
@@ -286,7 +305,20 @@ for (const scenario of cases) {
 				expect(parsed(response).job.state).toBe('unknown');
 				preserve_historical_snapshot();
 			} else
-				expect(response.result ?? response.error).toMatchSnapshot();
+				expect(
+					without_structured_content(response.result, {
+						ok: false,
+						error: {
+							kind: 'authentication',
+							http_status: 401,
+							provider:
+								scenario.name === 'web_search'
+									? 'tavily'
+									: 'tavily_extract',
+							retryable: false,
+						},
+					}),
+				).toMatchSnapshot();
 		});
 
 		it('reports a transport timeout without fallback', async () => {
@@ -341,7 +373,12 @@ for (const scenario of cases) {
 				);
 				preserve_historical_snapshot();
 			} else
-				expect(response.result ?? response.error).toMatchSnapshot();
+				expect(
+					without_structured_content(response.result, {
+						ok: false,
+						error: { kind: 'cancelled', retryable: false },
+					}),
+				).toMatchSnapshot();
 		});
 
 		it('rejects missing required input before any networking', async () => {

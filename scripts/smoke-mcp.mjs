@@ -27,6 +27,23 @@ assert.notEqual(port, upstreamPort);
 const key = randomUUID();
 const url = `http://127.0.0.1:${port}`;
 const checks = [];
+const toolNames = [
+	'ai_search',
+	'brave_llm_context',
+	'brave_media_search',
+	'brave_news_search',
+	'context_brand_intel',
+	'context_classify',
+	'context_styleguide',
+	'context_transaction_identify',
+	'context_web_extract',
+	'firecrawl_agent',
+	'github_search',
+	'result_read',
+	'search_and_read',
+	'web_extract',
+	'web_search',
+];
 const env = {
 	PATH: process.env.PATH,
 	HOME: home,
@@ -188,13 +205,57 @@ try {
 	const legacy = (await rpc('tools/list')).data.result.tools;
 	const modern = (await rpc('tools/list', {}, true)).data.result
 		.tools;
-	assert.equal(legacy.length, 14);
-	assert.deepEqual(
-		modern.map((t) => t.name),
-		legacy.map((t) => t.name),
+	assert.equal(legacy.length, toolNames.length);
+	assert.deepEqual(legacy.map((t) => t.name).sort(), toolNames);
+	assert.deepEqual(modern, legacy);
+	assert.equal(
+		new Set(legacy.map((t) => t.name)).size,
+		toolNames.length,
 	);
-	assert.equal(new Set(legacy.map((t) => t.name)).size, 14);
-	checks.push('legacy-and-modern-14-tools');
+	checks.push('legacy-and-modern-15-tools');
+	assert.deepEqual(
+		legacy
+			.filter((t) => t.outputSchema !== undefined)
+			.map((t) => t.name)
+			.sort(),
+		['search_and_read', 'web_extract', 'web_search'],
+	);
+	const webOutput = legacy.find(
+		(t) => t.name === 'web_search',
+	).outputSchema;
+	assert.deepEqual(
+		legacy.find((t) => t.name === 'web_extract').outputSchema,
+		webOutput,
+	);
+	for (const tool of legacy.filter(
+		(t) => t.outputSchema !== undefined,
+	)) {
+		assert.equal(tool.outputSchema.type, 'object');
+		assert.deepEqual(
+			Object.keys(tool.outputSchema.properties).sort(),
+			['data', 'error', 'ok'],
+		);
+		assert(tool.outputSchema.required.includes('ok'));
+	}
+	const workflow = legacy.find((t) => t.name === 'search_and_read');
+	assert.notDeepEqual(workflow.outputSchema, webOutput);
+	assert.deepEqual(workflow.inputSchema.required, [
+		'query',
+		'search_provider',
+		'extract_provider',
+	]);
+	assert.deepEqual(
+		workflow.inputSchema.properties.search_provider.enum,
+		legacy.find((t) => t.name === 'web_search').inputSchema.properties
+			.provider.enum,
+	);
+	assert.deepEqual(
+		workflow.inputSchema.properties.extract_provider.enum.toSorted(),
+		['exa', 'firecrawl', 'tavily'],
+	);
+	assert.equal(workflow.inputSchema.additionalProperties, false);
+	assert(!Object.hasOwn(workflow.inputSchema.properties, 'mode'));
+	checks.push('structured-output-and-workflow-discovery');
 	for (const modern of [false, true]) {
 		const unknown = await rpc(
 			'tools/call',
@@ -225,6 +286,59 @@ try {
 		assert(!serialized.includes('PRIVATE_FIXTURE_SENTINEL'));
 	}
 	checks.push('bounded-validation-and-protocol-errors');
+	for (const modern of [false, true]) {
+		// Schema-valid but semantically invalid calls exercise the tool's
+		// public error envelope without attempting a provider request.
+		for (const { name, args, provider } of [
+			{
+				name: 'web_search',
+				args: {
+					provider: 'tavily',
+					query: 'offline',
+					output_budget_bytes: 2048,
+				},
+				provider: 'presentation',
+			},
+			{
+				name: 'web_extract',
+				args: {
+					provider: 'exa',
+					url: 'https://example.test/report',
+					chunks_per_source: 1,
+				},
+				provider: 'web_extract',
+			},
+			{
+				name: 'search_and_read',
+				args: {
+					query: 'offline',
+					search_provider: 'tavily',
+					extract_provider: 'tavily',
+					max_sources: 2,
+					search_limit: 1,
+				},
+				provider: 'search_and_read',
+			},
+		]) {
+			const { response, data } = await rpc(
+				'tools/call',
+				{ name, arguments: args },
+				modern,
+			);
+			assert.equal(response.status, 200);
+			assert.equal(data.error, undefined);
+			assert.equal(data.result.isError, true);
+			assert.equal(data.result.content.length, 1);
+			assert.equal(data.result.content[0].type, 'text');
+			assert(data.result.content[0].text.length > 0);
+			assert.deepEqual(data.result.structuredContent, {
+				ok: false,
+				error: { kind: 'bad_input', provider, retryable: false },
+			});
+			assert(Buffer.byteLength(JSON.stringify(data.result)) <= 2048);
+		}
+	}
+	checks.push('structured-errors-before-network-both-protocols');
 	assert.equal(
 		(await rpc('server/discover', {}, true)).data.result.resultType,
 		'complete',

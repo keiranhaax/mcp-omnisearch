@@ -56,6 +56,19 @@ export const sanitize_query = (query: string): string => {
 
 export const MAX_PUBLIC_ERROR_LENGTH = 1024;
 
+// Keep legacy human-readable failure text while exposing the correct
+// non-retryable storage classification to clients and provider health.
+export class LegacyRetentionError extends ProviderError {
+	constructor(public readonly original: unknown) {
+		super(
+			ErrorType.PROVIDER_ERROR,
+			'Cannot retain complete canonical result; no evidence was returned',
+			'result_store',
+			{ retryable: false, cause: 'storage' },
+		);
+	}
+}
+
 export type PublicErrorKind =
 	| 'authentication'
 	| 'entitlement'
@@ -65,6 +78,7 @@ export type PublicErrorKind =
 	| 'endpoint_mismatch'
 	| 'bad_input'
 	| 'storage_failure'
+	| 'request_budget'
 	| 'upstream_failure';
 
 export interface PublicErrorMetadata {
@@ -130,6 +144,8 @@ export const public_error_metadata = (
 		metadata.kind = details.cause;
 	} else if (details?.cause === 'storage') {
 		metadata.kind = 'storage_failure';
+	} else if (details?.cause === 'request_budget') {
+		metadata.kind = 'request_budget';
 	} else {
 		switch (error.type) {
 			case ErrorType.ENTITLEMENT_REQUIRED:
@@ -335,6 +351,8 @@ export const create_error_response = (
 	error: unknown,
 	options: { include_recovery?: boolean } = {},
 ): { error: string } => {
+	if (error instanceof LegacyRetentionError)
+		return create_error_response(error.original, options);
 	if (error instanceof Error && error.name === 'TimeoutError')
 		return { error: 'Operation timed out' };
 	if (error instanceof Error && error.name === 'AbortError')

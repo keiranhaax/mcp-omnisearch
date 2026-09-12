@@ -14,6 +14,11 @@ import {
 	vi,
 } from 'vitest';
 import { store_result } from '../common/result_store.js';
+import { search_read_data_schema } from '../common/search_read_result.js';
+import {
+	create_output_schema,
+	output_schema,
+} from '../common/tool_output.js';
 // Synthetic configuration only. Fresh modules model a cold process, not a
 // credential hot reload. No live entitlement or tenant isolation is implied.
 let create_server: typeof import('./create_server.js').create_server;
@@ -35,6 +40,7 @@ const all_tool_names = [
 	'firecrawl_agent',
 	'github_search',
 	'result_read',
+	'search_and_read',
 	'web_extract',
 	'web_search',
 ];
@@ -78,14 +84,56 @@ const snapshot = (name: string) =>
 			'utf8',
 		),
 	);
-// Preserve the captured P0 schemas byte-for-byte; permit only reviewed
-// optional P1A/P1B additions, checking their exact client-visible definitions.
-const expect_p0_compatibility = (
+type ToolDefinition = {
+	name: string;
+	schema: GenericSchema;
+	outputSchema?: GenericSchema;
+};
+const registered_definitions = () => {
+	const definitions: ToolDefinition[] = [];
+	register_tools({
+		tool: (definition: ToolDefinition) =>
+			definitions.push(definition),
+	} as any);
+	return definitions;
+};
+// Preserve P0 fixtures; permit only reviewed P1A/P1B input additions,
+// the two web output schemas and the separately checked workflow tool.
+const expect_p0_compatibility = async (
 	tools: Awaited<ReturnType<typeof discover>>,
 	profile: string,
 ) => {
-	const legacy = structuredClone(tools);
+	const adapter = new ValibotJsonSchemaAdapter();
+	const workflow = tools.find(
+		({ name }) => name === 'search_and_read',
+	);
+	expect(Boolean(workflow)).toBe(
+		tools.some(({ name }) => name === 'web_search') &&
+			tools.some(({ name }) => name === 'web_extract'),
+	);
+	if (workflow) {
+		const definition = registered_definitions().find(
+			({ name }) => name === workflow.name,
+		)!;
+		expect(workflow.inputSchema).toEqual(
+			await adapter.toJsonSchema(definition.schema),
+		);
+		expect(workflow.outputSchema).toEqual(
+			await adapter.toJsonSchema(
+				create_output_schema(search_read_data_schema),
+			),
+		);
+	}
+	const legacy = structuredClone(
+		tools.filter(({ name }) => name !== 'search_and_read'),
+	);
 	for (const tool of legacy) {
+		if (tool.name === 'web_search' || tool.name === 'web_extract') {
+			expect(tool.outputSchema).toEqual(
+				await adapter.toJsonSchema(output_schema),
+			);
+			delete tool.outputSchema;
+		}
 		const properties = tool.inputSchema.properties as Record<
 			string,
 			unknown
@@ -114,6 +162,7 @@ const discover = async () => {
 		name: string;
 		description: string;
 		inputSchema: Record<string, unknown>;
+		outputSchema?: Record<string, unknown>;
 	}>;
 };
 
@@ -152,15 +201,7 @@ describe('P0 configured discovery contract', () => {
 		expect(tools.map(({ name }) => name).sort()).toEqual(
 			all_tool_names,
 		);
-		const definitions: Array<{
-			name: string;
-			schema: GenericSchema;
-		}> = [];
-		register_tools({
-			tool: (definition: { name: string; schema: GenericSchema }) => {
-				definitions.push(definition);
-			},
-		} as any);
+		const definitions = registered_definitions();
 		expect(definitions).toHaveLength(tools.length);
 		const adapter = new ValibotJsonSchemaAdapter();
 		for (const definition of definitions) {
@@ -169,15 +210,23 @@ describe('P0 configured discovery contract', () => {
 				tools.find(({ name }) => name === definition.name)
 					?.inputSchema,
 			).toEqual(converted);
+			expect(
+				tools.find(({ name }) => name === definition.name)
+					?.outputSchema,
+			).toEqual(
+				definition.outputSchema
+					? await adapter.toJsonSchema(definition.outputSchema)
+					: undefined,
+			);
 		}
-		expect_p0_compatibility(tools, 'all-providers');
+		await expect_p0_compatibility(tools, 'all-providers');
 	});
 
 	it('retains only result_read without any configured provider', async () => {
 		configure(() => false);
 		const tools = await discover();
 		expect(tools.map(({ name }) => name)).toEqual(['result_read']);
-		expect_p0_compatibility(tools, 'no-providers');
+		await expect_p0_compatibility(tools, 'no-providers');
 	});
 
 	it('removes only github_search when the GitHub key is missing', async () => {
@@ -186,7 +235,7 @@ describe('P0 configured discovery contract', () => {
 		expect(tools.map(({ name }) => name).sort()).toEqual(
 			all_tool_names.filter((name) => name !== 'github_search'),
 		);
-		expect_p0_compatibility(tools, 'no-github');
+		await expect_p0_compatibility(tools, 'no-github');
 	});
 
 	it('advertises the Tavily-only provider enums without unrelated tools', async () => {
@@ -195,11 +244,56 @@ describe('P0 configured discovery contract', () => {
 		expect(tools.map(({ name }) => name).sort()).toEqual([
 			'ai_search',
 			'result_read',
+			'search_and_read',
 			'web_extract',
 			'web_search',
 		]);
-		expect_p0_compatibility(tools, 'tavily-only');
+		await expect_p0_compatibility(tools, 'tavily-only');
 	});
+
+	it.each([
+		{ enabled: ['you'], extract: undefined },
+		{ enabled: ['tavily_extract'], extract: undefined },
+		{ enabled: ['you', 'tavily_extract'], extract: 'tavily' },
+		{ enabled: ['you', 'exa_contents'], extract: 'exa' },
+		{ enabled: ['you', 'firecrawl_scrape'], extract: 'firecrawl' },
+	])(
+		'registers workflow only with both search and supported read providers: $enabled',
+		async ({ enabled, extract }) => {
+			configure((name) => enabled.includes(name));
+			const tools = await discover();
+			const workflow = tools.find(
+				({ name }) => name === 'search_and_read',
+			);
+			if (!extract) {
+				expect(workflow).toBeUndefined();
+				return;
+			}
+			expect(workflow).toBeDefined();
+			const properties = workflow!.inputSchema.properties as Record<
+				string,
+				any
+			>;
+			expect(properties.search_provider.enum).toEqual(['you']);
+			expect(properties.extract_provider.enum).toEqual([extract]);
+			expect(Object.keys(properties).sort()).toEqual([
+				'extract_provider',
+				'max_requests',
+				'max_sources',
+				'output_budget_bytes',
+				'query',
+				'search_limit',
+				'search_provider',
+				'timeout_ms',
+			]);
+			expect(workflow!.inputSchema.required).toEqual([
+				'query',
+				'search_provider',
+				'extract_provider',
+			]);
+			expect(workflow!.inputSchema.additionalProperties).toBe(false);
+		},
+	);
 
 	it('adds only the two optional P1B presentation fields while retaining P1A chunks and no local extractor', async () => {
 		const tools = await discover();
@@ -262,6 +356,18 @@ describe('built discovery capture phase guards', () => {
 		{
 			flags: ['--p1a', '--p1b'],
 			error: 'Choose only one phase: --p1a or --p1b',
+		},
+		{
+			flags: ['--update', '--workflow'],
+			error: 'Workflow verification must not overwrite P0 fixtures',
+		},
+		{
+			flags: ['--p1a', '--workflow'],
+			error: 'Use --workflow without --p1a or --p1b',
+		},
+		{
+			flags: ['--p1b', '--workflow'],
+			error: 'Use --workflow without --p1a or --p1b',
 		},
 	])(
 		'rejects $flags before capture or fixture writes',

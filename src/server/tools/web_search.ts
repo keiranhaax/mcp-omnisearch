@@ -1,7 +1,12 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import { create_error_response } from '../../common/errors.js';
+import {
+	output_schema,
+	tool_success,
+	tool_success_bytes,
+	tool_error,
+} from '../../common/tool_output.js';
 import {
 	presentation_schema,
 	present_result,
@@ -51,6 +56,9 @@ export const initialize_web_search = (): boolean => {
 	return providers.size > 0;
 };
 
+export const get_search_provider = (name: string) =>
+	providers.get(name);
+
 export const get_available_providers = () =>
 	Array.from(providers.keys());
 
@@ -67,6 +75,7 @@ export const register_web_search = (
 		{
 			name: 'web_search',
 			description: tool_descriptions.web_search,
+			outputSchema: output_schema,
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,
@@ -258,6 +267,7 @@ export const register_web_search = (
 						: {}),
 				});
 				const safe_results = present_result(results, {
+					measure_bytes: tool_success_bytes,
 					response_mode,
 					output_budget_bytes,
 					query,
@@ -266,26 +276,10 @@ export const register_web_search = (
 					elapsed_ms: Math.round(performance.now() - started),
 				});
 				mark_provider_success('search', provider);
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: JSON.stringify(safe_results, null, 2),
-						},
-					],
-				};
+				return tool_success(safe_results);
 			} catch (error) {
 				mark_provider_error('search', provider, error);
-				const error_response = create_error_response(error as Error);
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: error_response.error,
-						},
-					],
-					isError: true,
-				};
+				return tool_error(error);
 			}
 		},
 	);

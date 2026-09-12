@@ -6,20 +6,41 @@ export const MAX_REQUEST_RESPONSE_BYTES = 25 * 1024 * 1024;
 const request_context = new AsyncLocalStorage<{
 	signal: AbortSignal | undefined;
 	response_budget: { bytes: number };
+	http_budget?: { limit: number; used: number };
 }>();
 
 export const run_with_request_context = <T>(
 	signal: AbortSignal | undefined,
 	fn: () => T,
+	options: { http_budget?: { limit: number; used: number } } = {},
 ): T =>
 	request_context.run(
 		{
 			signal,
 			response_budget: request_context.getStore()
 				?.response_budget ?? { bytes: 0 },
+			http_budget:
+				request_context.getStore()?.http_budget ??
+				options.http_budget,
 		},
 		fn,
 	);
+
+// Count immediately before fetch, including adapter retries. Existing
+// callers have no attempt budget and retain their original behavior.
+export const consume_http_request = (): boolean => {
+	const budget = request_context.getStore()?.http_budget;
+	if (!budget) return false;
+	if (budget.used >= budget.limit)
+		throw new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'Provider request budget exhausted',
+			'resource_limits',
+			{ retryable: false, cause: 'request_budget' },
+		);
+	budget.used++;
+	return true;
+};
 
 export const consume_response_bytes = (bytes: number): void => {
 	const budget = request_context.getStore()?.response_budget;

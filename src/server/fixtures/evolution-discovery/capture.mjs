@@ -1,6 +1,8 @@
 // P0 fixture verification; --p1a/--p1b allow reviewed optional additions.
 // --p1b includes P1A. Phase flags cannot be combined with each other or
 // --update, which refreshes P0 snapshots only.
+// --workflow verifies P1B plus structured output and search_and_read,
+// without changing any historical schema fixture.
 // Run only in an approved isolated worktree,
 // after building the exact source revision being recorded. No provider calls.
 import assert from 'node:assert/strict';
@@ -15,13 +17,22 @@ assert(
 	process.argv
 		.slice(2)
 		.every((argument) =>
-			['--update', '--p1a', '--p1b'].includes(argument),
+			['--update', '--p1a', '--p1b', '--workflow'].includes(argument),
 		),
 );
 const update = process.argv.includes('--update');
 const p1a = process.argv.includes('--p1a');
 const p1b = process.argv.includes('--p1b');
+const workflow = process.argv.includes('--workflow');
 assert(!(p1a && p1b), 'Choose only one phase: --p1a or --p1b');
+assert(
+	!(workflow && (p1a || p1b)),
+	'Use --workflow without --p1a or --p1b',
+);
+assert(
+	!(workflow && update),
+	'Workflow verification must not overwrite P0 fixtures',
+);
 assert(
 	!(update && p1a),
 	'P1A verification must not overwrite P0 fixtures',
@@ -30,7 +41,7 @@ assert(
 	!(update && p1b),
 	'P1B verification must not overwrite P0 fixtures',
 );
-const phases = p1b ? ['p1a', 'p1b'] : p1a ? ['p1a'] : [];
+const phases = p1b || workflow ? ['p1a', 'p1b'] : p1a ? ['p1a'] : [];
 const additions = await Promise.all(
 	phases.map(async (phase) =>
 		JSON.parse(
@@ -44,7 +55,7 @@ const additions = await Promise.all(
 		),
 	),
 );
-if (p1b) {
+if (p1b || workflow) {
 	const delta = additions[1];
 	assert.deepEqual(Object.keys(delta).sort(), [
 		'web_extract',
@@ -68,14 +79,20 @@ const keys = [
 	'CONTEXT_DEV_API_KEY',
 ];
 const profiles = [
-	{ name: 'all-providers', enabled: keys, count: 14 },
+	{ name: 'all-providers', enabled: keys, count: 14, workflow: true },
 	{ name: 'no-providers', enabled: [], count: 1 },
 	{
 		name: 'no-github',
 		enabled: keys.filter((key) => key !== 'GITHUB_API_KEY'),
 		count: 13,
+		workflow: true,
 	},
-	{ name: 'tavily-only', enabled: ['TAVILY_API_KEY'], count: 4 },
+	{
+		name: 'tavily-only',
+		enabled: ['TAVILY_API_KEY'],
+		count: 4,
+		workflow: true,
+	},
 ];
 const deny_network = `
 import net from 'node:net';
@@ -167,11 +184,10 @@ for (const profile of profiles) {
 			}) + '\n',
 		);
 		const { tools } = await rpc('tools/list', {});
-		assert.equal(tools.length, profile.count);
-		assert.equal(
-			new Set(tools.map((tool) => tool.name)).size,
-			profile.count,
-		);
+		const count =
+			profile.count + (workflow && profile.workflow ? 1 : 0);
+		assert.equal(tools.length, count);
+		assert.equal(new Set(tools.map((tool) => tool.name)).size, count);
 		assert(!logs.includes('P0_NETWORK_ATTEMPT'));
 		const target = new URL(`${profile.name}.json`, import.meta.url);
 		if (update)
@@ -181,6 +197,67 @@ for (const profile of profiles) {
 			);
 		else {
 			const legacy = structuredClone(tools);
+			if (workflow) {
+				const index = legacy.findIndex(
+					(tool) => tool.name === 'search_and_read',
+				);
+				assert.equal(index >= 0, Boolean(profile.workflow));
+				const outputNames = legacy
+					.filter((tool) => tool.outputSchema !== undefined)
+					.map((tool) => tool.name)
+					.sort();
+				assert.deepEqual(
+					outputNames,
+					profile.workflow
+						? ['search_and_read', 'web_extract', 'web_search']
+						: [],
+				);
+				if (index >= 0) {
+					const search = legacy.find(
+						(tool) => tool.name === 'web_search',
+					);
+					const extract = legacy.find(
+						(tool) => tool.name === 'web_extract',
+					);
+					const combined = legacy[index];
+					assert.deepEqual(search.outputSchema, extract.outputSchema);
+					assert.notDeepEqual(
+						combined.outputSchema,
+						search.outputSchema,
+					);
+					for (const tool of [search, extract, combined]) {
+						assert.equal(tool.outputSchema.type, 'object');
+						assert.deepEqual(
+							Object.keys(tool.outputSchema.properties).sort(),
+							['data', 'error', 'ok'],
+						);
+						assert(tool.outputSchema.required.includes('ok'));
+					}
+					assert.deepEqual(
+						combined.inputSchema.properties.search_provider.enum,
+						search.inputSchema.properties.provider.enum,
+					);
+					assert.deepEqual(
+						combined.inputSchema.properties.extract_provider.enum,
+						extract.inputSchema.properties.provider.enum,
+					);
+					assert.deepEqual(combined.inputSchema.required, [
+						'query',
+						'search_provider',
+						'extract_provider',
+					]);
+					assert.equal(
+						combined.inputSchema.additionalProperties,
+						false,
+					);
+					assert(
+						!Object.hasOwn(combined.inputSchema.properties, 'mode'),
+					);
+					delete search.outputSchema;
+					delete extract.outputSchema;
+					legacy.splice(index, 1);
+				}
+			}
 			for (const tool of legacy) {
 				for (const delta of additions) {
 					for (const [field, schema] of Object.entries(

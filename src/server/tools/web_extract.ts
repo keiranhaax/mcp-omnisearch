@@ -1,7 +1,12 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import { create_error_response } from '../../common/errors.js';
+import {
+	output_schema,
+	tool_success,
+	tool_success_bytes,
+	tool_error,
+} from '../../common/tool_output.js';
 import { firecrawl_format_schema } from '../../common/firecrawl_utils.js';
 import {
 	presentation_schema,
@@ -124,6 +129,11 @@ export const initialize_web_extract = (): boolean => {
 
 	return providers.size > 0;
 };
+
+export const get_extract_provider = (
+	provider: string,
+	mode: string,
+) => providers.get(make_key(provider, mode));
 
 export const get_available_providers = () => {
 	const available = new Set<string>();
@@ -361,6 +371,7 @@ export const register_web_extract = (
 		{
 			name: 'web_extract',
 			description: tool_descriptions.web_extract,
+			outputSchema: output_schema,
 			annotations: {
 				readOnlyHint: false,
 				destructiveHint: false,
@@ -589,6 +600,7 @@ export const register_web_extract = (
 					provider_options,
 				);
 				const safe_result = present_result(result, {
+					measure_bytes: tool_success_bytes,
 					response_mode,
 					output_budget_bytes,
 					query,
@@ -598,26 +610,10 @@ export const register_web_extract = (
 					elapsed_ms: Math.round(performance.now() - started),
 				});
 				mark_provider_success('processing', provider);
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: JSON.stringify(safe_result, null, 2),
-						},
-					],
-				};
+				return tool_success(safe_result);
 			} catch (error) {
 				mark_provider_error('processing', provider, error);
-				const error_response = create_error_response(error as Error);
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: error_response.error,
-						},
-					],
-					isError: true,
-				};
+				return tool_error(error);
 			}
 		},
 	);

@@ -126,16 +126,24 @@ try {
 	);
 	const observations = [];
 	for (const response_mode of ['compact', 'full']) {
+		// Include structured content in the measured wire budget. The
+		// selection case needs room for both copies; full stays at minimum.
+		const output_budget_bytes =
+			response_mode === 'compact' ? 4096 : 2048;
 		const response = await call('web_extract', {
 			provider: 'tavily',
 			url,
 			query: 'Needle',
 			response_mode,
-			output_budget_bytes: 2048,
+			output_budget_bytes,
 		});
 		const bytes = Buffer.byteLength(JSON.stringify(response));
-		assert(bytes <= 2048);
+		assert(bytes <= output_budget_bytes);
 		const value = parse(response);
+		assert.deepEqual(response.structuredContent, {
+			ok: true,
+			data: value,
+		});
 		assert.equal(value.metadata.request_id, 'p1b-built-request');
 		assert.deepEqual(value.metadata.usage, { credits: 0 });
 		if (response_mode === 'compact')
@@ -159,6 +167,7 @@ try {
 		);
 		observations.push({
 			response_mode,
+			output_budget_bytes,
 			bytes,
 			canonical_reads: recovered.reads,
 			exact_reconstruction: true,

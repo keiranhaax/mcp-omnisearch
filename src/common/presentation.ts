@@ -4,6 +4,7 @@ import { store_result } from './result_store.js';
 import { select_passages } from './passages.js';
 import { get_response_metadata } from './response_metadata.js';
 import { ErrorType, ProviderError } from './types.js';
+import { LegacyRetentionError } from './errors.js';
 
 export const presentation_schema = v.object({
 	response_mode: v.optional(
@@ -34,6 +35,8 @@ export interface PresentationOptions {
 	operation: string;
 	elapsed_ms: number;
 	urls?: string | string[];
+	/** Measure the actual caller envelope; defaults to text-only MCP. */
+	measure_bytes?: (value: unknown) => number;
 }
 
 // Remove only the exact, reconstructible concatenation. All other fields
@@ -145,8 +148,16 @@ export const present_result = (
 	options: PresentationOptions,
 ): unknown => {
 	validate_presentation(options);
-	if (!options.response_mode || options.response_mode === 'legacy')
-		return handle_large_result(result, options.operation);
+	const measure_bytes = options.measure_bytes ?? tool_result_bytes;
+	if (!options.response_mode || options.response_mode === 'legacy') {
+		try {
+			return handle_large_result(result, options.operation, {
+				force_storage: measure_bytes(result) > 80000,
+			});
+		} catch (error) {
+			throw new LegacyRetentionError(error);
+		}
+	}
 	const budget =
 		options.output_budget_bytes ??
 		(options.response_mode === 'compact' ? 12000 : 80000);
@@ -178,7 +189,7 @@ export const present_result = (
 		...(warnings.length ? { warnings } : {}),
 		result: canonical_result(result),
 	};
-	if (tool_result_bytes(full) <= budget) return full;
+	if (measure_bytes(full) <= budget) return full;
 	// Always retain the entire normalized canonical result before selecting,
 	// including results below the historical 80000-byte offload threshold.
 	let stored;
@@ -189,7 +200,7 @@ export const present_result = (
 			ErrorType.PROVIDER_ERROR,
 			'Cannot retain complete canonical result; no evidence was returned',
 			'presentation',
-			{ retryable: false },
+			{ retryable: false, cause: 'storage' },
 		);
 	}
 	const retained = {
@@ -200,7 +211,16 @@ export const present_result = (
 		read_hint:
 			'Call result_read; concatenate pages using next_offset and next_byte_offset as byte_offset to recover the complete canonical JSON.',
 	};
-	if (options.response_mode === 'full') return retained;
+	if (options.response_mode === 'full') {
+		if (measure_bytes(retained) > budget)
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'Output budget cannot fit required result provenance',
+				'presentation',
+				{ retryable: false },
+			);
+		return retained;
+	}
 	const sources = sources_of(
 		full.result,
 		['scrape', 'summarize', 'extract', 'contents'].includes(
@@ -257,7 +277,7 @@ export const present_result = (
 					};
 				});
 			compact.omitted_sources = sources.length - count;
-			if (tool_result_bytes(compact) <= budget) return compact;
+			if (measure_bytes(compact) <= budget) return compact;
 			if (allowance <= 64) break;
 			allowance = Math.floor(allowance / 2);
 		}
@@ -265,12 +285,18 @@ export const present_result = (
 	}
 	compact.sources = [];
 	compact.omitted_sources = sources.length;
-	if (tool_result_bytes(compact) > budget)
+	// With an expanded envelope, prefer a recoverable handle to an empty
+	// selection. Text-only callers retain their existing compact shape.
+	if (options.measure_bytes && measure_bytes(retained) <= budget)
+		return retained;
+	if (measure_bytes(compact) > budget) {
+		if (measure_bytes(retained) <= budget) return retained;
 		throw new ProviderError(
 			ErrorType.INVALID_INPUT,
 			'Output budget cannot fit required result provenance',
 			'presentation',
 			{ retryable: false },
 		);
+	}
 	return compact;
 };

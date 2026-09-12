@@ -6,6 +6,9 @@ import { config } from '../../config/env.js';
 import { create_server } from '../create_server.js';
 
 const url = 'https://example.test/report?edition=2';
+// Selection must fit provenance plus both text and structured copies.
+// These fixtures still exceed this cap, so they exercise selection, not full.
+const selection_budget = 4096;
 const settings = Object.values(config).flatMap(Object.values);
 const keys = settings.map((item) => item.api_key);
 let server: ReturnType<typeof create_server>;
@@ -19,6 +22,17 @@ const call = async (name: string, args: Record<string, unknown>) => {
 		method: 'tools/call',
 		params: { name, arguments: args },
 	});
+	if (
+		name !== 'result_read' &&
+		response.result?.isError !== true &&
+		!response.error
+	)
+		expect(
+			JSON.parse(JSON.stringify(response.result.structuredContent)),
+		).toStrictEqual({
+			ok: true,
+			data: JSON.parse(response.result.content[0].text),
+		});
 	return response;
 };
 const parsed = (response: any) =>
@@ -76,8 +90,16 @@ const reconstruct = async (id: string) => {
 		expect(response.result.isError).not.toBe(true);
 		const chunk = parsed(response);
 		output += chunk.content;
-		if (chunk.next_offset === undefined)
-			return { canonical: JSON.parse(output), pages };
+		if (chunk.next_offset === undefined) {
+			const marker = '\nFULL RESULT JSON\n';
+			const start = output.lastIndexOf(marker);
+			return {
+				canonical: JSON.parse(
+					start < 0 ? output : output.slice(start + marker.length),
+				),
+				pages,
+			};
+		}
 		if (chunk.next_byte_offset === undefined) output += '\n';
 		offset = chunk.next_offset;
 		byte_offset = chunk.next_byte_offset ?? 0;
@@ -123,14 +145,14 @@ it('selects relevant compact evidence and retains below-threshold canonical cont
 		provider: 'tavily',
 		url,
 		response_mode: 'compact',
-		output_budget_bytes: 2048,
+		output_budget_bytes: selection_budget,
 		query: 'Needle',
 	});
 	const compact = parsed(response);
 	expect(compact.response_mode).toBe('compact');
 	expect(
 		Buffer.byteLength(JSON.stringify(response.result)),
-	).toBeLessThanOrEqual(2048);
+	).toBeLessThanOrEqual(selection_budget);
 	expect(compact.sources[0].url).toBe(url);
 	expect(compact.sources[0].selection_method).toBe('query');
 	expect(
@@ -146,6 +168,33 @@ it('selects relevant compact evidence and retains below-threshold canonical cont
 		text,
 	);
 	expect(recovered.canonical.result).not.toHaveProperty('content');
+	expect(readdirSync(directory)).toHaveLength(1);
+	expect(fetch_mock).toHaveBeenCalledTimes(1);
+});
+
+it('returns recoverable compact retention when both copies cannot fit selection at 2048 bytes', async () => {
+	const text = 'Needle evidence [2].\n'.repeat(500);
+	respond(text);
+	const response = await call('web_extract', {
+		provider: 'tavily',
+		url,
+		response_mode: 'compact',
+		output_budget_bytes: 2048,
+		query: 'Needle',
+	});
+	expect(response.result.isError).not.toBe(true);
+	expect(
+		Buffer.byteLength(JSON.stringify(response.result)),
+	).toBeLessThanOrEqual(2048);
+	const retained = parsed(response);
+	expect(retained.response_mode).toBe('compact');
+	expect(retained.metadata.local_completeness).toBe('retained');
+	expect(retained).not.toHaveProperty('sources');
+	const { canonical } = await reconstruct(retained.result_id);
+	expect(canonical.result.raw_contents).toEqual([
+		{ url, content: text },
+	]);
+	expect(canonical.metadata.local_completeness).toBe('complete');
 	expect(readdirSync(directory)).toHaveLength(1);
 	expect(fetch_mock).toHaveBeenCalledTimes(1);
 });
@@ -317,13 +366,14 @@ it.each(['tavily', 'exa', 'brave', 'you'])(
 			provider,
 			query: 'needle',
 			response_mode: 'compact',
-			output_budget_bytes: 2048,
+			output_budget_bytes: selection_budget,
 		});
 		expect(response.result.isError).not.toBe(true);
 		expect(
 			Buffer.byteLength(JSON.stringify(response.result)),
-		).toBeLessThanOrEqual(2048);
+		).toBeLessThanOrEqual(selection_budget);
 		const compact = parsed(response);
+		expect(compact.metadata.local_completeness).toBe('selected');
 		expect(compact.metadata.provider).toBe(provider);
 		expect(compact.sources[0].url).toBe(url);
 		expect(
@@ -365,9 +415,34 @@ it.each(['firecrawl', 'exa'])(
 				{ headers: { 'content-type': 'application/json' } },
 			);
 		});
-		const legacy = parsed(
-			await call('web_extract', { provider, url }),
-		);
+		const legacy_response = await call('web_extract', {
+			provider,
+			url,
+		});
+		const legacy_handle = parsed(legacy_response);
+		expect(legacy_handle.result_id).toEqual(expect.any(String));
+		expect(
+			Buffer.byteLength(JSON.stringify(legacy_response.result)),
+		).toBeLessThanOrEqual(80000);
+		const legacy = (await reconstruct(legacy_handle.result_id))
+			.canonical;
+		const text_only = {
+			content: [
+				{ type: 'text', text: JSON.stringify(legacy, null, 2) },
+			],
+		};
+		// The old text-only result fit; only the additive copy causes offload.
+		expect(
+			Buffer.byteLength(JSON.stringify(text_only)),
+		).toBeLessThanOrEqual(80000);
+		expect(
+			Buffer.byteLength(
+				JSON.stringify({
+					...text_only,
+					structuredContent: { ok: true, data: legacy },
+				}),
+			),
+		).toBeGreaterThan(80000);
 		const response = await call('web_extract', {
 			provider,
 			url,
@@ -377,6 +452,7 @@ it.each(['firecrawl', 'exa'])(
 		});
 		expect(response.result.isError).not.toBe(true);
 		const compact = parsed(response);
+		expect(compact.metadata.local_completeness).toBe('retained');
 		expect(
 			Buffer.byteLength(JSON.stringify(response.result)),
 		).toBeLessThanOrEqual(2048);
@@ -390,6 +466,7 @@ it.each(['firecrawl', 'exa'])(
 			delete legacy.content;
 		expect(canonical.result).toEqual(legacy);
 		expect(compact.metadata.provider).toBe(provider);
+		expect(readdirSync(directory)).toHaveLength(2);
 		expect(fetch_mock).toHaveBeenCalledTimes(2);
 	},
 );
@@ -446,10 +523,11 @@ it.each([
 			url,
 			query,
 			response_mode: 'compact',
-			output_budget_bytes: 2048,
+			output_budget_bytes: selection_budget,
 		});
 		const compact_ms = performance.now() - compact_started;
 		const compact = parsed(compact_response);
+		expect(compact.metadata.local_completeness).toBe('selected');
 		const { canonical, pages } = await reconstruct(compact.result_id);
 		expect(canonical.result.raw_contents[0].content).toBe(text);
 		const selected = compact.sources
@@ -460,7 +538,7 @@ it.each([
 		expect(selected).toContain(anchor);
 		expect(
 			Buffer.byteLength(JSON.stringify(compact_response.result)),
-		).toBeLessThanOrEqual(2048);
+		).toBeLessThanOrEqual(selection_budget);
 		console.log(
 			'P1B_MEASUREMENT ' +
 				JSON.stringify({
