@@ -1,15 +1,42 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+# This project uses the committed pnpm-lock.yaml, not npm's local lockfile.
+/package-lock.json
 
 # Build output
 dist/
 build/
+*.tsbuildinfo
 
 # Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Local credentials and client configuration (never force-add these)
+/.mcp.json
+/.npmrc
+/credentials/
+/.credentials/
+/secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Local agent state, backups, retained results, and scratch data
+.hermes/
+/backups/
+/backup/
+/results/
+/.cache/
+/tmp/
+/temp/
 
 # IDE
 .idea/
@@ -23,10 +50,25 @@ pnpm-debug.log*
 
 # Testing
 coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
 
 # Database files
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 
 # OS
 .DS_Store
