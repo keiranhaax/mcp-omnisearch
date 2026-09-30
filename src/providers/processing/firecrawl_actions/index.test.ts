@@ -64,8 +64,11 @@ describe('FirecrawlActionsProvider', () => {
 			metadata: { screenshot: 'shot.png', extract_depth: 'advanced' },
 			source_provider: 'firecrawl_actions',
 		});
-		const sent_actions = JSON.parse(fetch_mock.mock.calls[0][1].body)
-			.actions as Array<{ type: string }>;
+		const sent_body = JSON.parse(fetch_mock.mock.calls[0][1].body);
+		const sent_actions = sent_body.actions as Array<{
+			type: string;
+			selector?: string;
+		}>;
 		expect(sent_actions.map((action) => action.type)).toEqual([
 			'wait',
 			'scroll',
@@ -75,6 +78,31 @@ describe('FirecrawlActionsProvider', () => {
 			'click',
 			'wait',
 		]);
+		// Playwright locator syntax, not jQuery's unsupported :contains().
+		const click = sent_actions.find(
+			(action) => action.type === 'click',
+		);
+		expect(click?.selector).toContain(':has-text("Read more")');
+		expect(click?.selector).not.toContain(':contains(');
+		// Screenshots are opt-in; the default request bills markdown only.
+		expect(sent_body.formats).toEqual(['markdown']);
+	});
+
+	it('requests a screenshot only when the caller opts in', async () => {
+		fetch_mock.mockResolvedValue(
+			json_response({
+				success: true,
+				data: { markdown: 'Loaded content', screenshot: 'shot.png' },
+			}),
+		);
+		await new FirecrawlActionsProvider().process_content(
+			'https://dynamic.test',
+			'basic',
+			{ screenshot: true },
+		);
+		expect(
+			JSON.parse(fetch_mock.mock.calls[0][1].body).formats,
+		).toEqual(['markdown', 'screenshot']);
 	});
 
 	it('preserves action screenshot collections even without text', async () => {

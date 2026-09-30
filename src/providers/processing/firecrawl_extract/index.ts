@@ -102,6 +102,7 @@ export class FirecrawlExtractProvider implements ProcessingProvider {
 						provider_name: this.name,
 						status_url: `${config.processing.firecrawl_extract.base_url}/${extract_data.id}`,
 						api_key,
+						job_id: extract_data.id,
 						max_attempts: 15,
 						poll_interval: 3000,
 						timeout: 30000,

@@ -7,7 +7,13 @@ import {
 	vi,
 } from 'vitest';
 import { http_json, safe_endpoint } from './http.js';
-import { run_with_request_context } from './request_context.js';
+import { reset_http_cache } from './http_cache.js';
+import {
+	consume_response_bytes,
+	MAX_REQUEST_RESPONSE_BYTES,
+	release_response_bytes,
+	run_with_request_context,
+} from './request_context.js';
 import { ErrorType } from './types.js';
 import {
 	create_error_response,
@@ -449,6 +455,193 @@ describe('http_json', () => {
 		});
 		expect(JSON.stringify(error)).not.toContain('PRIVATE_INPUT');
 		expect(error).not.toHaveProperty('details.response');
+	});
+
+	it('serves an identical cacheable request from the cache only when enabled', async () => {
+		reset_http_cache();
+		fetch_mock.mockImplementation(async () =>
+			Response.json({ value: fetch_mock.mock.calls.length }),
+		);
+		const options = {
+			method: 'POST',
+			headers: {
+				Authorization: 'Bearer secret',
+				Accept: 'application/json',
+			},
+			body: '{"q":"needle"}',
+			cacheable: true,
+		};
+		// Off by default: two calls, two fetches.
+		await http_json(
+			'fixture',
+			'https://api.example.com/search',
+			options,
+		);
+		await http_json(
+			'fixture',
+			'https://api.example.com/search',
+			options,
+		);
+		expect(fetch_mock).toHaveBeenCalledTimes(2);
+
+		vi.stubEnv('OMNISEARCH_HTTP_CACHE_BYTES', '1048576');
+		try {
+			const first = await http_json(
+				'fixture',
+				'https://api.example.com/search',
+				options,
+			);
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+			// A hit returns an equal body and makes no provider call, but
+			// still counts against the response byte budget.
+			await run_with_request_context(
+				undefined,
+				async () => {
+					await expect(
+						http_json(
+							'fixture',
+							'https://api.example.com/search',
+							options,
+						),
+					).resolves.toEqual(first);
+					expect(() =>
+						consume_response_bytes(MAX_REQUEST_RESPONSE_BYTES),
+					).toThrow();
+				},
+				{ http_budget: { limit: 0, used: 0 } },
+			);
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+			// The credential header is not part of the key.
+			await http_json('fixture', 'https://api.example.com/search', {
+				...options,
+				headers: {
+					...options.headers,
+					Authorization: 'Bearer other',
+				},
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(3);
+			// Different body, provider, or an opted-out call all miss.
+			await http_json('fixture', 'https://api.example.com/search', {
+				...options,
+				body: '{"q":"other"}',
+			});
+			await http_json(
+				'other',
+				'https://api.example.com/search',
+				options,
+			);
+			await http_json('fixture', 'https://api.example.com/search', {
+				...options,
+				cacheable: false,
+			});
+			expect(fetch_mock).toHaveBeenCalledTimes(6);
+			// The boolean never reaches fetch as a RequestCache value.
+			expect(fetch_mock.mock.calls[0][1]).not.toHaveProperty(
+				'cacheable',
+			);
+			expect(fetch_mock.mock.calls[0][1]).not.toHaveProperty('cache');
+		} finally {
+			vi.unstubAllEnvs();
+			reset_http_cache();
+		}
+	});
+
+	it('does not cache failed responses', async () => {
+		reset_http_cache();
+		vi.stubEnv('OMNISEARCH_HTTP_CACHE_BYTES', '1048576');
+		try {
+			fetch_mock.mockImplementation(async () =>
+				fetch_mock.mock.calls.length === 1
+					? new Response('', { status: 503 })
+					: Response.json({ ok: true }),
+			);
+			await expect(
+				http_json('fixture', 'https://api.example.com/x', {
+					cacheable: true,
+				}),
+			).rejects.toMatchObject({ details: { status: 503 } });
+			await expect(
+				http_json('fixture', 'https://api.example.com/x', {
+					cacheable: true,
+				}),
+			).resolves.toEqual({ ok: true });
+			expect(fetch_mock).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.unstubAllEnvs();
+			reset_http_cache();
+		}
+	});
+
+	it('classifies a 5xx as transient even when its body mentions upgrades', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				'<html>We are upgrading our systems; subscription services are forbidden during maintenance.</html>',
+				{ status: 503, headers: { 'Content-Type': 'text/html' } },
+			),
+		);
+		const error = await http_json(
+			'test_provider',
+			'https://api.example.com',
+		).catch((failure: unknown) => failure);
+		expect(error).toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			message: 'test_provider API internal error',
+			details: { status: 503 },
+		});
+		expect(is_retryable_error(error)).toBe(true);
+		expect(public_error_metadata(error).kind).toBe(
+			'upstream_failure',
+		);
+	});
+
+	it('does not infer entitlement from an unstructured 4xx body', async () => {
+		// A raw body may echo the caller's own query text.
+		fetch_mock.mockResolvedValue(
+			new Response(
+				'query "how to upgrade my subscription" is invalid',
+				{
+					status: 400,
+					headers: { 'Content-Type': 'text/plain' },
+				},
+			),
+		);
+		await expect(
+			http_json('test_provider', 'https://api.example.com'),
+		).rejects.toMatchObject({
+			type: ErrorType.API_ERROR,
+			message: 'Provider rejected the request (HTTP 400)',
+		});
+	});
+
+	it('refunds a rejected oversized body so later calls keep their aggregate budget', async () => {
+		const chunk = new Uint8Array(6);
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(chunk);
+				controller.enqueue(chunk);
+				controller.close();
+			},
+		});
+		fetch_mock
+			.mockResolvedValueOnce(new Response(body, { status: 200 }))
+			.mockResolvedValueOnce(Response.json({ ok: true }));
+		await run_with_request_context(undefined, async () => {
+			await expect(
+				http_json('test_provider', 'https://api.example.com', {
+					max_response_bytes: 8,
+				}),
+			).rejects.toMatchObject({
+				message: 'Provider response exceeds byte limit',
+			});
+			// The whole aggregate budget is still available afterwards.
+			expect(() =>
+				consume_response_bytes(MAX_REQUEST_RESPONSE_BYTES),
+			).not.toThrow();
+			release_response_bytes(MAX_REQUEST_RESPONSE_BYTES);
+			await expect(
+				http_json('test_provider', 'https://api.example.com'),
+			).resolves.toEqual({ ok: true });
+		});
 	});
 
 	it('classifies entitlement errors from provider response text', async () => {

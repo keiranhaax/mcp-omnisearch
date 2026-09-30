@@ -357,4 +357,27 @@ describe('TavilyExtractProvider response validation', () => {
 		});
 		expect(fetch_mock).toHaveBeenCalledTimes(1);
 	});
+
+	it('does not retry an empty extraction, which would bill the same call twice', async () => {
+		fetch_mock.mockResolvedValue(
+			new Response(
+				JSON.stringify({ results: [], failed_results: [] }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				},
+			),
+		);
+		await expect(
+			new TavilyExtractProvider().process_content(
+				'https://example.com',
+			),
+		).rejects.toMatchObject({
+			type: 'PROVIDER_ERROR',
+			provider: 'tavily_extract',
+			message: 'No content extracted from URL',
+			details: { retryable: false },
+		});
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
+	});
 });

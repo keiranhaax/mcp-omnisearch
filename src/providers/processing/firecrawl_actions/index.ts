@@ -56,6 +56,19 @@ interface Action {
 	script?: string;
 }
 
+export interface FirecrawlActionsOptions {
+	/** Also request a page screenshot; costs extra latency and credits. */
+	screenshot?: boolean;
+}
+
+// Playwright locator syntax; jQuery's `:contains()` is not supported.
+const expand_more_selector = [
+	'button:has-text("Read more")',
+	'button:has-text("Show more")',
+	'a:has-text("Read more")',
+	'a:has-text("Show more")',
+].join(', ');
+
 export class FirecrawlActionsProvider implements ProcessingProvider {
 	name = 'firecrawl_actions';
 	description =
@@ -64,7 +77,11 @@ export class FirecrawlActionsProvider implements ProcessingProvider {
 	async process_content(
 		url: string | string[],
 		extract_depth: 'basic' | 'advanced' = 'basic',
+		options?: Record<string, unknown>,
 	): Promise<ProcessingResult> {
+		const with_screenshot =
+			(options as FirecrawlActionsOptions | undefined)?.screenshot ===
+			true;
 		// Actions works with a single URL
 		const urls = validate_processing_urls(url, this.name);
 		if (urls.length !== 1) {
@@ -94,11 +111,7 @@ export class FirecrawlActionsProvider implements ProcessingProvider {
 								{ type: 'wait', milliseconds: 1000 },
 								{ type: 'scroll', direction: 'down' },
 								{ type: 'wait', milliseconds: 1000 },
-								{
-									type: 'click',
-									selector:
-										'button:contains("Read more"), button:contains("Show more"), a:contains("Read more"), a:contains("Show more")',
-								},
+								{ type: 'click', selector: expand_more_selector },
 								{ type: 'wait', milliseconds: 2000 },
 							]
 						: [
@@ -114,7 +127,11 @@ export class FirecrawlActionsProvider implements ProcessingProvider {
 					api_key,
 					{
 						url: actions_url,
-						formats: ['markdown', 'screenshot'],
+						// Screenshots are opt-in: they add credits and a blob to
+						// every result while the content path only uses markdown.
+						formats: with_screenshot
+							? ['markdown', 'screenshot']
+							: ['markdown'],
 						actions: actions,
 					},
 					config.processing.firecrawl_actions.timeout,

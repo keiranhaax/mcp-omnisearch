@@ -45,14 +45,22 @@ export const consume_http_request = (): boolean => {
 export const consume_response_bytes = (bytes: number): void => {
 	const budget = request_context.getStore()?.response_budget;
 	if (!budget) return;
-	budget.bytes += bytes;
-	if (budget.bytes > MAX_REQUEST_RESPONSE_BYTES)
+	// Check before counting so a rejected chunk never poisons the budget.
+	if (budget.bytes + bytes > MAX_REQUEST_RESPONSE_BYTES)
 		throw new ProviderError(
 			ErrorType.PROVIDER_ERROR,
 			'Aggregate provider response exceeds byte limit',
 			'resource_limits',
 			{ retryable: false },
 		);
+	budget.bytes += bytes;
+};
+
+/** Refund bytes of a response that was discarded before delivery. */
+export const release_response_bytes = (bytes: number): void => {
+	const budget = request_context.getStore()?.response_budget;
+	if (!budget) return;
+	budget.bytes = Math.max(0, budget.bytes - bytes);
 };
 
 export const get_request_signal = (): AbortSignal | undefined =>

@@ -42,13 +42,83 @@ export function handle_provider_error(
 		);
 	}
 
-	throw new ProviderError(
-		ErrorType.API_ERROR,
-		`Failed to ${operation}`,
-		provider_name,
-		{ retryable: false },
+	throw with_cause(
+		new ProviderError(
+			ErrorType.API_ERROR,
+			`Failed to ${operation}`,
+			provider_name,
+			{ retryable: false },
+		),
+		error,
 	);
 }
+
+/**
+ * Attach the original failure for diagnostics. The property is
+ * non-enumerable so JSON serialization, logs and public metadata never
+ * pick it up; only a debugger or an explicit `error.cause` read sees it.
+ */
+export const with_cause = <T extends Error>(
+	error: T,
+	cause: unknown,
+): T => {
+	if (cause !== undefined)
+		Object.defineProperty(error, 'cause', {
+			value: cause,
+			enumerable: false,
+			writable: true,
+			configurable: true,
+		});
+	return error;
+};
+
+/**
+ * Validation failure whose message is safe to show a client verbatim.
+ * Only use fixed text or values drawn from the schema itself (field
+ * names, picklist values, numeric bounds); never interpolate caller
+ * input into `message`.
+ */
+export const input_error = (
+	message: string,
+	provider: string,
+	details: Record<string, unknown> = {},
+) =>
+	new ProviderError(ErrorType.INVALID_INPUT, message, provider, {
+		retryable: false,
+		public: true,
+		...details,
+	});
+
+const failure_code = (failure: unknown): string => {
+	const code = (failure as { code?: unknown } | null)?.code;
+	if (typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code))
+		return code;
+	return failure instanceof Error ? failure.name : 'unknown';
+};
+
+/**
+ * Result retention failed (disk full, permissions, quota); the client
+ * gets a fixed message while stderr records the failure class so an
+ * operator can distinguish ENOSPC from a quota rejection.
+ */
+export const retention_error = (
+	provider: string,
+	failure: unknown,
+	details: Record<string, unknown> = {},
+): ProviderError => {
+	console.error(
+		`Result retention failed for ${provider}: ${failure_code(failure)}`,
+	);
+	return with_cause(
+		new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'Cannot retain complete canonical result; no evidence was returned',
+			provider,
+			{ retryable: false, cause: 'storage', ...details },
+		),
+		failure,
+	);
+};
 
 export const sanitize_query = (query: string): string => {
 	return query.trim().replace(/[\n\r]+/g, ' ');
@@ -184,7 +254,9 @@ export const public_error_metadata = (
 
 	const job_id = details?.job_id;
 	if (
-		metadata.provider === 'firecrawl_agent' &&
+		(metadata.provider === 'firecrawl_agent' ||
+			metadata.provider === 'firecrawl_crawl' ||
+			metadata.provider === 'firecrawl_extract') &&
 		typeof job_id === 'string' &&
 		job_id.length === 36 &&
 		v.safeParse(job_id_schema, job_id).success
@@ -327,7 +399,11 @@ export const public_error_message = (
 		case ErrorType.INVALID_INPUT:
 			// Only fixed local guidance is safe; rejected input may be
 			// a path, malformed URL, or query with no recognizable scheme.
-			if (safe_validation_messages.has(error.message))
+			// `input_error` marks messages built solely from schema facts.
+			if (
+				safe_validation_messages.has(error.message) ||
+				error.details?.public === true
+			)
 				return error.message;
 			if (error.message.startsWith('Invalid URL provided:'))
 				return 'Invalid URL provided. Use a public HTTP(S) URL without credentials.';

@@ -1,13 +1,8 @@
 import * as v from 'valibot';
-import {
-	handle_provider_error,
-	sanitize_query,
-} from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider_response.js';
+import { sanitize_query } from '../../../common/errors.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import { sanitize_exa_control_metadata } from '../../../common/provider_sanitization.js';
 import { set_response_metadata } from '../../../common/response_metadata.js';
-import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
 	SearchProvider,
@@ -46,31 +41,21 @@ export class ExaAnswerProvider implements SearchProvider {
 			this.name,
 		);
 
-		const search_request = async () => {
-			try {
-				const raw_data = await http_json(
-					this.name,
-					`${config.ai_response.exa_answer.base_url}/answer`,
-					{
-						method: 'POST',
-						headers: {
-							'x-api-key': api_key,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify({
-							query: sanitize_query(params.query),
-						}),
-						signal: AbortSignal.timeout(
-							config.ai_response.exa_answer.timeout,
-						),
-					},
-				);
-				const data = parse_provider_response(
-					this.name,
-					exa_answer_response_schema,
-					raw_data,
-				);
-
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.ai_response.exa_answer.base_url}/answer`,
+				method: 'POST',
+				headers: {
+					'x-api-key': api_key,
+					'Content-Type': 'application/json',
+				},
+				body: { query: sanitize_query(params.query) },
+				timeout_ms: config.ai_response.exa_answer.timeout,
+				schema: exa_answer_response_schema,
+				operation: 'fetch AI response',
+			},
+			(data) => {
 				const controls = sanitize_exa_control_metadata(data);
 				const results: SearchResult[] = [
 					{
@@ -108,13 +93,7 @@ export class ExaAnswerProvider implements SearchProvider {
 
 				set_response_metadata(results, controls, this.name);
 				return results;
-			} catch (error) {
-				handle_provider_error(error, this.name, 'fetch AI response');
-			}
-		};
-
-		return retry_with_backoff(search_request, {
-			timeout_ms: config.ai_response.exa_answer.timeout,
-		});
+			},
+		);
 	}
 }

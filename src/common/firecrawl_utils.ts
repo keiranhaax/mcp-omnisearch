@@ -10,6 +10,7 @@ import { ErrorType, ProviderError } from './types.js';
 import {
 	combine_request_signal,
 	get_request_signal,
+	run_with_request_context,
 	throw_if_aborted,
 	with_abort_signal,
 } from './request_context.js';
@@ -89,11 +90,17 @@ export const make_firecrawl_request = async <
 	timeout: number,
 	schema: TSchema,
 	signal?: AbortSignal,
+	options: {
+		/** Only idempotent lookups (scrape, map, search) opt in. */
+		cacheable?: boolean;
+	} = {},
 ): Promise<v.InferOutput<TSchema>> => {
-	const budget = signal
-		? undefined
-		: create_firecrawl_budget(timeout);
-	signal ??= budget!.signal;
+	// The per-call timer always applies; a caller signal only adds the
+	// overall job budget or client cancellation on top of it.
+	const budget = create_firecrawl_budget(timeout);
+	const request_signal = signal
+		? AbortSignal.any([signal, budget.signal])
+		: budget.signal;
 	try {
 		const data = await with_abort_signal(
 			() =>
@@ -107,14 +114,65 @@ export const make_firecrawl_request = async <
 						'Content-Type': 'application/json',
 					},
 					body: JSON.stringify(body),
-					signal,
+					signal: request_signal,
+					cacheable: options.cacheable === true,
 				}),
-			signal,
+			request_signal,
 		);
 
 		return parse_provider_response(provider_name, schema, data);
 	} finally {
-		budget?.dispose();
+		budget.dispose();
+	}
+};
+
+/**
+ * Poll exhaustion keeps the job id so a caller can resume or cancel
+ * instead of starting a duplicate paid job. `budget_expired` marks the
+ * overall deadline case, which stays classified as a timeout publicly.
+ */
+export const firecrawl_job_timeout_error = (
+	provider_name: string,
+	job_id?: string,
+	options: { budget_expired?: boolean } = {},
+) =>
+	new ProviderError(
+		ErrorType.PROVIDER_ERROR,
+		options.budget_expired
+			? 'Operation timed out'
+			: 'Job timed out - try again later or with a smaller scope',
+		provider_name,
+		{
+			retryable: false,
+			cause: options.budget_expired ? 'timeout' : 'poll_exhausted',
+			...(job_id !== undefined ? { job_id } : {}),
+		},
+	);
+
+/**
+ * Best-effort remote cancellation after a local timeout or client cancel.
+ * Runs outside the (possibly aborted) request context with its own short
+ * deadline so an abandoned paid job stops billing. Failures are swallowed:
+ * the caller's original outcome is what the client should see.
+ */
+export const cancel_firecrawl_job = async (
+	provider_name: string,
+	job_url: string,
+	api_key: string,
+	timeout = 5000,
+): Promise<boolean> => {
+	try {
+		await run_with_request_context(undefined, () =>
+			http_json(provider_name, job_url, {
+				method: 'DELETE',
+				redirect: 'error',
+				headers: { Authorization: `Bearer ${api_key}` },
+				signal: AbortSignal.timeout(timeout),
+			}),
+		);
+		return true;
+	} catch {
+		return false;
 	}
 };
 
@@ -158,6 +216,8 @@ export interface PollingConfig {
 	provider_name: string;
 	status_url: string;
 	api_key: string;
+	/** Opaque provider job id, attached to exhaustion errors for recovery. */
+	job_id?: string;
 	max_attempts: number;
 	poll_interval: number;
 	/** Per-GET timeout; also the total budget if no signal is supplied. */
@@ -313,10 +373,9 @@ export const poll_firecrawl_job = async <
 			return last_pending;
 		}
 
-		throw new ProviderError(
-			ErrorType.PROVIDER_ERROR,
-			'Job timed out - try again later or with a smaller scope',
+		throw firecrawl_job_timeout_error(
 			config.provider_name,
+			config.job_id,
 		);
 	} catch (error) {
 		// A caller timeout is cancellation, not provider wait exhaustion.

@@ -1,6 +1,8 @@
 import * as v from 'valibot';
 import { handle_provider_error } from '../../../common/errors.js';
 import {
+	cancel_firecrawl_job,
+	firecrawl_job_timeout_error,
 	firecrawl_poll_status_schema,
 	create_firecrawl_budget,
 	make_firecrawl_request,
@@ -130,23 +132,62 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 					'Error starting crawl',
 				);
 
-				const status_url = `${config.processing.firecrawl_crawl.base_url}/${encodeURIComponent(crawl_data.id)}`;
-				// Poll for crawl completion
-				const status_data = await poll_firecrawl_job(
-					{
-						provider_name: this.name,
+				const job_id = crawl_data.id;
+				const status_url = `${config.processing.firecrawl_crawl.base_url}/${encodeURIComponent(job_id)}`;
+				// Poll for crawl completion. Exhaustion returns the last pending
+				// status so pages already paid for are not discarded.
+				let status_data: v.InferOutput<
+					typeof firecrawl_crawl_status_schema
+				>;
+				try {
+					status_data = await poll_firecrawl_job(
+						{
+							provider_name: this.name,
+							status_url,
+							api_key,
+							job_id,
+							max_attempts: 20,
+							poll_interval: 5000,
+							timeout: 30000,
+							return_on_exhaustion: true,
+							signal: budget.signal,
+						},
+						firecrawl_crawl_status_schema,
+					);
+				} catch (error) {
+					// A client cancel or expired budget abandons the job locally;
+					// stop it remotely so it does not keep crawling and billing.
+					if (
+						error instanceof Error &&
+						['AbortError', 'TimeoutError'].includes(error.name)
+					) {
+						await cancel_firecrawl_job(
+							this.name,
+							status_url,
+							api_key,
+						);
+					}
+					throw error;
+				}
+
+				const unfinished = status_data.status !== 'completed';
+				let remote_cancelled = false;
+				if (unfinished) {
+					remote_cancelled = await cancel_firecrawl_job(
+						this.name,
 						status_url,
 						api_key,
-						max_attempts: 20,
-						poll_interval: 5000,
-						timeout: 30000,
-						signal: budget.signal,
-					},
-					firecrawl_crawl_status_schema,
-				);
+					);
+					if (!status_data.data?.length) {
+						throw firecrawl_job_timeout_error(this.name, job_id, {
+							budget_expired: budget.signal.aborted,
+						});
+					}
+				}
 
 				const pages = [...(status_data.data ?? [])];
-				let next = status_data.next ?? null;
+				// Continuation pages only exist for a completed job.
+				let next = unfinished ? null : (status_data.next ?? null);
 				let page_count = 1;
 				while (next) {
 					let continuation: URL;
@@ -275,11 +316,25 @@ export class FirecrawlCrawlProvider implements ProcessingProvider {
 						total: status_data.total,
 						completed: status_data.completed,
 						returned_pages: status_data.data.length,
-						truncated: next !== null,
+						truncated: unfinished || next !== null,
 						next,
-						truncation_reason: next ? 'page_limit' : undefined,
+						truncation_reason: unfinished
+							? 'poll_exhausted'
+							: next
+								? 'page_limit'
+								: undefined,
 						successful_extractions: successful_pages.length,
 						extract_depth,
+						job_id,
+						...(unfinished
+							? {
+									partial: true,
+									job_status: status_data.status,
+									remote_cancelled,
+									warning:
+										'Crawl did not finish within the polling budget; returning the pages received so far.',
+								}
+							: {}),
 					},
 					source_provider: this.name,
 				};

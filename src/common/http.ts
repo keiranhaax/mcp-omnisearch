@@ -1,9 +1,16 @@
 import { handle_rate_limit, safe_endpoint } from './errors.js';
 export { safe_endpoint } from './errors.js';
 import {
+	cache_get,
+	cache_key,
+	cache_set,
+	cache_settings,
+} from './http_cache.js';
+import {
 	combine_request_signal,
 	consume_http_request,
 	consume_response_bytes,
+	release_response_bytes,
 	throw_if_aborted,
 	with_abort_signal,
 } from './request_context.js';
@@ -13,6 +20,12 @@ import { ErrorType, ProviderError } from './types.js';
 export interface HttpJsonOptions extends RequestInit {
 	expectedStatuses?: number[];
 	max_response_bytes?: number;
+	/**
+	 * Allow an identical successful response to be served from the
+	 * in-process cache when OMNISEARCH_HTTP_CACHE_BYTES enables it. Only
+	 * idempotent lookups opt in; job creation and status never do.
+	 */
+	cacheable?: boolean;
 }
 
 export const MAX_HTTP_RESPONSE_BYTES = 25 * 1024 * 1024;
@@ -28,6 +41,7 @@ const read_bounded_body = async (
 	const decoder = new TextDecoder();
 	const chunks: string[] = [];
 	let bytes = 0;
+	let consumed = 0;
 	try {
 		while (true) {
 			const { done, value } = await with_abort_signal(
@@ -49,11 +63,15 @@ const read_bounded_body = async (
 				);
 			}
 			consume_response_bytes(value.byteLength);
+			consumed += value.byteLength;
 			chunks.push(decoder.decode(value, { stream: true }));
 		}
 		chunks.push(decoder.decode());
 		return chunks.join('');
 	} catch (error) {
+		// A discarded response must not count against the aggregate
+		// budget, or one oversized body fails every later call.
+		release_response_bytes(consumed);
 		void reader.cancel().catch(() => {});
 		throw error;
 	} finally {
@@ -116,6 +134,28 @@ export const http_json = async <T = any>(
 		);
 	}
 	const signal = combine_request_signal(options.signal);
+	const { cacheable, ...fetch_options } = options;
+	const method = (options.method || 'GET').toUpperCase();
+	const key =
+		cacheable && cache_settings().bytes > 0
+			? cache_key(
+					provider,
+					method,
+					url,
+					typeof options.body === 'string' ? options.body : undefined,
+					options.headers as Record<string, string> | undefined,
+				)
+			: undefined;
+	if (key !== undefined) {
+		const cached = cache_get(key);
+		if (cached !== undefined) {
+			throw_if_aborted(signal);
+			// A hit still counts toward the response byte budget, but not
+			// toward the request budget: no provider call was made.
+			consume_response_bytes(Buffer.byteLength(cached, 'utf8'));
+			return JSON.parse(cached) as T;
+		}
+	}
 	let res: Response;
 	let raw: string;
 	try {
@@ -126,7 +166,7 @@ export const http_json = async <T = any>(
 					throw_if_aborted(signal);
 					const bounded_requests = consume_http_request();
 					const res = await fetch(url, {
-						...options,
+						...fetch_options,
 						signal,
 						...(bounded_requests ? { redirect: 'error' } : {}),
 					});
@@ -164,22 +204,30 @@ export const http_json = async <T = any>(
 			options.expectedStatuses.includes(res.status));
 
 	if (!okOrExpected) {
-		const raw_message =
-			(body &&
-				(body.message ||
-					body.detail ||
-					(typeof body.error === 'string'
-						? body.error
-						: body.error?.detail || body.error?.message) ||
-					(body.error?.code
-						? `${body.error.code}: ${body.error.detail || ''}`
-						: undefined))) ||
-			raw ||
-			res.statusText;
+		// Only structured error fields are trusted for classification. A
+		// raw body may echo caller input or a maintenance page and must
+		// not turn into an entitlement verdict.
+		const structured_message =
+			body &&
+			(body.message ||
+				body.detail ||
+				(typeof body.error === 'string'
+					? body.error
+					: body.error?.detail || body.error?.message) ||
+				(body.error?.code
+					? `${body.error.code}: ${body.error.detail || ''}`
+					: undefined));
+		const raw_message = structured_message || raw || res.statusText;
 		const message =
 			typeof raw_message === 'string'
 				? raw_message
 				: JSON.stringify(raw_message);
+		const classified_message =
+			typeof structured_message === 'string'
+				? structured_message
+				: structured_message
+					? JSON.stringify(structured_message)
+					: '';
 		const details = {
 			status: res.status,
 			url: safe_endpoint(url),
@@ -205,6 +253,16 @@ export const http_json = async <T = any>(
 			case 429:
 				handle_rate_limit(provider, details.reset_time, details);
 			default:
+				// A 5xx is transient by definition; classify it before any
+				// text matching so a maintenance page stays retryable.
+				if (res.status >= 500) {
+					throw new ProviderError(
+						ErrorType.PROVIDER_ERROR,
+						`${provider} API internal error`,
+						provider,
+						details,
+					);
+				}
 				if (
 					res.status === 404 &&
 					endpoint_missing_pattern.test(message)
@@ -216,18 +274,10 @@ export const http_json = async <T = any>(
 						details,
 					);
 				}
-				if (entitlement_pattern.test(message)) {
+				if (entitlement_pattern.test(classified_message)) {
 					throw new ProviderError(
 						ErrorType.ENTITLEMENT_REQUIRED,
 						'API key does not have access to this endpoint',
-						provider,
-						details,
-					);
-				}
-				if (res.status >= 500) {
-					throw new ProviderError(
-						ErrorType.PROVIDER_ERROR,
-						`${provider} API internal error`,
 						provider,
 						details,
 					);
@@ -249,5 +299,7 @@ export const http_json = async <T = any>(
 			{ status: res.status, retryable: false, cause: 'invalid_json' },
 		);
 	}
+	// Only a fully read, successful, well-formed body is worth reusing.
+	if (key !== undefined && res.ok) cache_set(key, raw);
 	return body as T;
 };

@@ -10,7 +10,10 @@ import {
 	ProcessingResult,
 	ProviderError,
 } from '../../../common/types.js';
-import { handle_provider_error } from '../../../common/errors.js';
+import {
+	handle_provider_error,
+	input_error,
+} from '../../../common/errors.js';
 import { retry_with_backoff } from '../../../common/retry.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
@@ -123,6 +126,17 @@ const assert_domain_filters = (
 	}
 };
 
+// Scraping every hit bills one scrape per result. Basic depth returns
+// provider snippets only; advanced depth or explicit formats opt in.
+const should_scrape_hits = (
+	extract_depth: 'basic' | 'advanced',
+	options: FirecrawlSearchOptions,
+) => {
+	const formats = options.scrapeOptions?.formats;
+	if (formats !== undefined) return formats.length > 0;
+	return extract_depth === 'advanced';
+};
+
 const build_search_body = (
 	query: string,
 	extract_depth: 'basic' | 'advanced',
@@ -132,11 +146,13 @@ const build_search_body = (
 		query,
 		limit: options.limit ?? (extract_depth === 'advanced' ? 10 : 5),
 		sources: options.sources?.length ? options.sources : ['web'],
-		scrapeOptions: {
+	};
+	if (should_scrape_hits(extract_depth, options)) {
+		body.scrapeOptions = {
 			formats: ['markdown'],
 			onlyMainContent: true,
-		},
-	};
+		};
+	}
 
 	if (options.categories?.length)
 		body.categories = options.categories;
@@ -149,7 +165,7 @@ const build_search_body = (
 	if (options.country) body.country = options.country;
 	if (options.ignoreInvalidURLs !== undefined)
 		body.ignoreInvalidURLs = options.ignoreInvalidURLs;
-	if (options.scrapeOptions) {
+	if (options.scrapeOptions && body.scrapeOptions) {
 		body.scrapeOptions = {
 			...(body.scrapeOptions as Record<string, unknown>),
 			...options.scrapeOptions,
@@ -158,6 +174,8 @@ const build_search_body = (
 
 	return body;
 };
+
+const scraped_fields = ['markdown', 'html', 'rawHtml'] as const;
 
 const web_content = (result: FirecrawlWebResult) =>
 	result.markdown ||
@@ -172,6 +190,19 @@ const news_content = (result: FirecrawlNewsResult) =>
 	result.rawHtml ||
 	result.snippet ||
 	'No content extracted';
+
+// The scraped body already lives in `raw_contents`; keep `documents`
+// to metadata and any additional representations so results are not
+// stored twice per hit.
+const without_scraped_body = <
+	T extends Partial<Record<(typeof scraped_fields)[number], string>>,
+>(
+	result: T,
+): Omit<T, (typeof scraped_fields)[number]> => {
+	const copy: Record<string, unknown> = { ...result };
+	for (const field of scraped_fields) delete copy[field];
+	return copy as Omit<T, (typeof scraped_fields)[number]>;
+};
 
 const format_web_result = (result: FirecrawlWebResult) => {
 	const title = result.title ? `## ${result.title}\n` : '';
@@ -224,8 +255,7 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 				search_options.limit < 1 ||
 				search_options.limit > 100)
 		) {
-			throw new ProviderError(
-				ErrorType.INVALID_INPUT,
+			throw input_error(
 				'limit must be an integer between 1 and 100',
 				this.name,
 			);
@@ -257,6 +287,9 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 					request_body,
 					config.processing.firecrawl_search.timeout,
 					firecrawl_search_response_schema,
+					undefined,
+					// Search is an idempotent lookup; identical queries may reuse.
+					{ cacheable: true },
 				);
 
 				validate_firecrawl_response(data, this.name, 'Search failed');
@@ -313,7 +346,11 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 					raw_contents,
 					metadata: {
 						word_count,
-						documents: { web, images, news },
+						documents: {
+							web: web.map(without_scraped_body),
+							images,
+							news: news.map(without_scraped_body),
+						},
 						urls_processed: total_results,
 						successful_extractions: total_results,
 						extract_depth,
@@ -339,4 +376,5 @@ export class FirecrawlSearchProvider implements ProcessingProvider {
 
 export const __private__ = {
 	build_search_body,
+	should_scrape_hits,
 };

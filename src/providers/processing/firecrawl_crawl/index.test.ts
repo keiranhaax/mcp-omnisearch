@@ -7,6 +7,7 @@ import {
 	vi,
 } from 'vitest';
 import { config } from '../../../config/env.js';
+import { run_with_request_context } from '../../../common/request_context.js';
 import { FirecrawlCrawlProvider } from './index.js';
 
 const fetch_mock = vi.fn();
@@ -282,11 +283,104 @@ describe('FirecrawlCrawlProvider', () => {
 			provider: 'firecrawl_crawl',
 			message:
 				'Job timed out - try again later or with a smaller scope',
+			// The job id survives so a caller can resume or cancel instead
+			// of starting a duplicate paid crawl.
+			details: {
+				job_id: 'crawl-3',
+				cause: 'poll_exhausted',
+				retryable: false,
+			},
 		});
 
 		await vi.advanceTimersByTimeAsync(20 * 5000);
 		await rejection;
-		// One start request plus 20 poll attempts.
-		expect(fetch_mock).toHaveBeenCalledTimes(21);
+		// One start request, 20 poll attempts, then a remote cancel.
+		expect(fetch_mock).toHaveBeenCalledTimes(22);
+		const [cancel_url, cancel_options] = fetch_mock.mock.calls[21];
+		expect(cancel_url).toBe(
+			'https://api.firecrawl.dev/v2/crawl/crawl-3',
+		);
+		expect(cancel_options.method).toBe('DELETE');
+	});
+
+	it('returns pages received so far and cancels the job when polling is exhausted', async () => {
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({ success: true, id: 'crawl-4' }),
+		);
+		fetch_mock.mockImplementation(async (_url, options) =>
+			options.method === 'DELETE'
+				? json_response({ success: true, status: 'cancelled' })
+				: json_response({
+						status: 'scraping',
+						total: 40,
+						completed: 1,
+						data: [
+							{
+								markdown: '# Partial page',
+								metadata: { sourceURL: 'https://example.com/a' },
+							},
+						],
+						next: 'https://api.firecrawl.dev/v2/crawl/crawl-4?skip=1',
+					}),
+		);
+
+		const promise = new FirecrawlCrawlProvider().process_content(
+			'https://example.com',
+		);
+		await vi.advanceTimersByTimeAsync(20 * 5000);
+		const result = await promise;
+
+		expect(result.raw_contents).toEqual([
+			{ url: 'https://example.com/a', content: '# Partial page' },
+		]);
+		expect(result.metadata).toMatchObject({
+			job_id: 'crawl-4',
+			partial: true,
+			job_status: 'scraping',
+			remote_cancelled: true,
+			truncated: true,
+			truncation_reason: 'poll_exhausted',
+			// Continuation links are meaningless for an unfinished job.
+			next: null,
+		});
+		const methods = fetch_mock.mock.calls.map(
+			([, options]) => options.method,
+		);
+		expect(methods.filter((method) => method === 'DELETE')).toEqual([
+			'DELETE',
+		]);
+		expect(methods.at(-1)).toBe('DELETE');
+	});
+
+	it('cancels the remote job when the client aborts mid-crawl', async () => {
+		fetch_mock.mockImplementationOnce(async () =>
+			json_response({ success: true, id: 'crawl-5' }),
+		);
+		fetch_mock.mockImplementation(async () =>
+			json_response({ status: 'scraping' }),
+		);
+		const client = new AbortController();
+		const promise = run_with_request_context(client.signal, () =>
+			new FirecrawlCrawlProvider().process_content(
+				'https://example.com',
+			),
+		).catch((error: unknown) => error);
+
+		await vi.advanceTimersByTimeAsync(5000);
+		client.abort();
+		const error = await promise;
+
+		expect(error).toMatchObject({ name: 'AbortError' });
+		// The caller sees the abort immediately; the remote cancel is
+		// best-effort and completes just after, so flush pending work.
+		await vi.advanceTimersByTimeAsync(10);
+		const cancel = fetch_mock.mock.calls.find(
+			([, options]) => options.method === 'DELETE',
+		);
+		expect(cancel?.[0]).toBe(
+			'https://api.firecrawl.dev/v2/crawl/crawl-5',
+		);
+		// The cancel runs outside the aborted request context.
+		expect(cancel?.[1].signal.aborted).toBe(false);
 	});
 });

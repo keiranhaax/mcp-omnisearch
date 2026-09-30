@@ -1,5 +1,8 @@
 import * as v from 'valibot';
-import { handle_provider_error } from '../../../common/errors.js';
+import {
+	handle_provider_error,
+	input_error,
+} from '../../../common/errors.js';
 import {
 	make_firecrawl_request,
 	create_firecrawl_budget,
@@ -87,8 +90,7 @@ const assert_valid_options = (
 			value !== undefined &&
 			(!Number.isSafeInteger(value) || value < 0)
 		) {
-			throw new ProviderError(
-				ErrorType.INVALID_INPUT,
+			throw input_error(
 				`${key} must be a nonnegative integer`,
 				provider_name,
 			);
@@ -170,19 +172,41 @@ const build_scrape_body = (
 	return body;
 };
 
-const extract_content = (data: SanitizedFirecrawlDocument) => {
-	if (!data) return '';
-	if (data.markdown) return data.markdown;
-	if (data.summary) return data.summary;
-	if (data.answer) return data.answer;
-	if (data.highlights) return data.highlights;
-	if (data.html) return data.html;
-	if (data.rawHtml) return data.rawHtml;
-	if (data.links?.length) return data.links.join('\n');
+// String representations promoted into `content` are removed from the
+// per-URL document so a page is not retained twice; structured `json`
+// and `links` stay because `content` only holds a rendering of them.
+const promotable_fields = [
+	'markdown',
+	'summary',
+	'answer',
+	'highlights',
+	'html',
+	'rawHtml',
+] as const;
+type PromotableField = (typeof promotable_fields)[number];
+
+const extract_content = (
+	data: SanitizedFirecrawlDocument,
+): { content: string; promoted?: PromotableField } => {
+	if (!data) return { content: '' };
+	for (const field of promotable_fields) {
+		const value = data[field];
+		if (value) return { content: value, promoted: field };
+	}
+	if (data.links?.length) return { content: data.links.join('\n') };
 	if (Object.hasOwn(data, 'json'))
-		return JSON.stringify(data.json, null, 2);
-	if (data.screenshot) return data.screenshot;
-	return '';
+		return { content: JSON.stringify(data.json, null, 2) };
+	if (data.screenshot) return { content: data.screenshot };
+	return { content: '' };
+};
+
+const document_without_content = (
+	document: SanitizedFirecrawlDocument,
+	promoted: PromotableField | undefined,
+) => {
+	if (!promoted) return document;
+	const { [promoted]: _content, ...rest } = document;
+	return { ...rest, content_format: promoted };
 };
 
 export class FirecrawlScrapeProvider implements ProcessingProvider {
@@ -227,6 +251,9 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 							config.processing.firecrawl_scrape.timeout,
 							firecrawl_scrape_response_schema,
 							signal,
+							// A scrape of the same URL with the same options is
+							// an idempotent lookup.
+							{ cacheable: true },
 						);
 
 						validate_firecrawl_response(
@@ -244,7 +271,7 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 						}
 
 						const document = sanitize_firecrawl_document(data.data);
-						const content = extract_content(document);
+						const { content, promoted } = extract_content(document);
 
 						// A null answer/highlights is an explicit, valid "no match".
 						const no_match =
@@ -264,7 +291,10 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 							metadata: {
 								...document.metadata,
 								warning: document.warning,
-								document,
+								document: document_without_content(
+									document,
+									promoted,
+								),
 							},
 							success: true,
 						};

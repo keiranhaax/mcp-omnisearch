@@ -1,13 +1,7 @@
 import * as v from 'valibot';
-import { parse_provider_response } from '../../../common/provider_response.js';
-import { http_json } from '../../../common/http.js';
-import {
-	ErrorType,
-	ProviderError,
-	SearchResult,
-} from '../../../common/types.js';
-import { handle_provider_error } from '../../../common/errors.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import { provider_json_request } from '../../../common/provider_request.js';
+import { SearchResult } from '../../../common/types.js';
+import { input_error } from '../../../common/errors.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
@@ -72,8 +66,7 @@ export class BraveMediaSearchProvider {
 				options.count < 1 ||
 				options.count > max_count)
 		) {
-			throw new ProviderError(
-				ErrorType.INVALID_INPUT,
+			throw input_error(
 				`count must be an integer between 1 and ${max_count}`,
 				this.name,
 			);
@@ -84,8 +77,7 @@ export class BraveMediaSearchProvider {
 				options.offset < 0 ||
 				options.offset > 9)
 		) {
-			throw new ProviderError(
-				ErrorType.INVALID_INPUT,
+			throw input_error(
 				'offset must be an integer between 0 and 9',
 				this.name,
 			);
@@ -99,61 +91,49 @@ export class BraveMediaSearchProvider {
 	private async search_images(
 		options: BraveMediaSearchOptions,
 	): Promise<SearchResult[]> {
-		const image_request = async () => {
-			const api_key = validate_api_key(
-				config.search.brave_media.api_key,
-				this.name,
+		const api_key = validate_api_key(
+			config.search.brave_media.api_key,
+			this.name,
+		);
+
+		const params = new URLSearchParams({
+			q: options.query.trim(),
+		});
+
+		if (options.count) {
+			params.set(
+				'count',
+				String(Math.min(Math.max(options.count, 1), 200)),
 			);
+		}
 
-			try {
-				const params = new URLSearchParams({
-					q: options.query.trim(),
-				});
+		if (options.country) {
+			params.set('country', options.country);
+		}
 
-				if (options.count) {
-					params.set(
-						'count',
-						String(Math.min(Math.max(options.count, 1), 200)),
-					);
-				}
+		if (options.search_lang) {
+			params.set('search_lang', options.search_lang);
+		}
 
-				if (options.country) {
-					params.set('country', options.country);
-				}
+		if (options.safesearch) {
+			const safe = options.safesearch === 'off' ? 'off' : 'strict';
+			params.set('safesearch', safe);
+		}
 
-				if (options.search_lang) {
-					params.set('search_lang', options.search_lang);
-				}
-
-				if (options.safesearch) {
-					const safe =
-						options.safesearch === 'off' ? 'off' : 'strict';
-					params.set('safesearch', safe);
-				}
-
-				const raw_response = await http_json(
-					this.name,
-					`${config.search.brave.base_url}/images/search?${params}`,
-					{
-						method: 'GET',
-						headers: {
-							Accept: 'application/json',
-							'X-Subscription-Token': api_key,
-						},
-						signal: AbortSignal.timeout(
-							config.search.brave_media.timeout,
-						),
-					},
-				);
-
-				const response = parse_provider_response(
-					this.name,
-					brave_media_response_schema,
-					raw_response,
-				);
-				const results = response.results;
-
-				return results.map((result) => ({
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.search.brave.base_url}/images/search?${params}`,
+				headers: {
+					Accept: 'application/json',
+					'X-Subscription-Token': api_key,
+				},
+				timeout_ms: config.search.brave_media.timeout,
+				schema: brave_media_response_schema,
+				operation: 'search images',
+			},
+			(response) =>
+				response.results.map((result) => ({
 					title: result.title || 'Untitled Image',
 					url: result.url || result.properties?.url || '',
 					snippet: [
@@ -183,84 +163,66 @@ export class BraveMediaSearchProvider {
 						confidence: result.confidence,
 						source_hostname: result.meta_url?.hostname,
 					},
-				}));
-			} catch (error) {
-				handle_provider_error(error, this.name, 'search images');
-			}
-		};
-
-		return retry_with_backoff(image_request, {
-			timeout_ms: config.search.brave_media.timeout,
-		});
+				})),
+		);
 	}
 
 	private async search_videos(
 		options: BraveMediaSearchOptions,
 	): Promise<SearchResult[]> {
-		const video_request = async () => {
-			const api_key = validate_api_key(
-				config.search.brave_media.api_key,
-				this.name,
+		const api_key = validate_api_key(
+			config.search.brave_media.api_key,
+			this.name,
+		);
+
+		const params = new URLSearchParams({
+			q: options.query.trim(),
+		});
+
+		if (options.count) {
+			params.set(
+				'count',
+				String(Math.min(Math.max(options.count, 1), 50)),
 			);
+		}
 
-			try {
-				const params = new URLSearchParams({
-					q: options.query.trim(),
-				});
+		if (options.offset !== undefined) {
+			params.set(
+				'offset',
+				String(Math.min(Math.max(options.offset, 0), 9)),
+			);
+		}
 
-				if (options.count) {
-					params.set(
-						'count',
-						String(Math.min(Math.max(options.count, 1), 50)),
-					);
-				}
+		if (options.country) {
+			params.set('country', options.country);
+		}
 
-				if (options.offset !== undefined) {
-					params.set(
-						'offset',
-						String(Math.min(Math.max(options.offset, 0), 9)),
-					);
-				}
+		if (options.search_lang) {
+			params.set('search_lang', options.search_lang);
+		}
 
-				if (options.country) {
-					params.set('country', options.country);
-				}
+		if (options.safesearch) {
+			params.set('safesearch', options.safesearch);
+		}
 
-				if (options.search_lang) {
-					params.set('search_lang', options.search_lang);
-				}
+		if (options.freshness) {
+			params.set('freshness', options.freshness);
+		}
 
-				if (options.safesearch) {
-					params.set('safesearch', options.safesearch);
-				}
-
-				if (options.freshness) {
-					params.set('freshness', options.freshness);
-				}
-
-				const raw_response = await http_json(
-					this.name,
-					`${config.search.brave.base_url}/videos/search?${params}`,
-					{
-						method: 'GET',
-						headers: {
-							Accept: 'application/json',
-							'X-Subscription-Token': api_key,
-						},
-						signal: AbortSignal.timeout(
-							config.search.brave_media.timeout,
-						),
-					},
-				);
-
-				const response = parse_provider_response(
-					this.name,
-					brave_media_response_schema,
-					raw_response,
-				);
-				const results = response.results;
-
-				return results.map((result) => ({
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.search.brave.base_url}/videos/search?${params}`,
+				headers: {
+					Accept: 'application/json',
+					'X-Subscription-Token': api_key,
+				},
+				timeout_ms: config.search.brave_media.timeout,
+				schema: brave_media_response_schema,
+				operation: 'search videos',
+			},
+			(response) =>
+				response.results.map((result) => ({
 					title: result.title || 'Untitled Video',
 					url: result.url || '',
 					snippet: [
@@ -280,14 +242,7 @@ export class BraveMediaSearchProvider {
 						source_hostname: result.meta_url?.hostname,
 						thumbnail: result.thumbnail?.src,
 					},
-				}));
-			} catch (error) {
-				handle_provider_error(error, this.name, 'search videos');
-			}
-		};
-
-		return retry_with_backoff(video_request, {
-			timeout_ms: config.search.brave_media.timeout,
-		});
+				})),
+		);
 	}
 }

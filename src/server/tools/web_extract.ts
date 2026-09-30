@@ -1,18 +1,9 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import {
-	output_schema,
-	tool_success,
-	tool_success_bytes,
-	tool_error,
-} from '../../common/tool_output.js';
+import { input_error } from '../../common/errors.js';
 import { firecrawl_format_schema } from '../../common/firecrawl_utils.js';
-import {
-	presentation_schema,
-	present_result,
-	validate_presentation,
-} from '../../common/presentation.js';
+import { presentation_schema } from '../../common/presentation.js';
 import {
 	ErrorType,
 	ProcessingProvider,
@@ -20,10 +11,7 @@ import {
 } from '../../common/types.js';
 import { is_api_key_valid } from '../../common/validation.js';
 import { config } from '../../config/env.js';
-import {
-	mark_provider_error,
-	mark_provider_success,
-} from '../provider_health.js';
+import { define_presented_tool } from './define_tool.js';
 import { tool_descriptions } from './descriptions.js';
 
 // Concrete provider imports
@@ -354,7 +342,7 @@ const firecrawl_search_options_schema = v.object({
 				),
 			}),
 			v.description(
-				'Optional scrape settings applied to Firecrawl search results.',
+				'Optional scrape settings applied to Firecrawl search results. Basic depth returns snippets without scraping; advanced depth or explicit formats scrape each hit (one scrape credit per result).',
 			),
 		),
 	),
@@ -367,17 +355,19 @@ export const register_web_extract = (
 
 	const available = get_available_providers() as WebExtractProvider[];
 
-	server.tool(
+	define_presented_tool(
+		server,
 		{
 			name: 'web_extract',
 			description: tool_descriptions.web_extract,
-			outputSchema: output_schema,
 			annotations: {
 				readOnlyHint: false,
 				destructiveHint: false,
 				idempotentHint: false,
 				openWorldHint: true,
 			},
+			category: 'processing',
+			provider: (input) => input.provider,
 			schema: v.object({
 				...presentation_schema.entries,
 				chunks_per_source: v.optional(
@@ -472,8 +462,6 @@ export const register_web_extract = (
 			}),
 		},
 		async ({
-			response_mode,
-			output_budget_bytes,
 			url,
 			query,
 			provider,
@@ -484,137 +472,121 @@ export const register_web_extract = (
 			chunks_per_source,
 			format,
 		}) => {
-			try {
-				const started = performance.now();
-				validate_presentation({ response_mode, output_budget_bytes });
-				if (
-					provider !== 'tavily' &&
-					(chunks_per_source !== undefined || format !== undefined)
-				) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'Tavily extraction controls require provider=tavily',
-						'web_extract',
-						{ retryable: false },
-					);
-				}
-				const resolved_mode =
-					mode || default_modes[provider as WebExtractProvider];
-
-				// Validate mode for provider
-				const allowed = valid_modes[provider as WebExtractProvider];
-				if (allowed && !allowed.includes(resolved_mode)) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						`Mode "${resolved_mode}" is not valid for provider "${provider}". Valid modes: ${allowed.join(', ')}`,
-						'web_extract',
-					);
-				}
-
-				// For firecrawl search mode, use query instead of url
-				const input =
-					resolved_mode === 'search' ? query || '' : url || '';
-
-				if (!input || (typeof input === 'string' && !input.trim())) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						resolved_mode === 'search'
-							? 'Query is required for search mode'
-							: 'URL is required',
-						'web_extract',
-					);
-				}
-
-				const single_target =
-					(provider === 'firecrawl' &&
-						['map', 'crawl', 'extract', 'actions'].includes(
-							resolved_mode,
-						)) ||
-					(provider === 'exa' && resolved_mode === 'similar');
-				if (
-					single_target &&
-					Array.isArray(input) &&
-					input.length !== 1
-				) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'This mode requires exactly one URL',
-						'web_extract',
-					);
-				}
-
-				const key = make_key(provider, resolved_mode);
-				const selected = providers.get(key);
-
-				if (!selected) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						`Provider "${provider}" with mode "${resolved_mode}" is not available. Check your API keys.`,
-						'web_extract',
-					);
-				}
-
-				if (
-					firecrawl_options &&
-					(provider !== 'firecrawl' || resolved_mode !== 'scrape')
-				) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'firecrawl_options can only be used with provider=firecrawl and mode=scrape',
-						'web_extract',
-					);
-				}
-
-				if (
-					firecrawl_search_options &&
-					(provider !== 'firecrawl' || resolved_mode !== 'search')
-				) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'firecrawl_search_options can only be used with provider=firecrawl and mode=search',
-						'web_extract',
-					);
-				}
-
-				const provider_options =
-					provider === 'firecrawl' && resolved_mode === 'scrape'
-						? firecrawl_options
-						: provider === 'firecrawl' &&
-							  resolved_mode === 'summarize'
-							? { formats: ['summary'] }
-							: provider === 'firecrawl' && resolved_mode === 'search'
-								? firecrawl_search_options
-								: provider === 'tavily'
-									? {
-											query,
-											...(chunks_per_source !== undefined
-												? { chunks_per_source }
-												: {}),
-											...(format !== undefined ? { format } : {}),
-										}
-									: undefined;
-
-				const result = await selected.process_content(
-					input,
-					extract_depth,
-					provider_options,
+			if (
+				provider !== 'tavily' &&
+				(chunks_per_source !== undefined || format !== undefined)
+			) {
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					'Tavily extraction controls require provider=tavily',
+					'web_extract',
+					{ retryable: false },
 				);
-				const safe_result = present_result(result, {
-					measure_bytes: tool_success_bytes,
-					response_mode,
-					output_budget_bytes,
-					query,
-					urls: url,
-					provider,
-					operation: resolved_mode,
-					elapsed_ms: Math.round(performance.now() - started),
-				});
-				mark_provider_success('processing', provider);
-				return tool_success(safe_result);
-			} catch (error) {
-				mark_provider_error('processing', provider, error);
-				return tool_error(error);
 			}
+			const resolved_mode =
+				mode || default_modes[provider as WebExtractProvider];
+
+			// Validate mode for provider
+			const allowed = valid_modes[provider as WebExtractProvider];
+			if (allowed && !allowed.includes(resolved_mode)) {
+				throw input_error(
+					`Mode "${resolved_mode}" is not valid for provider "${provider}". Valid modes: ${allowed.join(', ')}`,
+					'web_extract',
+				);
+			}
+
+			// For firecrawl search mode, use query instead of url
+			const input =
+				resolved_mode === 'search' ? query || '' : url || '';
+
+			if (!input || (typeof input === 'string' && !input.trim())) {
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					resolved_mode === 'search'
+						? 'Query is required for search mode'
+						: 'URL is required',
+					'web_extract',
+				);
+			}
+
+			const single_target =
+				(provider === 'firecrawl' &&
+					['map', 'crawl', 'extract', 'actions'].includes(
+						resolved_mode,
+					)) ||
+				(provider === 'exa' && resolved_mode === 'similar');
+			if (
+				single_target &&
+				Array.isArray(input) &&
+				input.length !== 1
+			) {
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					'This mode requires exactly one URL',
+					'web_extract',
+				);
+			}
+
+			const key = make_key(provider, resolved_mode);
+			const selected = providers.get(key);
+
+			if (!selected) {
+				throw input_error(
+					`Provider "${provider}" with mode "${resolved_mode}" is not available. Check your API keys.`,
+					'web_extract',
+				);
+			}
+
+			if (
+				firecrawl_options &&
+				(provider !== 'firecrawl' || resolved_mode !== 'scrape')
+			) {
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					'firecrawl_options can only be used with provider=firecrawl and mode=scrape',
+					'web_extract',
+				);
+			}
+
+			if (
+				firecrawl_search_options &&
+				(provider !== 'firecrawl' || resolved_mode !== 'search')
+			) {
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					'firecrawl_search_options can only be used with provider=firecrawl and mode=search',
+					'web_extract',
+				);
+			}
+
+			const provider_options =
+				provider === 'firecrawl' && resolved_mode === 'scrape'
+					? firecrawl_options
+					: provider === 'firecrawl' && resolved_mode === 'summarize'
+						? { formats: ['summary'] }
+						: provider === 'firecrawl' && resolved_mode === 'search'
+							? firecrawl_search_options
+							: provider === 'tavily'
+								? {
+										query,
+										...(chunks_per_source !== undefined
+											? { chunks_per_source }
+											: {}),
+										...(format !== undefined ? { format } : {}),
+									}
+								: undefined;
+
+			const result = await selected.process_content(
+				input,
+				extract_depth,
+				provider_options,
+			);
+			return {
+				result,
+				operation: resolved_mode,
+				query,
+				urls: url,
+			};
 		},
 	);
 };

@@ -1,27 +1,15 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import {
-	output_schema,
-	tool_success,
-	tool_success_bytes,
-	tool_error,
-} from '../../common/tool_output.js';
-import {
-	presentation_schema,
-	present_result,
-	validate_presentation,
-} from '../../common/presentation.js';
+import { presentation_schema } from '../../common/presentation.js';
 import {
 	ErrorType,
 	ProviderError,
 	SearchProvider,
 } from '../../common/types.js';
+import { input_error } from '../../common/errors.js';
 import { is_api_key_valid } from '../../common/validation.js';
-import {
-	mark_provider_error,
-	mark_provider_success,
-} from '../provider_health.js';
+import { define_presented_tool } from './define_tool.js';
 import { tool_descriptions } from './descriptions.js';
 
 // Concrete provider imports
@@ -71,17 +59,19 @@ export const register_web_search = (
 		providers.keys(),
 	) as WebSearchProviderName[];
 
-	server.tool(
+	define_presented_tool(
+		server,
 		{
 			name: 'web_search',
 			description: tool_descriptions.web_search,
-			outputSchema: output_schema,
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,
 				idempotentHint: true,
 				openWorldHint: true,
 			},
+			category: 'search',
+			provider: (input) => input.provider,
 			schema: v.object({
 				...presentation_schema.entries,
 				...tavily_search_controls_schema.entries,
@@ -195,8 +185,6 @@ export const register_web_search = (
 			}),
 		},
 		async ({
-			response_mode,
-			output_budget_bytes,
 			query,
 			provider,
 			limit,
@@ -213,74 +201,56 @@ export const register_web_search = (
 			topic,
 			time_range,
 		}) => {
-			try {
-				const started = performance.now();
-				validate_presentation({ response_mode, output_budget_bytes });
-				if (
-					provider !== 'tavily' &&
-					[search_depth, topic, time_range].some(
-						(value) => value !== undefined,
-					)
-				) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'Tavily search controls require provider=tavily',
-						'web_search',
-						{ retryable: false },
-					);
-				}
-				if (
-					provider === 'tavily' &&
-					limit !== undefined &&
-					limit > 20
-				) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'Tavily supports at most 20 results',
-						'tavily',
-						{ retryable: false },
-					);
-				}
-				const selected = providers.get(provider);
-				if (!selected) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						`Provider "${provider}" is not available. Available: ${Array.from(providers.keys()).join(', ')}`,
-						'web_search',
-					);
-				}
-
-				const results = await selected.search({
-					query,
-					limit,
-					include_domains,
-					exclude_domains,
-					search_type,
-					category,
-					user_location,
-					contents,
-					output_schema,
-					system_prompt,
-					additional_queries,
-					...(provider === 'tavily'
-						? { search_depth, topic, time_range }
-						: {}),
-				});
-				const safe_results = present_result(results, {
-					measure_bytes: tool_success_bytes,
-					response_mode,
-					output_budget_bytes,
-					query,
-					provider,
-					operation: 'search',
-					elapsed_ms: Math.round(performance.now() - started),
-				});
-				mark_provider_success('search', provider);
-				return tool_success(safe_results);
-			} catch (error) {
-				mark_provider_error('search', provider, error);
-				return tool_error(error);
+			if (
+				provider !== 'tavily' &&
+				[search_depth, topic, time_range].some(
+					(value) => value !== undefined,
+				)
+			) {
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					'Tavily search controls require provider=tavily',
+					'web_search',
+					{ retryable: false },
+				);
 			}
+			if (
+				provider === 'tavily' &&
+				limit !== undefined &&
+				limit > 20
+			) {
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					'Tavily supports at most 20 results',
+					'tavily',
+					{ retryable: false },
+				);
+			}
+			const selected = providers.get(provider);
+			if (!selected) {
+				throw input_error(
+					`Provider "${provider}" is not available. Available: ${Array.from(providers.keys()).join(', ')}`,
+					'web_search',
+				);
+			}
+
+			const results = await selected.search({
+				query,
+				limit,
+				include_domains,
+				exclude_domains,
+				search_type,
+				category,
+				user_location,
+				contents,
+				output_schema,
+				system_prompt,
+				additional_queries,
+				...(provider === 'tavily'
+					? { search_depth, topic, time_range }
+					: {}),
+			});
+			return { result: results, operation: 'search', query };
 		},
 	);
 };

@@ -146,7 +146,11 @@ export const register_firecrawl_agent = (
 					'firecrawl_agent',
 					metadata,
 				);
-				mark_provider_success('processing', 'firecrawl_agent');
+				mark_provider_success('processing', 'firecrawl_agent', {
+					tool: 'firecrawl_agent',
+					elapsed_ms: metadata.elapsed_ms,
+					usage: metadata.usage,
+				});
 				return {
 					_meta: {
 						omnisearch: {
@@ -162,7 +166,10 @@ export const register_firecrawl_agent = (
 					],
 				};
 			} catch (error) {
-				mark_provider_error('processing', 'firecrawl_agent', error);
+				mark_provider_error('processing', 'firecrawl_agent', error, {
+					tool: 'firecrawl_agent',
+					elapsed_ms: Math.round(performance.now() - started),
+				});
 				const metadata = {
 					...request_metadata(
 						error,

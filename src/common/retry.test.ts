@@ -65,11 +65,60 @@ describe('retry_with_backoff', () => {
 			});
 			await vi.advanceTimersByTimeAsync(100);
 			expect(settled).toBe(true);
-			expect(await pending).toMatchObject({ name: 'TimeoutError' });
+			// A hung attempt is a timeout; a budget that expires while waiting
+			// to retry reports the provider error that caused the wait.
+			expect(await pending).toMatchObject(
+				phase === 'hung attempt'
+					? { name: 'TimeoutError' }
+					: {
+							message: 'Network request failed',
+							details: { cause: 'network' },
+						},
+			);
 			expect(fn).toHaveBeenCalledTimes(1);
 			expect(vi.getTimerCount()).toBe(0);
 		},
 	);
+	it('keeps the last provider error when the total budget expires during backoff', async () => {
+		vi.useFakeTimers();
+		vi.spyOn(Math, 'random').mockReturnValue(1);
+		const reset_time = new Date(Date.now() + 2000);
+		const unavailable = new ProviderError(
+			ErrorType.PROVIDER_ERROR,
+			'test_provider API internal error',
+			'test_provider',
+			{ status: 503, reset_time },
+		);
+		const fn = vi.fn(() => Promise.reject(unavailable));
+		const pending = retry_with_backoff(fn, {
+			max_retries: 2,
+			initial_delay: 400,
+			timeout_ms: 150,
+		}).catch((error) => error);
+		await vi.advanceTimersByTimeAsync(150);
+		const error = await pending;
+		expect(error).toBe(unavailable);
+		expect(error).toMatchObject({
+			details: { status: 503, reset_time },
+		});
+		expect(fn).toHaveBeenCalledTimes(1);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+	it('still reports cancellation when the caller aborts during backoff', async () => {
+		vi.useFakeTimers();
+		vi.spyOn(Math, 'random').mockReturnValue(1);
+		const caller = new AbortController();
+		const fn = vi.fn(() => Promise.reject(network_error()));
+		const pending = retry_with_backoff(fn, {
+			initial_delay: 400,
+			timeout_ms: 1000,
+			signal: caller.signal,
+		}).catch((error) => error);
+		await vi.advanceTimersByTimeAsync(10);
+		caller.abort();
+		expect(await pending).toMatchObject({ name: 'AbortError' });
+		expect(vi.getTimerCount()).toBe(0);
+	});
 	it('disposes a total budget when the first attempt succeeds', async () => {
 		vi.useFakeTimers();
 		await expect(

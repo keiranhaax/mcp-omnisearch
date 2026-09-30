@@ -1,15 +1,10 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import { create_error_response } from '../../common/errors.js';
-import { handle_large_result } from '../../common/results.js';
 import { is_api_key_valid } from '../../common/validation.js';
 import { config } from '../../config/env.js';
 import { GitHubSearchProvider } from '../../providers/search/github/index.js';
-import {
-	mark_provider_error,
-	mark_provider_success,
-} from '../provider_health.js';
+import { define_legacy_tool } from './define_tool.js';
 import { tool_descriptions } from './descriptions.js';
 
 let provider: GitHubSearchProvider | undefined;
@@ -29,7 +24,8 @@ export const register_github_search = (
 ) => {
 	if (!provider) return;
 
-	server.tool(
+	define_legacy_tool(
+		server,
 		{
 			name: 'github_search',
 			description: tool_descriptions.github_search,
@@ -39,6 +35,8 @@ export const register_github_search = (
 				idempotentHint: true,
 				openWorldHint: true,
 			},
+			category: 'search',
+			provider: 'github',
 			schema: v.object({
 				query: v.pipe(v.string(), v.description('Search query')),
 				search_type: v.optional(
@@ -65,54 +63,17 @@ export const register_github_search = (
 			}),
 		},
 		async ({ query, search_type = 'code', limit, sort }) => {
-			try {
-				let results;
-				switch (search_type) {
-					case 'code':
-						results = await provider!.search_code({
-							query,
-							limit,
-						});
-						break;
-					case 'repositories':
-						results = await provider!.search_repositories({
-							query,
-							limit,
-							sort,
-						} as any);
-						break;
-					case 'users':
-						results = await provider!.search_users({
-							query,
-							limit,
-						});
-						break;
-				}
-				const safe_results = handle_large_result(
-					results,
-					'github_search',
-				);
-				mark_provider_success('search', 'github');
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: JSON.stringify(safe_results, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				mark_provider_error('search', 'github', error);
-				const error_response = create_error_response(error as Error);
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: error_response.error,
-						},
-					],
-					isError: true,
-				};
+			switch (search_type) {
+				case 'code':
+					return provider!.search_code({ query, limit });
+				case 'repositories':
+					return provider!.search_repositories({
+						query,
+						limit,
+						sort,
+					} as any);
+				case 'users':
+					return provider!.search_users({ query, limit });
 			}
 		},
 	);

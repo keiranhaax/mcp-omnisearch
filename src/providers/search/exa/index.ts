@@ -1,16 +1,11 @@
 import * as v from 'valibot';
-import {
-	handle_provider_error,
-	sanitize_query,
-} from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider_response.js';
+import { sanitize_query } from '../../../common/errors.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import {
 	sanitize_exa_control_metadata,
 	sanitize_exa_output,
 } from '../../../common/provider_sanitization.js';
 import { set_response_metadata } from '../../../common/response_metadata.js';
-import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	BaseSearchParams,
 	SearchProvider,
@@ -101,30 +96,22 @@ export class ExaSearchProvider implements SearchProvider {
 			this.name,
 		);
 
-		const search_request = async () => {
-			try {
-				const request_body = build_search_body(params);
-
-				const raw_data = await http_json(
-					this.name,
-					`${config.search.exa.base_url}/search`,
-					{
-						method: 'POST',
-						headers: {
-							'x-api-key': api_key,
-							Authorization: `Bearer ${api_key}`,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify(request_body),
-						signal: AbortSignal.timeout(config.search.exa.timeout),
-					},
-				);
-				const data = parse_provider_response(
-					this.name,
-					exa_search_response_schema,
-					raw_data,
-				);
-
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.search.exa.base_url}/search`,
+				method: 'POST',
+				headers: {
+					'x-api-key': api_key,
+					Authorization: `Bearer ${api_key}`,
+					'Content-Type': 'application/json',
+				},
+				body: build_search_body(params),
+				timeout_ms: config.search.exa.timeout,
+				schema: exa_search_response_schema,
+				operation: 'fetch search results',
+			},
+			(data) => {
 				const controls = sanitize_exa_control_metadata(data);
 				const output = sanitize_exa_output(data.output);
 				const results: SearchResult[] = (data.results ?? []).map(
@@ -147,18 +134,8 @@ export class ExaSearchProvider implements SearchProvider {
 				);
 				set_response_metadata(results, controls, this.name);
 				return results;
-			} catch (error) {
-				handle_provider_error(
-					error,
-					this.name,
-					'fetch search results',
-				);
-			}
-		};
-
-		return retry_with_backoff(search_request, {
-			timeout_ms: config.search.exa.timeout,
-		});
+			},
+		);
 	}
 }
 

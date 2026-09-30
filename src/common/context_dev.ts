@@ -1,3 +1,4 @@
+import { input_error } from './errors.js';
 import { http_json } from './http.js';
 import { ErrorType, ProviderError } from './types.js';
 import { validate_api_key } from './validation.js';
@@ -118,8 +119,7 @@ export const require_one = (
 			: Boolean(value);
 	});
 	if (present.length !== 1) {
-		throw new ProviderError(
-			ErrorType.INVALID_INPUT,
+		throw input_error(
 			`Provide exactly one of: ${Object.keys(fields).join(', ')}`,
 			provider,
 		);

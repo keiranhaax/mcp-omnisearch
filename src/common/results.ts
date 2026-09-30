@@ -3,7 +3,7 @@ import {
 	store_result,
 } from './result_store.js';
 import { ErrorType, ProviderError } from './types.js';
-import { create_error_response } from './errors.js';
+import { create_error_response, retention_error } from './errors.js';
 import { get_job_failure, set_job_failure } from './job_state.js';
 import {
 	copy_response_metadata,
@@ -253,22 +253,17 @@ export const present_job_result = (
 			text = JSON.stringify(presented, null, 2);
 		}
 		return { text, local_completeness };
-	} catch {
+	} catch (failure) {
 		const reported = get_response_metadata(result);
 		const job = reported?.job;
-		const error = new ProviderError(
-			ErrorType.PROVIDER_ERROR,
-			'Cannot retain complete canonical result; no evidence was returned',
+		const error = retention_error(
 			provider,
-			{
-				retryable: false,
-				cause: 'storage',
-				...(job
-					? provider === 'tavily_research'
-						? { request_id: job.id }
-						: { job_id: job.id }
-					: {}),
-			},
+			failure,
+			job
+				? provider === 'tavily_research'
+					? { request_id: job.id }
+					: { job_id: job.id }
+				: {},
 		);
 		copy_response_metadata(result, error);
 		if (job) set_job_failure(error, job);
@@ -360,10 +355,13 @@ export const aggregate_url_results = (
 		.map((r) => r.url);
 
 	if (successful_results.length === 0) {
+		// Every URL already failed once; an automatic retry would only
+		// repeat the paid calls with the same outcome.
 		throw new ProviderError(
 			ErrorType.PROVIDER_ERROR,
 			'Failed to extract content from all URLs',
 			provider_name,
+			{ retryable: false },
 		);
 	}
 

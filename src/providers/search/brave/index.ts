@@ -1,8 +1,5 @@
 import * as v from 'valibot';
-import { handle_provider_error } from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider_response.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import {
 	apply_search_operators,
 	build_query_with_operators,
@@ -47,51 +44,44 @@ export class BraveSearchProvider implements SearchProvider {
 		const parsed_query = parse_search_operators(params.query);
 		const search_params = apply_search_operators(parsed_query);
 
-		const search_request = async () => {
-			try {
-				// Build query with all operators using shared utility
-				const query = build_query_with_operators(
-					search_params,
-					params.include_domains,
-					params.exclude_domains,
-				);
+		// Build query with all operators using shared utility
+		const query = build_query_with_operators(
+			search_params,
+			params.include_domains,
+			params.exclude_domains,
+		);
 
-				// Brave API limits: 400 chars / 50 words per query, max 20 results
-				if (query.length > 400 || query.split(/\s+/).length > 50) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'Brave query exceeds API limits (400 characters / 50 words). Shorten the query.',
-						this.name,
-						{ retryable: false },
-					);
-				}
+		// Brave API limits: 400 chars / 50 words per query, max 20 results
+		if (query.length > 400 || query.split(/\s+/).length > 50) {
+			throw new ProviderError(
+				ErrorType.INVALID_INPUT,
+				'Brave query exceeds API limits (400 characters / 50 words). Shorten the query.',
+				this.name,
+				{ retryable: false },
+			);
+		}
 
-				const query_params = new URLSearchParams({
-					q: query,
-					count: Math.min(params.limit ?? 5, 20).toString(),
-					result_filter: 'web',
-					text_decorations: 'false',
-				});
+		const query_params = new URLSearchParams({
+			q: query,
+			count: Math.min(params.limit ?? 5, 20).toString(),
+			result_filter: 'web',
+			text_decorations: 'false',
+		});
 
-				const raw_data = await http_json(
-					this.name,
-					`${config.search.brave.base_url}/web/search?${query_params}`,
-					{
-						method: 'GET',
-						headers: {
-							Accept: 'application/json',
-							'X-Subscription-Token': api_key,
-						},
-						signal: AbortSignal.timeout(config.search.brave.timeout),
-					},
-				);
-				const data = parse_provider_response(
-					this.name,
-					brave_search_response_schema,
-					raw_data,
-				);
-
-				return (data.web?.results || [])
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.search.brave.base_url}/web/search?${query_params}`,
+				headers: {
+					Accept: 'application/json',
+					'X-Subscription-Token': api_key,
+				},
+				timeout_ms: config.search.brave.timeout,
+				schema: brave_search_response_schema,
+				operation: 'fetch search results',
+			},
+			(data) =>
+				(data.web?.results || [])
 					.filter(
 						(
 							result,
@@ -104,18 +94,7 @@ export class BraveSearchProvider implements SearchProvider {
 						url: result.url,
 						snippet: result.description ?? '',
 						source_provider: this.name,
-					}));
-			} catch (error) {
-				handle_provider_error(
-					error,
-					this.name,
-					'fetch search results',
-				);
-			}
-		};
-
-		return retry_with_backoff(search_request, {
-			timeout_ms: config.search.brave.timeout,
-		});
+					})),
+		);
 	}
 }

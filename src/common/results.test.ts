@@ -358,6 +358,8 @@ describe('aggregate_url_results', () => {
 				type: ErrorType.PROVIDER_ERROR,
 				provider: 'firecrawl',
 				message: 'Failed to extract content from all URLs',
+				// Every URL already failed; never repeat the paid calls.
+				details: { retryable: false },
 			}),
 		);
 	});

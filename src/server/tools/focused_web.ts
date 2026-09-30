@@ -1,23 +1,11 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import {
-	presentation_schema,
-	present_result,
-	validate_presentation,
-} from '../../common/presentation.js';
-import {
-	output_schema,
-	tool_success,
-	tool_success_bytes,
-	tool_error,
-} from '../../common/tool_output.js';
+import { presentation_schema } from '../../common/presentation.js';
+import { input_error } from '../../common/errors.js';
 import { ErrorType, ProviderError } from '../../common/types.js';
 import { validate_processing_urls } from '../../common/validation.js';
-import {
-	mark_provider_error,
-	mark_provider_success,
-} from '../provider_health.js';
+import { define_presented_tool } from './define_tool.js';
 import { get_extract_provider } from './web_extract.js';
 
 const read_modes = {
@@ -41,18 +29,20 @@ export const register_web_read = (
 		get_extract_provider(provider, read_modes[provider]),
 	);
 	if (!available.length) return;
-	server.tool(
+	define_presented_tool(
+		server,
 		{
 			name: 'web_read',
 			description:
 				'Read 1-20 public URLs with basic Tavily extraction, Exa contents, or Firecrawl scraping. Returns source evidence, not synthesis. No crawl, actions, or advanced provider options.',
-			outputSchema: output_schema,
 			annotations: {
 				readOnlyHint: true,
 				destructiveHint: false,
 				idempotentHint: true,
 				openWorldHint: true,
 			},
+			category: 'processing',
+			provider: (input) => input.provider,
 			schema: v.strictObject({
 				...presentation_schema.entries,
 				provider: v.picklist(available),
@@ -91,71 +81,41 @@ export const register_web_read = (
 				]),
 			}),
 		},
-		async ({
-			provider,
-			url,
-			query,
-			chunks_per_source,
-			format,
-			response_mode,
-			output_budget_bytes,
-		}) => {
-			try {
-				const started = performance.now();
-				validate_presentation({ response_mode, output_budget_bytes });
-				if (
-					provider !== 'tavily' &&
-					(chunks_per_source !== undefined || format !== undefined)
-				)
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'Tavily extraction controls require provider=tavily',
-						'web_read',
-						{ retryable: false },
-					);
-				if (
-					(query !== undefined && !query.trim()) ||
-					(chunks_per_source !== undefined && !query?.trim())
-				)
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'A non-empty query is required when supplied or using chunks_per_source',
-						'web_read',
-						{ retryable: false },
-					);
-				validate_processing_urls(url, 'web_read');
-				const operation = read_modes[provider];
-				const selected = get_extract_provider(provider, operation);
-				if (!selected)
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
-						'Selected read provider is not available',
-						'web_read',
-						{ retryable: false },
-					);
-				const result = await selected.process_content(
-					url,
-					'basic',
-					provider === 'tavily'
-						? { query, chunks_per_source, format }
-						: undefined,
+		async ({ provider, url, query, chunks_per_source, format }) => {
+			if (
+				provider !== 'tavily' &&
+				(chunks_per_source !== undefined || format !== undefined)
+			)
+				throw new ProviderError(
+					ErrorType.INVALID_INPUT,
+					'Tavily extraction controls require provider=tavily',
+					'web_read',
+					{ retryable: false },
 				);
-				const presented = present_result(result, {
-					provider,
-					operation,
-					urls: url,
-					query,
-					response_mode,
-					output_budget_bytes,
-					measure_bytes: tool_success_bytes,
-					elapsed_ms: Math.round(performance.now() - started),
-				});
-				mark_provider_success('processing', provider);
-				return tool_success(presented);
-			} catch (error) {
-				mark_provider_error('processing', provider, error);
-				return tool_error(error);
-			}
+			if (
+				(query !== undefined && !query.trim()) ||
+				(chunks_per_source !== undefined && !query?.trim())
+			)
+				throw input_error(
+					'A non-empty query is required when supplied or using chunks_per_source',
+					'web_read',
+				);
+			validate_processing_urls(url, 'web_read');
+			const operation = read_modes[provider];
+			const selected = get_extract_provider(provider, operation);
+			if (!selected)
+				throw input_error(
+					'Selected read provider is not available',
+					'web_read',
+				);
+			const result = await selected.process_content(
+				url,
+				'basic',
+				provider === 'tavily'
+					? { query, chunks_per_source, format }
+					: undefined,
+			);
+			return { result, operation, urls: url, query };
 		},
 	);
 };
@@ -166,20 +126,22 @@ const register_site_tool = (
 ) => {
 	const selected = get_extract_provider('firecrawl', operation);
 	if (!selected) return;
-	server.tool(
+	define_presented_tool(
+		server,
 		{
 			name: `web_${operation}`,
 			description:
 				operation === 'crawl'
 					? 'Start an expensive Firecrawl crawl from one public URL and wait for page content. Basic: up to 20 pages; advanced: up to 50. Creates a paid job; do not repeat this tool call to retry an existing job.'
 					: 'Discover URLs using Firecrawl without reading page content. One public starting URL; basic returns up to 50 links, advanced up to 200. Use web_read to read selected URLs.',
-			outputSchema: output_schema,
 			annotations: {
 				readOnlyHint: operation === 'map',
 				destructiveHint: false,
 				idempotentHint: operation === 'map',
 				openWorldHint: true,
 			},
+			category: 'processing',
+			provider: 'firecrawl',
 			schema: v.strictObject({
 				...presentation_schema.entries,
 				url: url_schema,
@@ -191,35 +153,13 @@ const register_site_tool = (
 				),
 			}),
 		},
-		async ({
-			url,
-			extract_depth,
-			response_mode,
-			output_budget_bytes,
-		}) => {
-			try {
-				const started = performance.now();
-				validate_presentation({ response_mode, output_budget_bytes });
-				validate_processing_urls(url, `web_${operation}`);
-				const result = await selected.process_content(
-					url,
-					extract_depth,
-				);
-				const presented = present_result(result, {
-					provider: 'firecrawl',
-					operation,
-					urls: url,
-					response_mode,
-					output_budget_bytes,
-					measure_bytes: tool_success_bytes,
-					elapsed_ms: Math.round(performance.now() - started),
-				});
-				mark_provider_success('processing', 'firecrawl');
-				return tool_success(presented);
-			} catch (error) {
-				mark_provider_error('processing', 'firecrawl', error);
-				return tool_error(error);
-			}
+		async ({ url, extract_depth }) => {
+			validate_processing_urls(url, `web_${operation}`);
+			const result = await selected.process_content(
+				url,
+				extract_depth,
+			);
+			return { result, operation, urls: url };
 		},
 	);
 };

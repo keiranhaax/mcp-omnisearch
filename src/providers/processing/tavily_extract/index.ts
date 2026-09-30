@@ -1,9 +1,6 @@
 import * as v from 'valibot';
-import { handle_provider_error } from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider_response.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import { set_response_metadata } from '../../../common/response_metadata.js';
-import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	ErrorType,
 	ProcessingProvider,
@@ -86,47 +83,42 @@ export class TavilyExtractProvider implements ProcessingProvider {
 			);
 		}
 
-		const extract_request = async () => {
-			const api_key = validate_api_key(
-				config.processing.tavily_extract.api_key,
-				this.name,
-			);
+		const api_key = validate_api_key(
+			config.processing.tavily_extract.api_key,
+			this.name,
+		);
 
-			try {
-				const raw_data = await http_json(
-					this.name,
-					`${config.processing.tavily_extract.base_url}/extract`,
-					{
-						method: 'POST',
-						headers: {
-							Authorization: `Bearer ${api_key}`,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify({
-							urls: urls,
-							include_images: false,
-							extract_depth,
-							query: options?.query,
-							chunks_per_source: options?.chunks_per_source,
-							format: options?.format,
-						}),
-						signal: AbortSignal.timeout(
-							config.processing.tavily_extract.timeout,
-						),
-					},
-				);
-				const data = parse_provider_response(
-					this.name,
-					tavily_extract_response_schema,
-					raw_data,
-				);
-
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.processing.tavily_extract.base_url}/extract`,
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${api_key}`,
+					'Content-Type': 'application/json',
+				},
+				body: {
+					urls: urls,
+					include_images: false,
+					extract_depth,
+					query: options?.query,
+					chunks_per_source: options?.chunks_per_source,
+					format: options?.format,
+				},
+				timeout_ms: config.processing.tavily_extract.timeout,
+				schema: tavily_extract_response_schema,
+				operation: 'extract content',
+			},
+			(data) => {
 				// Check if there are any results
 				if (data.results.length === 0) {
+					// A deterministic empty extraction must not be retried:
+					// the second paid call returns the same nothing.
 					throw new ProviderError(
 						ErrorType.PROVIDER_ERROR,
 						'No content extracted from URL',
 						this.name,
+						{ retryable: false },
 					);
 				}
 
@@ -166,13 +158,7 @@ export class TavilyExtractProvider implements ProcessingProvider {
 				};
 				set_response_metadata(result, data);
 				return result;
-			} catch (error) {
-				handle_provider_error(error, this.name, 'extract content');
-			}
-		};
-
-		return retry_with_backoff(extract_request, {
-			timeout_ms: config.processing.tavily_extract.timeout,
-		});
+			},
+		);
 	}
 }

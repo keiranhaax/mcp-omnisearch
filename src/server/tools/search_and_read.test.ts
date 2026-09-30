@@ -515,14 +515,120 @@ it('returns completed evidence on deadline and does not start further reads', as
 	const result = parsed(
 		await call('search_and_read', { ...args, timeout_ms: 100 }),
 	);
+	// Reads run in parallel: the third source completes while the second
+	// is still hanging, so only the hung read reports the deadline.
 	expect(result.sources.map((s: any) => s.status)).toEqual([
 		'ok',
 		'error',
-		'skipped',
+		'ok',
 	]);
 	expect(result.sources[1].error.kind).toBe('timeout');
-	expect(result.sources[2].error.kind).toBe('timeout');
 	expect(result.metadata.complete).toBe(false);
+	expect(fetch_mock).toHaveBeenCalledTimes(4);
+});
+
+it('skips reads still queued at the deadline instead of starting them', async () => {
+	const urls = Array.from(
+		{ length: 5 },
+		(_, i) => `https://example.test/page-${i}`,
+	);
+	respond(urls);
+	const ordinary = fetch_mock.getMockImplementation()!;
+	fetch_mock.mockImplementation(async (target, options) => {
+		if (String(target).endsWith('/extract'))
+			return new Promise((_resolve, reject) =>
+				options.signal.addEventListener(
+					'abort',
+					() => reject(options.signal.reason),
+					{ once: true },
+				),
+			);
+		return ordinary(target, options);
+	});
+	const result = parsed(
+		await call('search_and_read', {
+			...args,
+			max_sources: 5,
+			search_limit: 5,
+			timeout_ms: 100,
+		}),
+	);
+	// Four reads start together (the concurrency bound); the fifth is
+	// still queued when the deadline hits and is never sent.
+	expect(result.sources.map((s: any) => s.status)).toEqual([
+		'error',
+		'error',
+		'error',
+		'error',
+		'skipped',
+	]);
+	expect(result.sources.map((s: any) => s.error.kind)).toEqual(
+		Array(5).fill('timeout'),
+	);
+	expect(fetch_mock).toHaveBeenCalledTimes(5);
+});
+
+it('reads independent sources concurrently in ranked order', async () => {
+	const third = 'https://example.test/third';
+	respond([first, second, third]);
+	const ordinary = fetch_mock.getMockImplementation()!;
+	const started: string[] = [];
+	const release: Array<() => void> = [];
+	fetch_mock.mockImplementation(async (target, options) => {
+		if (!String(target).endsWith('/extract'))
+			return ordinary(target, options);
+		const url = JSON.parse(options.body).urls[0];
+		started.push(url);
+		await new Promise<void>((resolve) => release.push(resolve));
+		return ordinary(target, options);
+	});
+	const pending = call('search_and_read', {
+		...args,
+		max_sources: 3,
+	});
+	await vi.waitFor(() => expect(started).toHaveLength(3));
+	// All three reads were issued before any of them completed.
+	expect(started).toEqual([first, second, third]);
+	// Finish out of order; the result keeps the ranked order.
+	release[2]();
+	release[0]();
+	release[1]();
+	const result = parsed(await pending);
+	expect(result.sources.map((s: any) => s.url)).toEqual([
+		first,
+		second,
+		third,
+	]);
+	expect(result.sources.map((s: any) => s.status)).toEqual([
+		'ok',
+		'ok',
+		'ok',
+	]);
+	expect(result.metadata).toMatchObject({
+		http_requests: 4,
+		complete: true,
+	});
+});
+
+it('lets in-flight reads reserve the request budget before starting more', async () => {
+	// Budget 3: one search plus two reads. The third source must be
+	// skipped as request_budget, not started optimistically.
+	const third = 'https://example.test/third';
+	respond([first, second, third]);
+	const result = parsed(
+		await call('search_and_read', {
+			...args,
+			max_sources: 3,
+			max_requests: 3,
+		}),
+	);
+	expect(result.sources.map((s: any) => s.status)).toEqual([
+		'ok',
+		'ok',
+		'skipped',
+	]);
+	expect(result.sources[2].error.kind).toBe('request_budget');
+	expect(result.metadata.http_requests).toBe(3);
 	expect(fetch_mock).toHaveBeenCalledTimes(3);
 });
 
@@ -673,6 +779,16 @@ it('searches once, deduplicates URLs and returns source-linked evidence without 
 		'ok',
 	]);
 	expect(result.sources[0].content).toContain('needle evidence');
+	// The page text appears once; `extraction` carries provider metadata
+	// only, so canonical results are not inflated with copies.
+	expect(result.sources[0].extraction).toMatchObject({
+		source_provider: 'tavily_extract',
+		metadata: { successful_extractions: 1 },
+	});
+	expect(result.sources[0].extraction).not.toHaveProperty('content');
+	expect(result.sources[0].extraction).not.toHaveProperty(
+		'raw_contents',
+	);
 	expect(result.metadata).toMatchObject({
 		search_provider: 'tavily',
 		extract_provider: 'tavily',

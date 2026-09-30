@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { input_error } from './errors.js';
 import { ErrorType, ProviderError } from './types.js';
 
 const MAX_PROCESSING_URLS = 20;
@@ -13,11 +14,7 @@ export const validate_api_key = (
 	provider: string,
 ): string => {
 	if (!key) {
-		throw new ProviderError(
-			ErrorType.INVALID_INPUT,
-			`API key not found for ${provider}`,
-			provider,
-		);
+		throw input_error(`API key not found for ${provider}`, provider);
 	}
 	return normalize_api_key(key);
 };
@@ -133,8 +130,7 @@ export const validate_processing_urls = (
 		);
 	}
 	if (urls.length > MAX_PROCESSING_URLS) {
-		throw new ProviderError(
-			ErrorType.INVALID_INPUT,
+		throw input_error(
 			`A maximum of ${MAX_PROCESSING_URLS} URLs is allowed per request`,
 			provider_name,
 		);

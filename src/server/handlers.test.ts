@@ -64,6 +64,12 @@ describe('setup_handlers', () => {
 		expect(status.contents[0].text).not.toContain(
 			'PRIVATE_QUERY_FIXTURE',
 		);
+		// Per-provider and per-tool counters plus cache state ride along.
+		expect(body.metrics).toEqual({ providers: {}, tools: {} });
+		expect(body.http_cache).toMatchObject({
+			enabled: false,
+			entries: 0,
+		});
 	});
 	it('discovers and dispatches provider-info through the real resource template API', async () => {
 		reset_available_providers();

@@ -1,15 +1,10 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import { create_error_response } from '../../common/errors.js';
-import { handle_large_result } from '../../common/results.js';
 import { is_api_key_valid } from '../../common/validation.js';
 import { config } from '../../config/env.js';
 import { BraveMediaSearchProvider } from '../../providers/search/brave_media/index.js';
-import {
-	mark_provider_error,
-	mark_provider_success,
-} from '../provider_health.js';
+import { define_legacy_tool } from './define_tool.js';
 import { tool_descriptions } from './descriptions.js';
 
 let provider: BraveMediaSearchProvider | null = null;
@@ -31,7 +26,8 @@ export const register_brave_media_search = (
 ) => {
 	if (!provider) return;
 
-	server.tool(
+	define_legacy_tool(
+		server,
 		{
 			name: 'brave_media_search',
 			description: tool_descriptions.brave_media_search,
@@ -41,6 +37,8 @@ export const register_brave_media_search = (
 				idempotentHint: true,
 				openWorldHint: true,
 			},
+			category: 'search',
+			provider: 'brave_media',
 			schema: v.object({
 				query: v.pipe(
 					v.string(),
@@ -93,44 +91,16 @@ export const register_brave_media_search = (
 			search_lang,
 			safesearch,
 			freshness,
-		}) => {
-			try {
-				const results = await provider!.search({
-					query,
-					type,
-					count,
-					offset,
-					country,
-					search_lang,
-					safesearch,
-					freshness,
-				});
-				const safe_results = handle_large_result(
-					results,
-					'brave_media_search',
-				);
-				mark_provider_success('search', 'brave_media');
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: JSON.stringify(safe_results, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				mark_provider_error('search', 'brave_media', error);
-				const error_response = create_error_response(error as Error);
-				return {
-					content: [
-						{
-							type: 'text' as const,
-							text: error_response.error,
-						},
-					],
-					isError: true,
-				};
-			}
-		},
+		}) =>
+			provider!.search({
+				query,
+				type,
+				count,
+				offset,
+				country,
+				search_lang,
+				safesearch,
+				freshness,
+			}),
 	);
 };

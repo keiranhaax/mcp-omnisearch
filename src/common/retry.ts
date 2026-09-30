@@ -206,7 +206,16 @@ export const retry_with_backoff = async <T>(
 				const wait = Math.max(retry_after, Math.random() * ceiling);
 				if (wait > wait_remaining) throw error;
 				wait_remaining -= wait;
-				await delay(wait, signal);
+				try {
+					await delay(wait, signal);
+				} catch (interrupted) {
+					// Cancellation stays terminal. A total budget that expires
+					// while waiting to retry reports the last provider error,
+					// which carries the status and Retry-After the client needs.
+					if (timeout.signal.aborted && !caller_signal?.aborted)
+						throw error;
+					throw interrupted;
+				}
 				retries++;
 			}
 		}

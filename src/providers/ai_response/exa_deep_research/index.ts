@@ -1,16 +1,11 @@
 import * as v from 'valibot';
-import { parse_provider_response } from '../../../common/provider_response.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import {
 	sanitize_exa_control_metadata,
 	sanitize_exa_grounding,
 } from '../../../common/provider_sanitization.js';
 import { set_response_metadata } from '../../../common/response_metadata.js';
-import {
-	handle_provider_error,
-	sanitize_query,
-} from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import { sanitize_query } from '../../../common/errors.js';
 import {
 	BaseSearchParams,
 	SearchProvider,
@@ -84,42 +79,35 @@ export class ExaDeepResearchProvider implements SearchProvider {
 			this.name,
 		);
 
-		const search_request = async () => {
-			try {
-				const request_body: ExaDeepResearchRequest = {
-					query: sanitize_query(params.query),
-					type:
-						params.search_type === 'deep' ? 'deep' : 'deep-reasoning',
-					numResults: params.limit ?? 10,
-					outputSchema: params.output_schema ?? default_output_schema,
-				};
+		const request_body: ExaDeepResearchRequest = {
+			query: sanitize_query(params.query),
+			type: params.search_type === 'deep' ? 'deep' : 'deep-reasoning',
+			numResults: params.limit ?? 10,
+			outputSchema: params.output_schema ?? default_output_schema,
+		};
 
-				if (params.system_prompt) {
-					request_body.systemPrompt = params.system_prompt;
-				}
+		if (params.system_prompt) {
+			request_body.systemPrompt = params.system_prompt;
+		}
 
-				const raw_data = await http_json(
-					this.name,
-					`${config.ai_response.exa_deep_research.base_url}/search`,
-					{
-						method: 'POST',
-						headers: {
-							'x-api-key': api_key,
-							Authorization: `Bearer ${api_key}`,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify(request_body),
-						signal: AbortSignal.timeout(
-							config.ai_response.exa_deep_research.timeout,
-						),
-					},
-				);
-
-				const data = parse_provider_response(
-					this.name,
-					exa_deep_response_schema,
-					raw_data,
-				);
+		// A paid synthesis run is never retried automatically.
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.ai_response.exa_deep_research.base_url}/search`,
+				method: 'POST',
+				headers: {
+					'x-api-key': api_key,
+					Authorization: `Bearer ${api_key}`,
+					'Content-Type': 'application/json',
+				},
+				body: request_body,
+				timeout_ms: config.ai_response.exa_deep_research.timeout,
+				schema: exa_deep_response_schema,
+				operation: 'run deep research',
+				max_retries: 0,
+			},
+			(data) => {
 				const controls = sanitize_exa_control_metadata(data);
 				const answer = stringify_content(data.output.content);
 				const results: SearchResult[] = [
@@ -161,11 +149,7 @@ export class ExaDeepResearchProvider implements SearchProvider {
 
 				set_response_metadata(results, controls, this.name);
 				return results;
-			} catch (error) {
-				handle_provider_error(error, this.name, 'run deep research');
-			}
-		};
-
-		return retry_with_backoff(search_request, { max_retries: 0 });
+			},
+		);
 	}
 }

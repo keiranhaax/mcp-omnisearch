@@ -1,12 +1,7 @@
 import * as v from 'valibot';
-import {
-	handle_provider_error,
-	sanitize_query,
-} from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider_response.js';
+import { sanitize_query } from '../../../common/errors.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import { set_response_metadata } from '../../../common/response_metadata.js';
-import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	apply_search_operators,
 	build_query_with_operators,
@@ -148,97 +143,85 @@ export class TavilySearchProvider implements SearchProvider {
 			);
 		}
 
-		const search_request = async () => {
-			try {
-				// Merge operator-extracted domains with explicit params
-				const include_domains = [
-					...(params.include_domains ?? []),
-					...(mapped_types.includes('site')
-						? (search_params.include_domains ?? [])
-						: []),
-				];
-				const exclude_domains = [
-					...(params.exclude_domains ?? []),
-					...(mapped_types.includes('exclude_site')
-						? (search_params.exclude_domains ?? [])
-						: []),
-				];
+		// Merge operator-extracted domains with explicit params
+		const include_domains = [
+			...(params.include_domains ?? []),
+			...(mapped_types.includes('site')
+				? (search_params.include_domains ?? [])
+				: []),
+		];
+		const exclude_domains = [
+			...(params.exclude_domains ?? []),
+			...(mapped_types.includes('exclude_site')
+				? (search_params.exclude_domains ?? [])
+				: []),
+		];
 
-				const request_body: Record<string, any> = {
-					query: sanitize_query(
-						build_query_with_operators(
-							search_params,
-							undefined,
-							undefined,
-							{ exclude_operators: mapped_types },
-						),
-					),
-					max_results: Math.min(params.limit ?? 5, 20),
-					include_domains:
-						include_domains.length > 0 ? include_domains : [],
-					exclude_domains:
-						exclude_domains.length > 0 ? exclude_domains : [],
-					search_depth: params.search_depth ?? 'basic',
-					topic: params.topic ?? 'general',
-					time_range: params.time_range,
-				};
+		const request_body: Record<string, any> = {
+			query: sanitize_query(
+				build_query_with_operators(
+					search_params,
+					undefined,
+					undefined,
+					{ exclude_operators: mapped_types },
+				),
+			),
+			max_results: Math.min(params.limit ?? 5, 20),
+			include_domains:
+				include_domains.length > 0 ? include_domains : [],
+			exclude_domains:
+				exclude_domains.length > 0 ? exclude_domains : [],
+			search_depth: params.search_depth ?? 'basic',
+			topic: params.topic ?? 'general',
+			time_range: params.time_range,
+		};
 
-				// Map date operators to Tavily's start_date/end_date
-				if (
-					search_params.date_after &&
-					mapped_types.includes('after')
-				) {
-					request_body.start_date = normalize_tavily_date(
-						search_params.date_after,
-					);
-				}
-				if (
-					search_params.date_before &&
-					mapped_types.includes('before')
-				) {
-					request_body.end_date = normalize_tavily_date(
-						search_params.date_before,
-					);
-				}
+		// Map date operators to Tavily's start_date/end_date
+		if (search_params.date_after && mapped_types.includes('after')) {
+			request_body.start_date = normalize_tavily_date(
+				search_params.date_after,
+			);
+		}
+		if (
+			search_params.date_before &&
+			mapped_types.includes('before')
+		) {
+			request_body.end_date = normalize_tavily_date(
+				search_params.date_before,
+			);
+		}
 
-				// Map exact phrases to Tavily's exact_match
-				if (
-					can_map &&
-					search_params.exact_phrases &&
-					search_params.exact_phrases.length > 0
-				) {
-					request_body.exact_match = true;
-				}
+		// Map exact phrases to Tavily's exact_match
+		if (
+			can_map &&
+			search_params.exact_phrases &&
+			search_params.exact_phrases.length > 0
+		) {
+			request_body.exact_match = true;
+		}
 
-				// Map location operator to Tavily's country param
-				if (
-					search_params.location &&
-					mapped_types.includes('location')
-				) {
-					request_body.country = normalize_tavily_country(
-						search_params.location,
-					);
-				}
+		// Map location operator to Tavily's country param
+		if (search_params.location && mapped_types.includes('location')) {
+			request_body.country = normalize_tavily_country(
+				search_params.location,
+			);
+		}
 
-				const raw_data = await http_json(
-					this.name,
-					`${config.search.tavily.base_url}/search`,
-					{
-						method: 'POST',
-						headers: {
-							Authorization: `Bearer ${api_key}`,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify(request_body),
-						signal: AbortSignal.timeout(config.search.tavily.timeout),
-					},
-				);
-				const data = parse_provider_response(
-					this.name,
-					tavily_search_response_schema,
-					raw_data,
-				);
-
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.search.tavily.base_url}/search`,
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${api_key}`,
+					'Content-Type': 'application/json',
+				},
+				body: request_body,
+				timeout_ms: config.search.tavily.timeout,
+				schema: tavily_search_response_schema,
+				operation: 'fetch search results',
+			},
+			(data) => {
 				const results = (data.results ?? []).map((result) => ({
 					title: result.title,
 					url: result.url,
@@ -248,17 +231,7 @@ export class TavilySearchProvider implements SearchProvider {
 				}));
 				set_response_metadata(results, data);
 				return results;
-			} catch (error) {
-				handle_provider_error(
-					error,
-					this.name,
-					'fetch search results',
-				);
-			}
-		};
-
-		return retry_with_backoff(search_request, {
-			timeout_ms: config.search.tavily.timeout,
-		});
+			},
+		);
 	}
 }

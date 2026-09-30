@@ -1,11 +1,6 @@
 import * as v from 'valibot';
-import {
-	handle_provider_error,
-	sanitize_query,
-} from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider_response.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import { sanitize_query } from '../../../common/errors.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import {
 	BaseSearchParams,
 	SearchProvider,
@@ -46,51 +41,37 @@ export class LinkupProvider implements SearchProvider {
 			this.name,
 		);
 
-		const search_request = async () => {
-			try {
-				const request_body: LinkupSearchRequest = {
-					q: sanitize_query(params.query),
-					depth: 'standard',
-					outputType: 'sourcedAnswer',
-				};
+		const request_body: LinkupSearchRequest = {
+			q: sanitize_query(params.query),
+			depth: 'standard',
+			outputType: 'sourcedAnswer',
+		};
 
-				if (
-					params.include_domains &&
-					params.include_domains.length > 0
-				) {
-					request_body.includeDomains = params.include_domains;
-				}
-				if (
-					params.exclude_domains &&
-					params.exclude_domains.length > 0
-				) {
-					request_body.excludeDomains = params.exclude_domains;
-				}
-				if (params.limit) {
-					request_body.maxResults = params.limit;
-				}
+		if (params.include_domains && params.include_domains.length > 0) {
+			request_body.includeDomains = params.include_domains;
+		}
+		if (params.exclude_domains && params.exclude_domains.length > 0) {
+			request_body.excludeDomains = params.exclude_domains;
+		}
+		if (params.limit) {
+			request_body.maxResults = params.limit;
+		}
 
-				const raw_data = await http_json(
-					this.name,
-					`${config.ai_response.linkup.base_url}/search`,
-					{
-						method: 'POST',
-						headers: {
-							Authorization: `Bearer ${api_key}`,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify(request_body),
-						signal: AbortSignal.timeout(
-							config.ai_response.linkup.timeout,
-						),
-					},
-				);
-				const data = parse_provider_response(
-					this.name,
-					linkup_sourced_answer_response_schema,
-					raw_data,
-				);
-
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.ai_response.linkup.base_url}/search`,
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${api_key}`,
+					'Content-Type': 'application/json',
+				},
+				body: request_body,
+				timeout_ms: config.ai_response.linkup.timeout,
+				schema: linkup_sourced_answer_response_schema,
+				operation: 'fetch AI response',
+			},
+			(data) => {
 				const results: SearchResult[] = [
 					{
 						title: 'Linkup AI Answer',
@@ -124,13 +105,7 @@ export class LinkupProvider implements SearchProvider {
 				}
 
 				return results;
-			} catch (error) {
-				handle_provider_error(error, this.name, 'fetch AI response');
-			}
-		};
-
-		return retry_with_backoff(search_request, {
-			timeout_ms: config.ai_response.linkup.timeout,
-		});
+			},
+		);
 	}
 }

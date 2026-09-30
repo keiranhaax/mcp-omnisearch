@@ -1053,9 +1053,10 @@ it('preserves the crawl deadline and stops without recreating the job', async ()
 			isError: true,
 			structuredContent: { ok: false, error: { kind: 'timeout' } },
 		});
+		// The abandoned job is cancelled remotely instead of recreated.
 		expect(
 			fetch_mock.mock.calls.map(([, options]) => options.method),
-		).toEqual(['POST', 'GET']);
+		).toEqual(['POST', 'GET', 'DELETE']);
 	} finally {
 		config.processing.firecrawl_crawl.timeout = original_timeout;
 	}

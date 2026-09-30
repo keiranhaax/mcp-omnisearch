@@ -1,15 +1,11 @@
 import {
-	handle_provider_error,
+	input_error,
 	sanitize_query,
 } from '../../../common/errors.js';
 import * as v from 'valibot';
-import { parse_provider_response } from '../../../common/provider_response.js';
-import { http_json } from '../../../common/http.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import {
 	BaseSearchParams,
-	ErrorType,
-	ProviderError,
 	SearchProvider,
 	SearchResult,
 } from '../../../common/types.js';
@@ -45,8 +41,7 @@ export class YouSearchProvider implements SearchProvider {
 				params.limit < 1 ||
 				params.limit > 100)
 		) {
-			throw new ProviderError(
-				ErrorType.INVALID_INPUT,
+			throw input_error(
 				'limit must be an integer between 1 and 100',
 				this.name,
 			);
@@ -56,49 +51,42 @@ export class YouSearchProvider implements SearchProvider {
 			this.name,
 		);
 
-		const search_request = async () => {
-			try {
-				const query_params = new URLSearchParams({
-					query: sanitize_query(params.query),
-				});
+		const query_params = new URLSearchParams({
+			query: sanitize_query(params.query),
+		});
 
-				if (params.limit) {
-					query_params.set(
-						'count',
-						Math.min(params.limit, 20).toString(),
-					);
-				}
-				if (params.include_domains?.length) {
-					query_params.set(
-						'include_domains',
-						params.include_domains.join(','),
-					);
-				}
-				if (params.exclude_domains?.length) {
-					query_params.set(
-						'exclude_domains',
-						params.exclude_domains.join(','),
-					);
-				}
+		if (params.limit) {
+			query_params.set(
+				'count',
+				Math.min(params.limit, 20).toString(),
+			);
+		}
+		if (params.include_domains?.length) {
+			query_params.set(
+				'include_domains',
+				params.include_domains.join(','),
+			);
+		}
+		if (params.exclude_domains?.length) {
+			query_params.set(
+				'exclude_domains',
+				params.exclude_domains.join(','),
+			);
+		}
 
-				const raw_data = await http_json(
-					this.name,
-					`${config.search.you.base_url}/v1/search?${query_params}`,
-					{
-						method: 'GET',
-						headers: {
-							Authorization: `Bearer ${api_key}`,
-							Accept: 'application/json',
-						},
-						signal: AbortSignal.timeout(config.search.you.timeout),
-					},
-				);
-
-				const data = parse_provider_response(
-					this.name,
-					you_response_schema,
-					raw_data,
-				);
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.search.you.base_url}/v1/search?${query_params}`,
+				headers: {
+					Authorization: `Bearer ${api_key}`,
+					Accept: 'application/json',
+				},
+				timeout_ms: config.search.you.timeout,
+				schema: you_response_schema,
+				operation: 'fetch search results',
+			},
+			(data) => {
 				const results: SearchResult[] = [];
 
 				for (const [type, items] of [
@@ -123,17 +111,7 @@ export class YouSearchProvider implements SearchProvider {
 				}
 
 				return results.slice(0, params.limit ?? 20);
-			} catch (error) {
-				handle_provider_error(
-					error,
-					this.name,
-					'fetch search results',
-				);
-			}
-		};
-
-		return retry_with_backoff(search_request, {
-			timeout_ms: config.search.you.timeout,
-		});
+			},
+		);
 	}
 }

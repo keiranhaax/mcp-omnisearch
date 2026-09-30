@@ -73,10 +73,11 @@ describe('FirecrawlScrapeProvider', () => {
 		expect(JSON.stringify(result)).not.toContain('CONTROL_CANARY');
 		expect(result.content).toBe(markdown);
 		expect(result.raw_contents).toEqual([{ url, content: markdown }]);
+		// The promoted markdown lives in content/raw_contents only.
 		expect(result.metadata.documents).toEqual([
 			{
 				url,
-				markdown,
+				content_format: 'markdown',
 				json: extracted,
 				llm_extraction: extracted,
 				links: [url],
@@ -120,7 +121,7 @@ describe('FirecrawlScrapeProvider', () => {
 			expect(result.metadata.documents).toEqual([
 				{
 					url: 'https://example.com',
-					markdown: 'Actual source',
+					content_format: 'markdown',
 					metadata: {},
 					warning: 'Provider reported a scrape warning',
 				},
@@ -367,10 +368,20 @@ describe('FirecrawlScrapeProvider', () => {
 					'basic',
 					{ formats },
 				);
+			// A string representation promoted into `content` is not
+			// stored a second time; structured json and screenshots stay.
+			const { markdown, ...retained } = data as {
+				markdown?: string;
+			};
 			expect(result.metadata.documents).toEqual([
-				{ url: 'https://example.test', ...data },
+				{
+					url: 'https://example.test',
+					...retained,
+					...(markdown ? { content_format: 'markdown' } : {}),
+				},
 			]);
 			expect(result.content.length).toBeGreaterThan(0);
+			if (markdown) expect(result.content).toBe(markdown);
 		},
 	);
 

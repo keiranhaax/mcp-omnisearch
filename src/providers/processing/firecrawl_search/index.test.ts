@@ -62,20 +62,115 @@ describe('FirecrawlSearchProvider', () => {
 		const [url, options] = fetch_mock.mock.calls[0];
 		const body = JSON.parse(options.body);
 		expect(url).toBe('https://api.firecrawl.dev/v2/search');
+		// Basic depth returns provider snippets; it must not bill a scrape
+		// per hit unless the caller opts in.
 		expect(body).toEqual({
 			query: 'current search APIs',
 			limit: 5,
 			sources: ['web'],
-			scrapeOptions: {
-				formats: ['markdown'],
-				onlyMainContent: true,
-			},
 		});
 		expect(result.content).toContain('Example markdown');
 		expect(result.metadata).toMatchObject({
 			search_id: 'search-1',
 			creditsUsed: 2,
 			source_counts: { web: 1, images: 0, news: 0 },
+		});
+	});
+
+	it('scrapes hits only for advanced depth or explicit formats', async () => {
+		fetch_mock.mockImplementation(
+			async () =>
+				new Response(
+					JSON.stringify({
+						success: true,
+						data: {
+							web: [{ url: 'https://example.com', markdown: 'Body' }],
+						},
+					}),
+				),
+		);
+		const provider = new FirecrawlSearchProvider();
+		const sent = () =>
+			JSON.parse(fetch_mock.mock.calls.at(-1)![1].body);
+
+		await provider.process_content('q', 'advanced');
+		expect(sent().scrapeOptions).toEqual({
+			formats: ['markdown'],
+			onlyMainContent: true,
+		});
+
+		await provider.process_content('q', 'basic', {
+			scrapeOptions: { formats: ['html'], onlyMainContent: false },
+		});
+		expect(sent().scrapeOptions).toEqual({
+			formats: ['html'],
+			onlyMainContent: false,
+		});
+
+		await provider.process_content('q', 'advanced', {
+			scrapeOptions: { formats: [] },
+		});
+		expect(sent()).not.toHaveProperty('scrapeOptions');
+
+		// Scrape-only settings without formats do not trigger scraping.
+		await provider.process_content('q', 'basic', {
+			scrapeOptions: { redactPII: true },
+		});
+		expect(sent()).not.toHaveProperty('scrapeOptions');
+	});
+
+	it('keeps scraped bodies in raw_contents rather than duplicating them in documents', async () => {
+		fetch_mock.mockImplementation(
+			async () =>
+				new Response(
+					JSON.stringify({
+						success: true,
+						data: {
+							web: [
+								{
+									url: 'https://example.com',
+									title: 'Page',
+									description: 'Snippet',
+									markdown: 'Full page body',
+									metadata: { statusCode: 200 },
+								},
+							],
+							news: [
+								{
+									url: 'https://example.com/news',
+									snippet: 'News snippet',
+									html: '<p>News body</p>',
+								},
+							],
+						},
+					}),
+				),
+		);
+		const result =
+			await new FirecrawlSearchProvider().process_content(
+				'q',
+				'advanced',
+			);
+		expect(result.raw_contents).toEqual([
+			{ url: 'https://example.com', content: 'Full page body' },
+			{
+				url: 'https://example.com/news',
+				content: '<p>News body</p>',
+			},
+		]);
+		expect(result.metadata.documents).toEqual({
+			web: [
+				{
+					url: 'https://example.com',
+					title: 'Page',
+					description: 'Snippet',
+					metadata: { statusCode: 200 },
+				},
+			],
+			images: [],
+			news: [
+				{ url: 'https://example.com/news', snippet: 'News snippet' },
+			],
 		});
 	});
 

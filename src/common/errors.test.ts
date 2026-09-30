@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	create_error_response,
 	handle_provider_error,
 	handle_rate_limit,
+	input_error,
 	local_fetch_error,
 	MAX_PUBLIC_ERROR_LENGTH,
 	public_error_metadata,
+	retention_error,
 	sanitize_query,
 } from './errors.js';
 import { ErrorType, ProviderError } from './types.js';
@@ -140,6 +142,85 @@ describe('handle_provider_error', () => {
 				details: { retryable: false },
 			}),
 		);
+	});
+
+	it('keeps the original failure reachable as a non-enumerable cause', () => {
+		const original = new TypeError('PRIVATE_MAPPING_INPUT');
+		let wrapped: unknown;
+		try {
+			handle_provider_error(original, 'tavily', 'parse response');
+		} catch (error) {
+			wrapped = error;
+		}
+		expect((wrapped as Error).cause).toBe(original);
+		expect(Object.keys(wrapped as object)).not.toContain('cause');
+		expect(JSON.stringify(wrapped)).not.toContain(
+			'PRIVATE_MAPPING_INPUT',
+		);
+		expect(create_error_response(wrapped).error).not.toContain(
+			'PRIVATE_MAPPING_INPUT',
+		);
+	});
+});
+
+describe('input_error', () => {
+	it('marks schema-derived validation text as safe to show', () => {
+		const error = input_error(
+			'count must be an integer between 1 and 50',
+			'brave_news',
+		);
+		expect(error).toMatchObject({
+			type: ErrorType.INVALID_INPUT,
+			details: { retryable: false, public: true },
+		});
+		expect(is_retryable_error(error)).toBe(false);
+		expect(create_error_response(error).error).toBe(
+			'brave_news error [INVALID_INPUT]: count must be an integer between 1 and 50',
+		);
+		expect(public_error_metadata(error).kind).toBe('bad_input');
+	});
+
+	it('still hides unmarked validation messages that are not allowlisted', () => {
+		const error = new ProviderError(
+			ErrorType.INVALID_INPUT,
+			'Rejected input: PRIVATE_PATH',
+			'test_provider',
+		);
+		expect(create_error_response(error).error).toBe(
+			'test_provider error [INVALID_INPUT]: Invalid input. Check required fields and allowed values in the tool schema.',
+		);
+	});
+});
+
+describe('retention_error', () => {
+	it('reports the failure class on stderr and keeps the cause private', () => {
+		const stderr = vi
+			.spyOn(console, 'error')
+			.mockImplementation(() => {});
+		const failure = Object.assign(new Error('PRIVATE_PATH'), {
+			code: 'ENOSPC',
+		});
+		const error = retention_error('presentation', failure, {
+			job_id: 'job-1',
+		});
+		expect(error).toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			provider: 'presentation',
+			message:
+				'Cannot retain complete canonical result; no evidence was returned',
+			details: {
+				retryable: false,
+				cause: 'storage',
+				job_id: 'job-1',
+			},
+		});
+		expect(error.cause).toBe(failure);
+		expect(JSON.stringify(error)).not.toContain('PRIVATE_PATH');
+		expect(stderr).toHaveBeenCalledWith(
+			'Result retention failed for presentation: ENOSPC',
+		);
+		expect(public_error_metadata(error).kind).toBe('storage_failure');
+		stderr.mockRestore();
 	});
 
 	it.each(['AbortError', 'TimeoutError'])(
@@ -359,8 +440,13 @@ describe('public_error_metadata', () => {
 			headers: { authorization: 'SECRET' },
 			recovery: 'PRIVATE_RECOVERY',
 		};
-		for (const provider of [
+		const job_providers = [
 			'firecrawl_agent',
+			'firecrawl_crawl',
+			'firecrawl_extract',
+		];
+		for (const provider of [
+			...job_providers,
 			'tavily_research',
 			'test_provider',
 		]) {
@@ -377,7 +463,7 @@ describe('public_error_metadata', () => {
 				retryable: true,
 				provider,
 				http_status: 503,
-				...(provider === 'firecrawl_agent' ? { job_id } : {}),
+				...(job_providers.includes(provider) ? { job_id } : {}),
 				...(provider === 'tavily_research'
 					? { request_id: details.request_id }
 					: {}),

@@ -490,7 +490,7 @@
 								}
 							},
 							"required": [],
-							"description": "Optional scrape settings applied to Firecrawl search results."
+							"description": "Optional scrape settings applied to Firecrawl search results. Basic depth returns snippets without scraping; advanced depth or explicit formats scrape each hit (one scrape credit per result)."
 						}
 					},
 					"required": [],

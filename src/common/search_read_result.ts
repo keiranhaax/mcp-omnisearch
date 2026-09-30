@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { select_passages } from './passages.js';
 import { store_result } from './result_store.js';
+import { retention_error } from './errors.js';
 import { ErrorType, ProviderError } from './types.js';
 
 const metadata_schema = v.looseObject({
@@ -60,7 +61,9 @@ const source_schema = v.looseObject({
 	omitted: v.optional(v.boolean()),
 	extraction: v.optional(
 		v.looseObject({
-			content: v.string(),
+			// Page text lives in `content` above; only provider metadata
+			// is carried here so evidence is not stored twice.
+			content: v.optional(v.string()),
 			source_provider: v.string(),
 			metadata: v.record(v.string(), v.unknown()),
 			raw_contents: v.optional(
@@ -114,13 +117,8 @@ export const present_search_read = (
 	let stored;
 	try {
 		stored = store_result(JSON.stringify(result, null, 2));
-	} catch {
-		throw new ProviderError(
-			ErrorType.PROVIDER_ERROR,
-			'Cannot retain complete canonical result; no evidence was returned',
-			'presentation',
-			{ retryable: false, cause: 'storage' },
-		);
+	} catch (failure) {
+		throw retention_error('presentation', failure);
 	}
 	const retained = {
 		presentation: 'retained',

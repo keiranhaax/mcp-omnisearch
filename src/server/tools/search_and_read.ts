@@ -1,6 +1,7 @@
 import { McpServer } from 'tmcp';
 import * as v from 'valibot';
 import {
+	input_error,
 	public_error_metadata,
 	type PublicErrorMetadata,
 } from '../../common/errors.js';
@@ -40,6 +41,8 @@ const modes: Record<string, string> = {
 	exa: 'contents',
 	firecrawl: 'scrape',
 };
+// Matches the per-provider slot limit; more would only queue in http.ts.
+const READ_CONCURRENCY = 4;
 const workflow_output_schema: v.GenericSchema<{
 	ok: boolean;
 	data?: unknown;
@@ -142,11 +145,9 @@ export const register_search_and_read = (
 			const signal = combine_request_signal(deadline.signal);
 			try {
 				if (!query.trim() || search_limit < max_sources)
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
+					throw input_error(
 						'Invalid search/read limits',
 						'search_and_read',
-						{ retryable: false },
 					);
 				const search = get_search_provider(search_provider);
 				const extract = get_extract_provider(
@@ -154,11 +155,9 @@ export const register_search_and_read = (
 					modes[extract_provider],
 				);
 				if (!search || !extract)
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
+					throw input_error(
 						'Provider is not available',
 						'search_and_read',
-						{ retryable: false },
 					);
 				const result = await run_with_request_context(
 					signal,
@@ -169,18 +168,30 @@ export const register_search_and_read = (
 								query,
 								limit: search_limit,
 							});
-							mark_provider_success('search', search_provider);
+							mark_provider_success('search', search_provider, {
+								tool: 'search_and_read',
+								usage: get_response_metadata(hits)?.usage,
+							});
 						} catch (error) {
 							if (
 								!signal?.aborted &&
 								public_error_metadata(error).kind !== 'request_budget'
 							)
-								mark_provider_error('search', search_provider, error);
+								mark_provider_error(
+									'search',
+									search_provider,
+									error,
+									{
+										tool: 'search_and_read',
+									},
+								);
 							throw error;
 						}
 						const seen = new Set<string>();
 						let duplicates_removed = 0;
 						const sources: SearchReadResult['sources'] = [];
+						// Indexes of sources still to read, in ranked order.
+						const pending: number[] = [];
 						for (const hit of hits.slice(0, search_limit)) {
 							if (seen.has(hit.url)) {
 								duplicates_removed++;
@@ -209,25 +220,34 @@ export const register_search_and_read = (
 								};
 								continue;
 							}
-							if (signal?.aborted || budget.used >= budget.limit) {
-								source.status = 'skipped';
-								source.error = {
-									kind: signal?.aborted
-										? signal.reason?.name === 'TimeoutError'
-											? 'timeout'
-											: 'cancelled'
-										: 'request_budget',
-									retryable: false,
-								};
-								continue;
-							}
+							pending.push(sources.length - 1);
+						}
+						const skip = (
+							source: SearchReadResult['sources'][number],
+							kind: 'timeout' | 'cancelled' | 'request_budget',
+						) => {
+							source.status = 'skipped';
+							source.error = { kind, retryable: false };
+						};
+						const abort_kind = () =>
+							signal?.reason?.name === 'TimeoutError'
+								? 'timeout'
+								: 'cancelled';
+						const read = async (
+							source: SearchReadResult['sources'][number],
+						) => {
 							try {
 								const extracted = await extract.process_content(
-									hit.url,
+									source.url!,
 									'basic',
 								);
 								source.content = extracted.content;
-								source.extraction = { ...extracted };
+								// Provider metadata only: the page text is already in
+								// `content`, and repeating it inflates the stored result.
+								source.extraction = {
+									source_provider: extracted.source_provider,
+									metadata: extracted.metadata,
+								};
 								const request_metadata =
 									get_response_metadata(extracted);
 								source.request_metadata = request_metadata
@@ -243,7 +263,14 @@ export const register_search_and_read = (
 										extract_provider,
 										{ retryable: false },
 									);
-								mark_provider_success('processing', extract_provider);
+								mark_provider_success(
+									'processing',
+									extract_provider,
+									{
+										tool: 'search_and_read',
+										usage: request_metadata?.usage,
+									},
+								);
 							} catch (error) {
 								source.status = 'error';
 								source.error = public_error_metadata(error);
@@ -255,9 +282,51 @@ export const register_search_and_read = (
 										'processing',
 										extract_provider,
 										error,
+										{ tool: 'search_and_read' },
 									);
 							}
-						}
+						};
+						// Bounded parallel reads. Each in-flight read reserves one
+						// request of the remaining budget, so a read only starts
+						// when at least one attempt is guaranteed to fit; the rest
+						// wait for a completion and re-check, or are skipped once
+						// nothing is in flight. Source order stays ranked.
+						let in_flight = 0;
+						const waiters: Array<() => void> = [];
+						const wait_for_capacity = () =>
+							new Promise<void>((resolve) => waiters.push(resolve));
+						const worker = async () => {
+							while (pending.length) {
+								if (signal?.aborted) {
+									skip(sources[pending.shift()!], abort_kind());
+									continue;
+								}
+								if (budget.used + in_flight >= budget.limit) {
+									if (in_flight === 0) {
+										skip(sources[pending.shift()!], 'request_budget');
+										continue;
+									}
+									await wait_for_capacity();
+									continue;
+								}
+								const source = sources[pending.shift()!];
+								in_flight++;
+								try {
+									await read(source);
+								} finally {
+									in_flight--;
+									for (const wake of waiters.splice(0)) wake();
+								}
+							}
+						};
+						await Promise.all(
+							Array.from(
+								{
+									length: Math.min(READ_CONCURRENCY, pending.length),
+								},
+								worker,
+							),
+						);
 						return {
 							presentation: 'complete' as const,
 							sources,

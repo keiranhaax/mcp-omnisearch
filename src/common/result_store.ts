@@ -14,6 +14,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import { with_cause } from './errors.js';
 import { ErrorType, ProviderError } from './types.js';
 
 const DEFAULT_RESULT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -275,9 +276,14 @@ const decode_result = (fd: number, size: number): Buffer => {
 		});
 		if (bytes.length !== expected) throw new Error();
 		return bytes;
-	} catch {
-		throw result_error(
-			'Stored result is corrupt or exceeds the logical limit',
+	} catch (failure) {
+		// Keep the fs/zlib failure reachable for diagnostics; an EIO or
+		// EBADF is not the same operator problem as a corrupt file.
+		throw with_cause(
+			result_error(
+				'Stored result is corrupt or exceeds the logical limit',
+			),
+			failure,
 		);
 	}
 };

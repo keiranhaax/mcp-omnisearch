@@ -70,6 +70,9 @@ export class FirecrawlMapProvider implements ProcessingProvider {
 					},
 					config.processing.firecrawl_map.timeout,
 					firecrawl_map_response_schema,
+					undefined,
+					// Mapping a site is an idempotent lookup.
+					{ cacheable: true },
 				);
 
 				validate_firecrawl_response(

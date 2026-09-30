@@ -4,7 +4,7 @@ import { store_result } from './result_store.js';
 import { select_passages } from './passages.js';
 import { get_response_metadata } from './response_metadata.js';
 import { ErrorType, ProviderError } from './types.js';
-import { LegacyRetentionError } from './errors.js';
+import { LegacyRetentionError, retention_error } from './errors.js';
 
 export const presentation_schema = v.object({
 	response_mode: v.optional(
@@ -195,13 +195,8 @@ export const present_result = (
 	let stored;
 	try {
 		stored = store_result(JSON.stringify(full, null, 2));
-	} catch {
-		throw new ProviderError(
-			ErrorType.PROVIDER_ERROR,
-			'Cannot retain complete canonical result; no evidence was returned',
-			'presentation',
-			{ retryable: false, cause: 'storage' },
-		);
+	} catch (failure) {
+		throw retention_error('presentation', failure);
 	}
 	const retained = {
 		response_mode: options.response_mode,

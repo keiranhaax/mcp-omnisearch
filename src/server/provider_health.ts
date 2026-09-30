@@ -5,6 +5,11 @@ import {
 	safe_endpoint,
 	type PublicErrorKind,
 } from '../common/errors.js';
+import {
+	record_provider_outcome,
+	reset_provider_metrics,
+	type ProviderUsage,
+} from './provider_metrics.js';
 
 export type ProviderCategory =
 	| 'search'
@@ -63,9 +68,17 @@ export const register_provider = (
 	state.registered = true;
 };
 
+/** Optional per-call facts recorded into the metrics counters. */
+export interface ProviderCallOutcome {
+	tool?: string;
+	elapsed_ms?: number | null;
+	usage?: ProviderUsage | null;
+}
+
 export const mark_provider_success = (
 	category: ProviderCategory,
 	provider: string,
+	outcome: ProviderCallOutcome = {},
 ) => {
 	const state = ensure_state(category, provider);
 	state.last_runtime_status = 'ok';
@@ -76,6 +89,14 @@ export const mark_provider_success = (
 	delete state.last_error_type;
 	delete state.last_error_kind;
 	delete state.last_endpoint;
+	record_provider_outcome({
+		category,
+		provider,
+		tool: outcome.tool,
+		ok: true,
+		elapsed_ms: outcome.elapsed_ms ?? undefined,
+		usage: outcome.usage,
+	});
 };
 
 const map_error_to_status = (
@@ -94,6 +115,7 @@ export const mark_provider_error = (
 	category: ProviderCategory,
 	provider: string,
 	error: unknown,
+	outcome: ProviderCallOutcome = {},
 ) => {
 	if (error instanceof Error && error.name === 'TimeoutError') {
 		error = new ProviderError(
@@ -103,6 +125,16 @@ export const mark_provider_error = (
 			{ retryable: false, cause: 'timeout' },
 		);
 	}
+	// Every failed call counts in the metrics, including validation and
+	// cancellation; only genuine provider faults change health below.
+	record_provider_outcome({
+		category,
+		provider,
+		tool: outcome.tool,
+		ok: false,
+		elapsed_ms: outcome.elapsed_ms ?? undefined,
+		kind: public_error_metadata(error).kind,
+	});
 	if (!(error instanceof ProviderError)) return;
 	const { kind } = public_error_metadata(error);
 	if (kind === 'cancelled' || kind === 'storage_failure') return;
@@ -196,4 +228,5 @@ export const get_provider_health_summary = () => {
 
 export const reset_provider_health = () => {
 	health_state.clear();
+	reset_provider_metrics();
 };

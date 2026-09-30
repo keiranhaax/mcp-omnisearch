@@ -1,13 +1,11 @@
 import * as v from 'valibot';
-import { parse_provider_response } from '../../../common/provider_response.js';
-import { http_json } from '../../../common/http.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import {
 	ErrorType,
 	ProcessingResult,
 	ProviderError,
 } from '../../../common/types.js';
-import { handle_provider_error } from '../../../common/errors.js';
-import { retry_with_backoff } from '../../../common/retry.js';
+import { input_error } from '../../../common/errors.js';
 import { validate_api_key } from '../../../common/validation.js';
 import { config } from '../../../config/env.js';
 
@@ -112,8 +110,7 @@ const build_location_headers = (
 
 const bounded_integer = (value: number, min: number, max: number) => {
 	if (!Number.isInteger(value) || value < min || value > max) {
-		throw new ProviderError(
-			ErrorType.INVALID_INPUT,
+		throw input_error(
 			`Value must be an integer between ${min} and ${max}`,
 			'brave_llm_context',
 		);
@@ -151,115 +148,104 @@ export class BraveLlmContextProvider {
 				bounded_integer(options[key], min, max);
 		}
 
-		const context_request = async () => {
-			const api_key = validate_api_key(
-				config.processing.brave_llm_context.api_key,
-				this.name,
+		const api_key = validate_api_key(
+			config.processing.brave_llm_context.api_key,
+			this.name,
+		);
+
+		const request_body: Record<string, any> = {
+			q: query.trim(),
+		};
+
+		if (options?.count !== undefined) {
+			request_body.count = bounded_integer(options.count, 1, 50);
+		}
+
+		if (options?.maximum_number_of_urls !== undefined) {
+			request_body.maximum_number_of_urls = bounded_integer(
+				options.maximum_number_of_urls,
+				1,
+				50,
 			);
+		}
 
-			try {
-				const request_body: Record<string, any> = {
-					q: query.trim(),
-				};
+		if (options?.maximum_number_of_tokens !== undefined) {
+			request_body.maximum_number_of_tokens = bounded_integer(
+				options.maximum_number_of_tokens,
+				1024,
+				32768,
+			);
+		}
 
-				if (options?.count !== undefined) {
-					request_body.count = bounded_integer(options.count, 1, 50);
-				}
+		if (options?.maximum_number_of_snippets !== undefined) {
+			request_body.maximum_number_of_snippets = bounded_integer(
+				options.maximum_number_of_snippets,
+				1,
+				256,
+			);
+		}
 
-				if (options?.maximum_number_of_urls !== undefined) {
-					request_body.maximum_number_of_urls = bounded_integer(
-						options.maximum_number_of_urls,
-						1,
-						50,
-					);
-				}
+		if (options?.context_threshold_mode) {
+			request_body.context_threshold_mode =
+				options.context_threshold_mode;
+		}
 
-				if (options?.maximum_number_of_tokens !== undefined) {
-					request_body.maximum_number_of_tokens = bounded_integer(
-						options.maximum_number_of_tokens,
-						1024,
-						32768,
-					);
-				}
+		if (options?.maximum_number_of_tokens_per_url !== undefined) {
+			request_body.maximum_number_of_tokens_per_url = bounded_integer(
+				options.maximum_number_of_tokens_per_url,
+				512,
+				8192,
+			);
+		}
 
-				if (options?.maximum_number_of_snippets !== undefined) {
-					request_body.maximum_number_of_snippets = bounded_integer(
-						options.maximum_number_of_snippets,
-						1,
-						256,
-					);
-				}
-
-				if (options?.context_threshold_mode) {
-					request_body.context_threshold_mode =
-						options.context_threshold_mode;
-				}
-
-				if (options?.maximum_number_of_tokens_per_url !== undefined) {
-					request_body.maximum_number_of_tokens_per_url =
-						bounded_integer(
-							options.maximum_number_of_tokens_per_url,
-							512,
-							8192,
-						);
-				}
-
-				if (
-					options?.maximum_number_of_snippets_per_url !== undefined
-				) {
-					request_body.maximum_number_of_snippets_per_url =
-						bounded_integer(
-							options.maximum_number_of_snippets_per_url,
-							1,
-							100,
-						);
-				}
-
-				if (options?.freshness) {
-					request_body.freshness = options.freshness;
-				}
-
-				if (options?.country) {
-					request_body.country = options.country;
-				}
-
-				if (options?.search_lang) {
-					request_body.search_lang = options.search_lang;
-				}
-
-				if (options?.enable_local !== undefined) {
-					request_body.enable_local = options.enable_local;
-				}
-
-				if (options?.goggles) {
-					request_body.goggles = options.goggles;
-				}
-
-				const location_headers = build_location_headers(options);
-
-				const raw_response = await http_json(
-					this.name,
-					config.processing.brave_llm_context.base_url,
-					{
-						method: 'POST',
-						headers: {
-							'Content-Type': 'application/json',
-							Accept: 'application/json',
-							'X-Subscription-Token': api_key,
-							...location_headers,
-						},
-						body: JSON.stringify(request_body),
-						signal: AbortSignal.timeout(
-							config.processing.brave_llm_context.timeout,
-						),
-					},
+		if (options?.maximum_number_of_snippets_per_url !== undefined) {
+			request_body.maximum_number_of_snippets_per_url =
+				bounded_integer(
+					options.maximum_number_of_snippets_per_url,
+					1,
+					100,
 				);
+		}
 
-				const response = parse_provider_response(
-					this.name,
-					context_response_schema,
-					raw_response,
-				);
+		if (options?.freshness) {
+			request_body.freshness = options.freshness;
+		}
+
+		if (options?.country) {
+			request_body.country = options.country;
+		}
+
+		if (options?.search_lang) {
+			request_body.search_lang = options.search_lang;
+		}
+
+		if (options?.enable_local !== undefined) {
+			request_body.enable_local = options.enable_local;
+		}
+
+		if (options?.goggles) {
+			request_body.goggles = options.goggles;
+		}
+
+		const location_headers = build_location_headers(options);
+
+		return provider_json_request(
+			this.name,
+			{
+				url: config.processing.brave_llm_context.base_url,
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+					'X-Subscription-Token': api_key,
+					...location_headers,
+				},
+				body: request_body,
+				timeout_ms: config.processing.brave_llm_context.timeout,
+				schema: context_response_schema,
+				operation: 'fetch LLM context',
+			},
+			(response) => {
 				const results = [
 					...(response.grounding.generic ?? []),
 					...(response.grounding.poi ? [response.grounding.poi] : []),
@@ -317,14 +303,8 @@ export class BraveLlmContextProvider {
 					},
 					source_provider: this.name,
 				};
-			} catch (error) {
-				handle_provider_error(error, this.name, 'fetch LLM context');
-			}
-		};
-
-		return retry_with_backoff(context_request, {
-			timeout_ms: config.processing.brave_llm_context.timeout,
-		});
+			},
+		);
 	}
 }
 

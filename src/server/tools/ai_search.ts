@@ -1,7 +1,10 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
-import { public_error_metadata } from '../../common/errors.js';
+import {
+	input_error,
+	public_error_metadata,
+} from '../../common/errors.js';
 import { request_metadata } from '../../common/response_metadata.js';
 import { get_job_failure } from '../../common/job_state.js';
 import {
@@ -210,8 +213,7 @@ export const register_ai_search = (
 				}
 				const selected = providers.get(provider);
 				if (!selected) {
-					throw new ProviderError(
-						ErrorType.INVALID_INPUT,
+					throw input_error(
 						`Provider "${provider}" is not available. Available: ${Array.from(providers.keys()).join(', ')}`,
 						'ai_search',
 					);
@@ -244,7 +246,11 @@ export const register_ai_search = (
 					'ai_search',
 					metadata,
 				);
-				mark_provider_success('ai_response', provider);
+				mark_provider_success('ai_response', provider, {
+					tool: 'ai_search',
+					elapsed_ms: metadata.elapsed_ms,
+					usage: metadata.usage,
+				});
 				return {
 					_meta: {
 						omnisearch: {
@@ -262,7 +268,10 @@ export const register_ai_search = (
 			} catch (error) {
 				if (!get_job_failure(error))
 					throw_if_aborted(get_request_signal());
-				mark_provider_error('ai_response', provider, error);
+				mark_provider_error('ai_response', provider, error, {
+					tool: 'ai_search',
+					elapsed_ms: Math.round(performance.now() - started),
+				});
 				const metadata = {
 					...request_metadata(
 						error,

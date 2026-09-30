@@ -78,7 +78,7 @@ describe('Firecrawl whole-job deadlines', () => {
 
 	it.each(providers)(
 		'$name includes start time in its total budget',
-		async ({ run }) => {
+		async ({ name, run }) => {
 			fetch_mock.mockImplementationOnce(
 				() =>
 					new Promise((resolve) =>
@@ -110,8 +110,14 @@ describe('Firecrawl whole-job deadlines', () => {
 			await vi.advanceTimersByTimeAsync(100);
 			expect(settled).toBe(true);
 			await result;
-			expect(fetch_mock).toHaveBeenCalledTimes(1);
 			expect(fetch_mock.mock.calls[0][1].signal.aborted).toBe(true);
+			// A crawl accepted before the deadline is cancelled remotely
+			// instead of being left running; nothing is ever recreated.
+			expect(
+				fetch_mock.mock.calls
+					.slice(1)
+					.map(([, options]) => options.method),
+			).toEqual(name === 'firecrawl_crawl' ? ['DELETE'] : []);
 		},
 	);
 	it.each(providers)(

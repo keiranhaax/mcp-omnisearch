@@ -13,6 +13,7 @@ vi.mock('./http.js', () => ({
 }));
 
 import {
+	cancel_firecrawl_job,
 	make_firecrawl_request,
 	poll_firecrawl_job,
 	validate_firecrawl_response,
@@ -580,5 +581,124 @@ describe('poll_firecrawl_job', () => {
 
 		await vi.advanceTimersByTimeAsync(20);
 		await rejection;
+	});
+
+	it('attaches the job id and a non-retryable cause when polls are exhausted', async () => {
+		http_json_mock.mockResolvedValue({
+			success: true,
+			status: 'processing',
+		});
+
+		const promise = poll_firecrawl_job(
+			{
+				provider_name: 'firecrawl',
+				status_url: 'https://api.firecrawl.dev/v2/jobs/123',
+				api_key: 'secret-key',
+				job_id: 'job-123',
+				max_attempts: 1,
+				poll_interval: 10,
+				timeout: 5000,
+			},
+			firecrawl_job_schema,
+		);
+		const rejection = expect(promise).rejects.toMatchObject({
+			type: ErrorType.PROVIDER_ERROR,
+			details: {
+				job_id: 'job-123',
+				cause: 'poll_exhausted',
+				retryable: false,
+			},
+		});
+
+		await vi.advanceTimersByTimeAsync(10);
+		await rejection;
+	});
+});
+
+describe('make_firecrawl_request per-call timer', () => {
+	beforeEach(() => {
+		http_json_mock.mockReset();
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	it('applies the per-call timeout even when a caller signal is supplied', async () => {
+		http_json_mock.mockImplementation(
+			(_provider, _url, options) =>
+				new Promise((_resolve, reject) => {
+					const signal = options?.signal as AbortSignal;
+					signal.addEventListener('abort', () =>
+						reject(signal.reason),
+					);
+				}),
+		);
+		const caller = new AbortController();
+		const promise = make_firecrawl_request(
+			'firecrawl',
+			'https://api.firecrawl.dev/v2/scrape',
+			'secret-key',
+			{ url: 'https://example.com' },
+			50,
+			firecrawl_job_schema,
+			caller.signal,
+		);
+		const rejection = expect(promise).rejects.toMatchObject({
+			name: 'TimeoutError',
+		});
+		await vi.advanceTimersByTimeAsync(50);
+		await rejection;
+		expect(caller.signal.aborted).toBe(false);
+	});
+});
+
+describe('cancel_firecrawl_job', () => {
+	beforeEach(() => {
+		http_json_mock.mockReset();
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('sends a DELETE outside an already-aborted request context', async () => {
+		http_json_mock.mockResolvedValue({ success: true });
+		const client = new AbortController();
+		client.abort();
+		await expect(
+			run_with_request_context(client.signal, () =>
+				cancel_firecrawl_job(
+					'firecrawl',
+					'https://api.firecrawl.dev/v2/crawl/job-1',
+					'secret-key',
+				),
+			),
+		).resolves.toBe(true);
+		expect(http_json_mock).toHaveBeenCalledWith(
+			'firecrawl',
+			'https://api.firecrawl.dev/v2/crawl/job-1',
+			expect.objectContaining({
+				method: 'DELETE',
+				redirect: 'error',
+				headers: { Authorization: 'Bearer secret-key' },
+			}),
+		);
+		const sent_signal = http_json_mock.mock.calls[0][2]
+			?.signal as AbortSignal;
+		expect(sent_signal.aborted).toBe(false);
+	});
+
+	it('swallows failures so the original outcome is what the caller sees', async () => {
+		http_json_mock.mockRejectedValue(new Error('upstream down'));
+		await expect(
+			cancel_firecrawl_job(
+				'firecrawl',
+				'https://api.firecrawl.dev/v2/crawl/job-1',
+				'secret-key',
+			),
+		).resolves.toBe(false);
 	});
 });

@@ -1,10 +1,7 @@
 import * as v from 'valibot';
-import { handle_provider_error } from '../../../common/errors.js';
-import { http_json } from '../../../common/http.js';
-import { parse_provider_response } from '../../../common/provider_response.js';
+import { provider_json_request } from '../../../common/provider_request.js';
 import { sanitize_exa_control_metadata } from '../../../common/provider_sanitization.js';
 import { set_response_metadata } from '../../../common/response_metadata.js';
-import { retry_with_backoff } from '../../../common/retry.js';
 import {
 	ErrorType,
 	ProcessingProvider,
@@ -82,43 +79,34 @@ export class ExaSimilarProvider implements ProcessingProvider {
 		// Validate URL format
 		validate_processing_urls(target_url, this.name);
 
-		const process_request = async () => {
-			try {
-				const request_body: ExaSimilarRequest = {
-					url: target_url,
-					numResults: extract_depth === 'advanced' ? 15 : 10,
-					contents: {
-						text: {
-							maxCharacters:
-								extract_depth === 'advanced' ? 3000 : 1500,
-						},
-						highlights: extract_depth === 'advanced',
-						summary: extract_depth === 'advanced',
-					},
-				};
+		const request_body: ExaSimilarRequest = {
+			url: target_url,
+			numResults: extract_depth === 'advanced' ? 15 : 10,
+			contents: {
+				text: {
+					maxCharacters: extract_depth === 'advanced' ? 3000 : 1500,
+				},
+				highlights: extract_depth === 'advanced',
+				summary: extract_depth === 'advanced',
+			},
+		};
 
-				const raw_data = await http_json(
-					this.name,
-					`${config.processing.exa_similar.base_url}/findSimilar`,
-					{
-						method: 'POST',
-						headers: {
-							'x-api-key': api_key,
-							Authorization: `Bearer ${api_key}`,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify(request_body),
-						signal: AbortSignal.timeout(
-							config.processing.exa_similar.timeout,
-						),
-					},
-				);
-				const data = parse_provider_response(
-					this.name,
-					exa_similar_response_schema,
-					raw_data,
-				);
-
+		return provider_json_request(
+			this.name,
+			{
+				url: `${config.processing.exa_similar.base_url}/findSimilar`,
+				method: 'POST',
+				headers: {
+					'x-api-key': api_key,
+					Authorization: `Bearer ${api_key}`,
+					'Content-Type': 'application/json',
+				},
+				body: request_body,
+				timeout_ms: config.processing.exa_similar.timeout,
+				schema: exa_similar_response_schema,
+				operation: 'find similar pages',
+			},
+			(data) => {
 				const controls = sanitize_exa_control_metadata(data);
 
 				// Combine all content
@@ -195,13 +183,7 @@ export class ExaSimilarProvider implements ProcessingProvider {
 				};
 				set_response_metadata(result, controls, this.name);
 				return result;
-			} catch (error) {
-				handle_provider_error(error, this.name, 'find similar pages');
-			}
-		};
-
-		return retry_with_backoff(process_request, {
-			timeout_ms: config.processing.exa_similar.timeout,
-		});
+			},
+		);
 	}
 }
