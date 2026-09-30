@@ -6,6 +6,9 @@ patchedDependencies:
   'tmcp@1.19.4': patches/tmcp@1.19.4.patch
   'mcp-proxy@6.7.3': patches/mcp-proxy@6.7.3.patch
 overrides:
+  # mcp-proxy -> pipenet pins axios 1.19.0, which carries 12 advisories
+  # (7 high, 5 moderate). 1.20.0 is the smallest patched release in major 1.
+  'axios@>=1.0.0 <1.20.0': 1.20.0
   'js-yaml@<3.15.2': 3.15.2
   'js-yaml@>=4.0.0 <4.3.2': 4.3.2
   # vite-plus 0.2.x pins the whole vitest family at 4.1.10; the mocker
