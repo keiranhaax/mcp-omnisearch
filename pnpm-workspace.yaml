@@ -6,8 +6,21 @@ patchedDependencies:
   'tmcp@1.19.4': patches/tmcp@1.19.4.patch
   'mcp-proxy@6.7.3': patches/mcp-proxy@6.7.3.patch
 overrides:
-  'js-yaml@<3.15.1': 3.15.1
-  'js-yaml@>=4.0.0 <4.3.1': 4.3.1
+  'js-yaml@<3.15.2': 3.15.2
+  'js-yaml@>=4.0.0 <4.3.2': 4.3.2
+  # vite-plus 0.2.x pins the whole vitest family at 4.1.10; the mocker
+  # advisory (GHSA path traversal via redirect mock) is fixed in 4.1.11
+  # and the packages require matching versions, so move them together.
+  'vitest@4.1.10': 4.1.11
+  '@vitest/browser@4.1.10': 4.1.11
+  '@vitest/browser-preview@4.1.10': 4.1.11
+  '@vitest/expect@4.1.10': 4.1.11
+  '@vitest/mocker@4.1.10': 4.1.11
+  '@vitest/pretty-format@4.1.10': 4.1.11
+  '@vitest/runner@4.1.10': 4.1.11
+  '@vitest/snapshot@4.1.10': 4.1.11
+  '@vitest/spy@4.1.10': 4.1.11
+  '@vitest/utils@4.1.10': 4.1.11
   'nanoid@>=3.0.0 <3.3.18': 3.3.18
   'picomatch@<2.3.2': 2.3.2
   'postcss@<8.5.23': 8.5.23
