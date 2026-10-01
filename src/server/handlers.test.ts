@@ -70,6 +70,7 @@ describe('setup_handlers', () => {
 			enabled: false,
 			entries: 0,
 		});
+		expect(body.spend_caps).toEqual({ enabled: false });
 	});
 	it('discovers and dispatches provider-info through the real resource template API', async () => {
 		reset_available_providers();

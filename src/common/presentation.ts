@@ -2,7 +2,10 @@ import * as v from 'valibot';
 import { handle_large_result } from './results.js';
 import { store_result } from './result_store.js';
 import { select_passages } from './passages.js';
-import { get_response_metadata } from './response_metadata.js';
+import {
+	get_response_metadata,
+	usage_source,
+} from './response_metadata.js';
 import { ErrorType, ProviderError } from './types.js';
 import { LegacyRetentionError, retention_error } from './errors.js';
 
@@ -181,7 +184,7 @@ export const present_result = (
 			elapsed_ms: options.elapsed_ms,
 			...reported,
 			usage: reported?.usage ?? null,
-			usage_source: reported?.usage ? 'provider_reported' : 'unknown',
+			usage_source: usage_source(reported),
 			local_completeness: 'complete',
 			provider_partial: partial,
 			provider_page_completeness: 'unknown',

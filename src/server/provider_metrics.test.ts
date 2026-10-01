@@ -73,6 +73,55 @@ describe('provider metrics', () => {
 		);
 	});
 
+	it('counts a cache hit as a call but never as spend', () => {
+		record_provider_outcome({
+			category: 'search',
+			provider: 'fixture',
+			tool: 'web_search',
+			ok: true,
+			elapsed_ms: 1,
+			usage: { usd: 0.007 },
+		});
+		record_provider_outcome({
+			category: 'search',
+			provider: 'fixture',
+			tool: 'web_search',
+			ok: true,
+			elapsed_ms: 1,
+			usage: { usd: 0.007 },
+			cached: true,
+		});
+		mark_provider_success('search', 'fixture', {
+			tool: 'web_search',
+			usage: { usd: 0.007 },
+			cached: true,
+		});
+		const snapshot = get_provider_metrics_snapshot();
+		expect(snapshot.providers['search:fixture']).toMatchObject({
+			calls: 3,
+			ok: 3,
+			cache_hits: 2,
+			usage: { usd: 0.007, credits: 0, reported_calls: 1 },
+		});
+		expect(snapshot.tools.web_search).toMatchObject({
+			calls: 3,
+			cache_hits: 2,
+			usage: { usd: 0.007, reported_calls: 1 },
+		});
+		vi.stubEnv('OMNISEARCH_CALL_LOG', '1');
+		record_provider_outcome({
+			category: 'search',
+			provider: 'fixture',
+			tool: 'web_search',
+			ok: true,
+			elapsed_ms: 2,
+			cached: true,
+		});
+		expect(console.error).toHaveBeenCalledWith(
+			'omnisearch call tool=web_search provider=search/fixture outcome=ok ms=2 cached=1',
+		);
+	});
+
 	it('reports null latency when nothing was measured and ignores bad numbers', () => {
 		record_provider_outcome({
 			category: 'processing',

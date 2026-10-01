@@ -5,6 +5,7 @@ import {
 	cache_key,
 	cache_set,
 	cache_settings,
+	mark_served_from_cache,
 } from './http_cache.js';
 import {
 	combine_request_signal,
@@ -153,7 +154,9 @@ export const http_json = async <T = any>(
 			// A hit still counts toward the response byte budget, but not
 			// toward the request budget: no provider call was made.
 			consume_response_bytes(Buffer.byteLength(cached, 'utf8'));
-			return JSON.parse(cached) as T;
+			const body = JSON.parse(cached);
+			mark_served_from_cache(body);
+			return body as T;
 		}
 	}
 	let res: Response;

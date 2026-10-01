@@ -368,6 +368,7 @@ source control.
 | `OMNISEARCH_RESULT_TTL_MS`          | Result retention, default 24 hours and maximum 7 days           |
 | `OMNISEARCH_RESULT_MAX_BYTES`       | Per-result limit, default 25 MiB                                |
 | `OMNISEARCH_RESULT_STORE_MAX_BYTES` | Total quota, default 256 MiB with oldest-first eviction         |
+| `OMNISEARCH_SPEND_CAPS`             | Optional per-account spending caps; see below                   |
 
 The result directory is created with mode `0700`; stored results use
 mode `0600`. `result_read` returns at most 500 lines and 12,000 UTF-8
@@ -380,6 +381,29 @@ text and bounded section outline are navigation aids. The
 inline/offload threshold is 80,000 UTF-8 bytes including JSON escaping
 in the MCP text payload. Near the storage quota, only the canonical
 JSON view is stored; optional readable copies are omitted.
+
+### Spending caps
+
+`OMNISEARCH_SPEND_CAPS` is off by default. Set it to a comma-separated
+list of `account:daily|monthly:usd|credits=amount` entries, for
+example
+`exa:daily:usd=1.50,exa:monthly:usd=20,tavily:monthly:credits=1000`.
+An account is a credential family (`exa`, `tavily`, `firecrawl`,
+`brave`), which covers every provider sharing that key, or one exact
+provider name such as `exa_deep_research`. Periods are UTC days and
+months; USD and credits are tracked separately and never converted. A
+malformed entry fails startup.
+
+Only provider-reported usage from real requests counts: Exa returns
+USD, Tavily and Firecrawl Agent return credits, and HTTP cache hits
+and repeated job status reads add nothing. Providers that report no
+usage can only be stopped with a cap of `0`. Running totals persist in
+`spend-ledger.json` inside the result directory (mode `0600`, atomic
+writes). When a cap is reached, every tool that would start paid work
+on that account returns a `spend_cap` error naming the account, cap
+and `reset_at`; nothing is rerouted, and job status or cancel actions
+stay available. The `omnisearch://providers/status` resource reports
+`spend_caps` with current totals, caps and reset times per account.
 
 ### GitHub token
 

@@ -7,7 +7,12 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { reset_http_cache } from './http_cache.js';
 import { provider_json_request } from './provider_request.js';
+import {
+	get_response_metadata,
+	set_response_metadata,
+} from './response_metadata.js';
 import { ErrorType, ProviderError } from './types.js';
 
 const fetch_mock = vi.fn();
@@ -30,7 +35,51 @@ describe('provider_json_request', () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
+		vi.unstubAllEnvs();
 		vi.restoreAllMocks();
+		reset_http_cache();
+	});
+
+	it('marks a mapped result as cached and drops its replayed usage', async () => {
+		vi.stubEnv('OMNISEARCH_HTTP_CACHE_BYTES', '1048576');
+		reset_http_cache();
+		fetch_mock.mockImplementation(async () =>
+			Response.json({ value: 1, usage: { credits: 3 } }),
+		);
+		const map = (data: { value: number }) => {
+			const result = { value: data.value };
+			set_response_metadata(result, { usage: { credits: 3 } });
+			return result;
+		};
+		const first = await provider_json_request(
+			'fixture',
+			request({ schema: v.looseObject({ value: v.number() }) }),
+			map,
+		);
+		expect(get_response_metadata(first)).toEqual({
+			usage: { credits: 3 },
+		});
+		const second = await provider_json_request(
+			'fixture',
+			request({ schema: v.looseObject({ value: v.number() }) }),
+			map,
+		);
+		expect(fetch_mock).toHaveBeenCalledTimes(1);
+		expect(second).toEqual({ value: 1 });
+		expect(get_response_metadata(second)).toEqual({ cached: true });
+		// An opted-out request is never a replay.
+		const third = await provider_json_request(
+			'fixture',
+			request({
+				schema: v.looseObject({ value: v.number() }),
+				cacheable: false,
+			}),
+			map,
+		);
+		expect(fetch_mock).toHaveBeenCalledTimes(2);
+		expect(get_response_metadata(third)).toEqual({
+			usage: { credits: 3 },
+		});
 	});
 
 	it('sends the request, validates the body and maps it', async () => {

@@ -42,10 +42,12 @@ const source_schema = v.looseObject({
 				'storage_failure',
 				'upstream_failure',
 				'request_budget',
+				'spend_cap',
 			]),
 			retryable: v.boolean(),
 			provider: v.optional(v.string()),
 			http_status: v.optional(v.number()),
+			reset_at: v.optional(v.string()),
 		}),
 	),
 	passages: v.optional(

@@ -78,6 +78,18 @@ let stored_bytes = 0;
 let hits = 0;
 let misses = 0;
 
+// A replayed body carries the provider's original usage figures, which
+// were paid for once already. Tag the parsed object so the request
+// layer can strip that usage before it is reported or counted.
+const replayed = new WeakSet<object>();
+
+export const mark_served_from_cache = (body: unknown): void => {
+	if (body !== null && typeof body === 'object') replayed.add(body);
+};
+
+export const was_served_from_cache = (body: unknown): boolean =>
+	body !== null && typeof body === 'object' && replayed.has(body);
+
 const evict = (key: string) => {
 	const entry = entries.get(key);
 	if (!entry) return;

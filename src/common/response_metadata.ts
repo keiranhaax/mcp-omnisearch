@@ -4,6 +4,8 @@ export interface ProviderResponseMetadata {
 	request_id?: string;
 	response_time_seconds?: number;
 	usage?: { credits: number } | { usd: number };
+	/** The body was replayed from the HTTP cache; no provider call. */
+	cached?: true;
 	job?: JobMetadata;
 }
 
@@ -71,6 +73,18 @@ export const get_response_metadata = (
 ): ProviderResponseMetadata | undefined =>
 	response_metadata.get(result);
 
+/**
+ * Mark a result as served from the HTTP cache. The replayed body still
+ * carries the provider's original usage figures, which were charged on
+ * the request that filled the cache, so they are dropped here rather
+ * than reported or counted a second time.
+ */
+export const mark_response_cached = (result: object): void => {
+	const { usage: _usage, ...rest } =
+		response_metadata.get(result) ?? {};
+	response_metadata.set(result, { ...rest, cached: true });
+};
+
 export const set_response_job = (
 	result: object,
 	job: JobMetadata,
@@ -88,6 +102,15 @@ export const copy_response_metadata = (
 	const metadata = response_metadata.get(from);
 	if (metadata) response_metadata.set(to, { ...metadata });
 };
+
+export const usage_source = (
+	reported: ProviderResponseMetadata | undefined,
+): 'provider_reported' | 'cache' | 'unknown' =>
+	reported?.usage
+		? 'provider_reported'
+		: reported?.cached
+			? 'cache'
+			: 'unknown';
 
 export const request_metadata = (
 	result: unknown,
@@ -108,7 +131,7 @@ export const request_metadata = (
 				: null,
 		...reported,
 		usage: reported?.usage ?? null,
-		usage_source: reported?.usage ? 'provider_reported' : 'unknown',
+		usage_source: usage_source(reported),
 		usage_scope: reported?.usage
 			? reported.job
 				? 'job'

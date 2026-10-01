@@ -10,6 +10,7 @@ import {
 	reset_provider_metrics,
 	type ProviderUsage,
 } from './provider_metrics.js';
+import { record_spend } from './spend_caps.js';
 
 export type ProviderCategory =
 	| 'search'
@@ -73,6 +74,10 @@ export interface ProviderCallOutcome {
 	tool?: string;
 	elapsed_ms?: number | null;
 	usage?: ProviderUsage | null;
+	/** The result was replayed from the HTTP cache. */
+	cached?: boolean;
+	/** Usage is cumulative for this job; only increments are spend. */
+	job_id?: string;
 }
 
 export const mark_provider_success = (
@@ -95,8 +100,11 @@ export const mark_provider_success = (
 		tool: outcome.tool,
 		ok: true,
 		elapsed_ms: outcome.elapsed_ms ?? undefined,
-		usage: outcome.usage,
+		usage: outcome.cached ? null : outcome.usage,
+		cached: outcome.cached === true,
 	});
+	if (!outcome.cached && outcome.usage)
+		record_spend(provider, outcome.usage, { job_id: outcome.job_id });
 };
 
 const map_error_to_status = (
@@ -137,7 +145,12 @@ export const mark_provider_error = (
 	});
 	if (!(error instanceof ProviderError)) return;
 	const { kind } = public_error_metadata(error);
-	if (kind === 'cancelled' || kind === 'storage_failure') return;
+	if (
+		kind === 'cancelled' ||
+		kind === 'storage_failure' ||
+		kind === 'spend_cap'
+	)
+		return;
 	if (error.type === ErrorType.INVALID_INPUT) return;
 
 	const state = ensure_state(category, provider);

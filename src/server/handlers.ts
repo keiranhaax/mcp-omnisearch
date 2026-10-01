@@ -8,6 +8,7 @@ import {
 	get_provider_health_summary,
 } from './provider_health.js';
 import { get_provider_metrics_snapshot } from './provider_metrics.js';
+import { get_spend_snapshot } from './spend_caps.js';
 
 export const setup_handlers = (server: McpServer<GenericSchema>) => {
 	// Provider Status Resource
@@ -44,6 +45,7 @@ export const setup_handlers = (server: McpServer<GenericSchema>) => {
 								resource_usage: get_resource_snapshot(),
 								metrics: get_provider_metrics_snapshot(),
 								http_cache: get_http_cache_snapshot(),
+								spend_caps: get_spend_snapshot(),
 								available_count: {
 									search: available_providers.search.size,
 									ai_response: available_providers.ai_response.size,

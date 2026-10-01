@@ -26,6 +26,7 @@ import {
 	mark_provider_error,
 	mark_provider_success,
 } from '../provider_health.js';
+import { assert_spend_within_cap } from '../spend_caps.js';
 import { describe_ai_search } from './descriptions.js';
 
 // Concrete provider imports
@@ -219,6 +220,8 @@ export const register_ai_search = (
 					);
 				}
 
+				// Reading an existing job costs nothing; only new work is capped.
+				if (action !== 'status') assert_spend_within_cap(provider);
 				const results =
 					action === 'status'
 						? await (selected as TavilyResearchProvider).status({
@@ -250,6 +253,8 @@ export const register_ai_search = (
 					tool: 'ai_search',
 					elapsed_ms: metadata.elapsed_ms,
 					usage: metadata.usage,
+					cached: metadata.cached === true,
+					...(metadata.job ? { job_id: metadata.job.id } : {}),
 				});
 				return {
 					_meta: {

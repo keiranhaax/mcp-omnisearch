@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	get_response_metadata,
+	mark_response_cached,
 	set_response_metadata,
 	request_metadata,
 	set_response_job,
@@ -161,6 +162,35 @@ describe('P2 metadata provenance', () => {
 			});
 		},
 	);
+	it('reports a cached replay as unpaid, keeping the other provenance', () => {
+		const result: unknown[] = [];
+		set_response_metadata(
+			result,
+			{ requestId: 'safe-id', costDollars: { total: 0.007 } },
+			'exa',
+		);
+		mark_response_cached(result);
+		expect(get_response_metadata(result)).toEqual({
+			request_id: 'safe-id',
+			cached: true,
+		});
+		expect(
+			request_metadata(result, 'exa', 'search', 1),
+		).toMatchObject({
+			request_id: 'safe-id',
+			cached: true,
+			usage: null,
+			usage_source: 'cache',
+			usage_scope: 'unknown',
+		});
+		// Marking a result that never carried metadata is still a cache hit.
+		const bare = {};
+		mark_response_cached(bare);
+		expect(request_metadata(bare, 'exa', 'search', 1)).toMatchObject({
+			usage: null,
+			usage_source: 'cache',
+		});
+	});
 	it('treats repeated Agent observations as job usage, not additional charges', () => {
 		const result = {};
 		set_response_job(result, {

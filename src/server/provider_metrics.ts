@@ -22,12 +22,15 @@ export interface ProviderOutcome {
 	elapsed_ms?: number;
 	kind?: PublicErrorKind;
 	usage?: ProviderUsage | null;
+	/** Served from the HTTP cache: counted as a call, never as spend. */
+	cached?: boolean;
 }
 
 interface Counter {
 	calls: number;
 	ok: number;
 	failed: number;
+	cache_hits: number;
 	errors_by_kind: Partial<Record<PublicErrorKind, number>>;
 	latency_samples: number[];
 	latency_total_ms: number;
@@ -40,6 +43,7 @@ export interface MetricsSnapshot {
 	calls: number;
 	ok: number;
 	failed: number;
+	cache_hits: number;
 	errors_by_kind: Partial<Record<PublicErrorKind, number>>;
 	latency_ms: {
 		samples: number;
@@ -68,6 +72,7 @@ const counter = (
 			calls: 0,
 			ok: 0,
 			failed: 0,
+			cache_hits: 0,
 			errors_by_kind: {},
 			latency_samples: [],
 			latency_total_ms: 0,
@@ -99,7 +104,8 @@ const apply = (state: Counter, outcome: ProviderOutcome) => {
 			state.latency_samples.shift();
 		state.latency_samples.push(elapsed);
 	}
-	if (outcome.usage) {
+	if (outcome.cached) state.cache_hits++;
+	if (outcome.usage && !outcome.cached) {
 		let reported = false;
 		if (is_measurement(outcome.usage.credits)) {
 			state.usage.credits += outcome.usage.credits;
@@ -138,6 +144,7 @@ export const record_provider_outcome = (
 			fields.push(`credits=${outcome.usage!.credits}`);
 		if (is_measurement(outcome.usage?.usd))
 			fields.push(`usd=${outcome.usage!.usd}`);
+		if (outcome.cached) fields.push('cached=1');
 		console.error(`omnisearch call ${fields.join(' ')}`);
 	}
 };
@@ -161,6 +168,7 @@ const snapshot_of = (state: Counter): MetricsSnapshot => {
 		calls: state.calls,
 		ok: state.ok,
 		failed: state.failed,
+		cache_hits: state.cache_hits,
 		errors_by_kind: { ...state.errors_by_kind },
 		latency_ms: {
 			samples: sorted.length,

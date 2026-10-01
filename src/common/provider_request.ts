@@ -1,7 +1,9 @@
 import * as v from 'valibot';
 import { handle_provider_error } from './errors.js';
 import { http_json } from './http.js';
+import { was_served_from_cache } from './http_cache.js';
 import { parse_provider_response } from './provider_response.js';
+import { mark_response_cached } from './response_metadata.js';
 import { retry_with_backoff } from './retry.js';
 
 /**
@@ -61,9 +63,18 @@ export const provider_json_request = <
 					signal: AbortSignal.timeout(request.timeout_ms),
 					cacheable: request.cacheable ?? true,
 				});
-				return await map(
+				const result = await map(
 					parse_provider_response(provider, request.schema, raw),
 				);
+				// A replayed body made no provider call: its usage figures
+				// were already charged and must not be reported again.
+				if (
+					was_served_from_cache(raw) &&
+					result !== null &&
+					typeof result === 'object'
+				)
+					mark_response_cached(result);
+				return result;
 			} catch (error) {
 				handle_provider_error(error, provider, request.operation);
 			}

@@ -25,6 +25,7 @@ export const create_output_schema = <T extends v.GenericSchema>(
 					'bad_input',
 					'storage_failure',
 					'request_budget',
+					'spend_cap',
 					'upstream_failure',
 				]),
 				retryable: v.boolean(),
@@ -32,6 +33,7 @@ export const create_output_schema = <T extends v.GenericSchema>(
 				http_status: v.optional(v.number()),
 				job_id: v.optional(v.string()),
 				request_id: v.optional(v.string()),
+				reset_at: v.optional(v.string()),
 			}),
 		),
 	});
@@ -95,7 +97,11 @@ const presentation_result_schema = v.looseObject({
 				v.object({ usd: v.number() }),
 			]),
 		),
-		usage_source: v.picklist(['provider_reported', 'unknown']),
+		usage_source: v.picklist([
+			'provider_reported',
+			'cache',
+			'unknown',
+		]),
 		local_completeness: v.picklist([
 			'complete',
 			'retained',

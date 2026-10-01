@@ -27,6 +27,7 @@ import {
 	mark_provider_error,
 	mark_provider_success,
 } from '../provider_health.js';
+import { assert_spend_within_cap } from '../spend_caps.js';
 import {
 	get_available_providers as search_providers,
 	get_search_provider,
@@ -164,6 +165,7 @@ export const register_search_and_read = (
 					async () => {
 						let hits;
 						try {
+							assert_spend_within_cap(search_provider);
 							hits = await search.search({
 								query,
 								limit: search_limit,
@@ -171,6 +173,7 @@ export const register_search_and_read = (
 							mark_provider_success('search', search_provider, {
 								tool: 'search_and_read',
 								usage: get_response_metadata(hits)?.usage,
+								cached: get_response_metadata(hits)?.cached === true,
 							});
 						} catch (error) {
 							if (
@@ -237,6 +240,7 @@ export const register_search_and_read = (
 							source: SearchReadResult['sources'][number],
 						) => {
 							try {
+								assert_spend_within_cap(extract_provider);
 								const extracted = await extract.process_content(
 									source.url!,
 									'basic',
@@ -269,6 +273,7 @@ export const register_search_and_read = (
 									{
 										tool: 'search_and_read',
 										usage: request_metadata?.usage,
+										cached: request_metadata?.cached === true,
 									},
 								);
 							} catch (error) {

@@ -123,7 +123,8 @@ for variable in \
   OMNISEARCH_RESULT_STORE_MAX_BYTES \
   OMNISEARCH_HTTP_CACHE_BYTES \
   OMNISEARCH_HTTP_CACHE_TTL_MS \
-  OMNISEARCH_CALL_LOG
+  OMNISEARCH_CALL_LOG \
+  OMNISEARCH_SPEND_CAPS
 do
   value="${!variable:-}"
   if [[ -n "${value}" ]]; then

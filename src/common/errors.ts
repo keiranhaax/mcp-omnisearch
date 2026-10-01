@@ -149,6 +149,7 @@ export type PublicErrorKind =
 	| 'bad_input'
 	| 'storage_failure'
 	| 'request_budget'
+	| 'spend_cap'
 	| 'upstream_failure';
 
 export interface PublicErrorMetadata {
@@ -159,6 +160,8 @@ export interface PublicErrorMetadata {
 	http_status?: number;
 	job_id?: string;
 	request_id?: string;
+	/** When a reached spending cap next resets, ISO 8601 UTC. */
+	reset_at?: string;
 }
 
 const safe_identifier = (
@@ -216,6 +219,14 @@ export const public_error_metadata = (
 		metadata.kind = 'storage_failure';
 	} else if (details?.cause === 'request_budget') {
 		metadata.kind = 'request_budget';
+	} else if (details?.cause === 'spend_cap') {
+		metadata.kind = 'spend_cap';
+		const reset_time = details.reset_time;
+		if (
+			reset_time instanceof Date &&
+			Number.isFinite(reset_time.getTime())
+		)
+			metadata.reset_at = reset_time.toISOString();
 	} else {
 		switch (error.type) {
 			case ErrorType.ENTITLEMENT_REQUIRED:
@@ -409,7 +420,13 @@ export const public_error_message = (
 				return 'Invalid URL provided. Use a public HTTP(S) URL without credentials.';
 			return 'Invalid input. Check required fields and allowed values in the tool schema.';
 		default: {
-			if (safe_messages.has(error.message)) return error.message;
+			// `public` marks text built only from operator configuration and
+			// the clock (spending caps), never from provider or caller data.
+			if (
+				safe_messages.has(error.message) ||
+				error.details?.public === true
+			)
+				return error.message;
 			const status = error.details?.status;
 			if (
 				Number.isInteger(status) &&

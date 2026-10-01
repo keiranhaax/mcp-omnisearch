@@ -66,6 +66,47 @@ it('distinguishes local storage failure from upstream failure', () => {
 	).toMatchObject({ kind: 'storage_failure', retryable: false });
 });
 
+it('classifies a reached spending cap with its reset time and shows the local message', () => {
+	const error = new ProviderError(
+		ErrorType.PROVIDER_ERROR,
+		'Spending cap reached for exa: 1 usd per UTC day; resets at 2026-10-02T00:00:00.000Z',
+		'exa',
+		{
+			cause: 'spend_cap',
+			retryable: false,
+			public: true,
+			reset_time: new Date('2026-10-02T00:00:00.000Z'),
+			spent: 1.2,
+		},
+	);
+	expect(public_error_metadata(error)).toEqual({
+		kind: 'spend_cap',
+		retryable: false,
+		provider: 'exa',
+		reset_at: '2026-10-02T00:00:00.000Z',
+	});
+	expect(create_error_response(error)).toEqual({
+		error:
+			'exa error [PROVIDER_ERROR]: Spending cap reached for exa: 1 usd per UTC day; resets at 2026-10-02T00:00:00.000Z',
+	});
+	// Without the public marker a provider-side message stays hidden, and
+	// an unusable reset time is simply omitted.
+	const hidden = new ProviderError(
+		ErrorType.PROVIDER_ERROR,
+		'PRIVATE upstream text',
+		'exa',
+		{ cause: 'spend_cap', retryable: false, reset_time: 'soon' },
+	);
+	expect(public_error_metadata(hidden)).toEqual({
+		kind: 'spend_cap',
+		retryable: false,
+		provider: 'exa',
+	});
+	expect(create_error_response(hidden).error).not.toContain(
+		'PRIVATE',
+	);
+});
+
 describe('handle_rate_limit', () => {
 	it('preserves a safe timeout message from an outer operation deadline', () => {
 		expect(

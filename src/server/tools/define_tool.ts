@@ -19,6 +19,7 @@ import {
 	mark_provider_success,
 	type ProviderCategory,
 } from '../provider_health.js';
+import { assert_spend_within_cap } from '../spend_caps.js';
 
 /**
  * Shared registration for provider-backed tools. The public contract
@@ -60,11 +61,19 @@ interface PresentationInput {
 }
 
 // Provider-reported usage travels on the result object; read it before
-// presentation replaces that object with a rendered view.
-const reported_usage = (result: unknown) =>
-	result && typeof result === 'object'
-		? (get_response_metadata(result)?.usage ?? null)
-		: null;
+// presentation replaces that object with a rendered view. A cached
+// replay carries no usage: that call was charged when the cache filled.
+const reported_outcome = (result: unknown) => {
+	const metadata =
+		result && typeof result === 'object'
+			? get_response_metadata(result)
+			: undefined;
+	return {
+		usage: metadata?.cached ? null : (metadata?.usage ?? null),
+		cached: metadata?.cached === true,
+		...(metadata?.job ? { job_id: metadata.job.id } : {}),
+	};
+};
 
 const resolve_provider = <TSchema extends GenericSchema>(
 	contract: ToolContract<TSchema>,
@@ -108,6 +117,7 @@ export const define_presented_tool = <TSchema extends GenericSchema>(
 					response_mode: input.response_mode,
 					output_budget_bytes: input.output_budget_bytes,
 				});
+				assert_spend_within_cap(provider);
 				const outcome = await run(input, { started });
 				const elapsed_ms = Math.round(performance.now() - started);
 				const presented = present_result(outcome.result, {
@@ -123,7 +133,7 @@ export const define_presented_tool = <TSchema extends GenericSchema>(
 				mark_provider_success(contract.category, provider, {
 					tool: contract.name,
 					elapsed_ms,
-					usage: reported_usage(outcome.result),
+					...reported_outcome(outcome.result),
 				});
 				return tool_success(presented);
 			} catch (error) {
@@ -162,6 +172,7 @@ export const define_legacy_tool = <TSchema extends GenericSchema>(
 			const provider = resolve_provider(contract, input);
 			const started = performance.now();
 			try {
+				assert_spend_within_cap(provider);
 				const result = await run(input);
 				const safe_result = handle_large_result(
 					result,
@@ -170,7 +181,7 @@ export const define_legacy_tool = <TSchema extends GenericSchema>(
 				mark_provider_success(contract.category, provider, {
 					tool: contract.name,
 					elapsed_ms: Math.round(performance.now() - started),
-					usage: reported_usage(result),
+					...reported_outcome(result),
 				});
 				return {
 					content: [

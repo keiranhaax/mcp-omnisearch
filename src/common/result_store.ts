@@ -107,7 +107,7 @@ export const get_result_storage_limit = () =>
 		MAX_LOGICAL_BYTES,
 	);
 
-const ensure_result_dir = () => {
+export const ensure_result_dir = () => {
 	const result_dir = get_result_dir();
 	mkdirSync(result_dir, { recursive: true, mode: 0o700 });
 	chmodSync(result_dir, 0o700);
