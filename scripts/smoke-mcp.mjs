@@ -232,6 +232,9 @@ try {
 			'web_search_fused',
 		],
 	);
+	const webOutput = legacy.find(
+		(t) => t.name === 'web_search',
+	).outputSchema;
 	const fused = legacy.find((t) => t.name === 'web_search_fused');
 	assert.notDeepEqual(fused.outputSchema, webOutput);
 	assert.deepEqual(fused.inputSchema.required, [
@@ -244,9 +247,6 @@ try {
 			.provider.enum,
 	);
 	assert.equal(fused.inputSchema.additionalProperties, false);
-	const webOutput = legacy.find(
-		(t) => t.name === 'web_search',
-	).outputSchema;
 	assert.deepEqual(
 		legacy.find((t) => t.name === 'web_extract').outputSchema,
 		webOutput,
