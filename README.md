@@ -369,6 +369,7 @@ source control.
 | `OMNISEARCH_RESULT_MAX_BYTES`       | Per-result limit, default 25 MiB                                |
 | `OMNISEARCH_RESULT_STORE_MAX_BYTES` | Total quota, default 256 MiB with oldest-first eviction         |
 | `OMNISEARCH_SPEND_CAPS`             | Optional per-account spending caps; see below                   |
+| `OMNISEARCH_PROVIDER_COOLDOWN_MS`   | Default provider cooldown, 60000; `0` disables; see below       |
 
 The result directory is created with mode `0700`; stored results use
 mode `0600`. `result_read` returns at most 500 lines and 12,000 UTF-8
@@ -404,6 +405,25 @@ on that account returns a `spend_cap` error naming the account, cap
 and `reset_at`; nothing is rerouted, and job status or cancel actions
 stay available. The `omnisearch://providers/status` resource reports
 `spend_caps` with current totals, caps and reset times per account.
+
+### Provider cooldown
+
+When a provider call ends, after its retries, in a rate limit (HTTP
+429, or a provider's own rate-limit signal) or a 5xx, that provider
+enters a short in-memory cooldown. The window is the provider's
+`Retry-After` when present, clamped to 15 minutes, otherwise
+`OMNISEARCH_PROVIDER_COOLDOWN_MS` (default 60000; `0` disables the
+feature). Authentication, entitlement, validation, local timeouts and
+policy refusals never start one. While cooling, tools that would start
+new work for that provider return a `provider_cooldown` error with
+`retry_at` and the triggering `trigger_status`; nothing is rerouted,
+and job status or cancel actions stay available. In `search_and_read`
+a cooling extract provider is one failed source. The
+`omnisearch://providers/status` resource shows `cooldown_until` per
+provider while a window is active. The unit is the same category and
+provider pair that provider health tracks, so Tavily extraction and
+Tavily search cool down independently. A restart clears every
+cooldown.
 
 ### GitHub token
 

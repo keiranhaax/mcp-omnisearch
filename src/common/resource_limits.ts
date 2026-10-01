@@ -27,12 +27,15 @@ const provider_family = (name: string) => {
 	}
 	return name;
 };
+// Local back-pressure, not a provider refusal: the cause lets the
+// cooldown classifier tell the two apart without changing the public
+// kind, retry behaviour or health handling.
 const busy = (provider: string) =>
 	new ProviderError(
 		ErrorType.RATE_LIMIT,
 		'Provider concurrency limit reached',
 		provider,
-		{ retryable: false },
+		{ retryable: false, cause: 'concurrency_limit' },
 	);
 
 const acquire = async (

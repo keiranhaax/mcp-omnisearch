@@ -150,6 +150,7 @@ export type PublicErrorKind =
 	| 'storage_failure'
 	| 'request_budget'
 	| 'spend_cap'
+	| 'provider_cooldown'
 	| 'upstream_failure';
 
 export interface PublicErrorMetadata {
@@ -162,6 +163,10 @@ export interface PublicErrorMetadata {
 	request_id?: string;
 	/** When a reached spending cap next resets, ISO 8601 UTC. */
 	reset_at?: string;
+	/** When a cooling-down provider accepts new work, ISO 8601 UTC. */
+	retry_at?: string;
+	/** HTTP status that started the cooldown, when the provider sent one. */
+	trigger_status?: number;
 }
 
 const safe_identifier = (
@@ -227,6 +232,22 @@ export const public_error_metadata = (
 			Number.isFinite(reset_time.getTime())
 		)
 			metadata.reset_at = reset_time.toISOString();
+	} else if (details?.cause === 'provider_cooldown') {
+		metadata.kind = 'provider_cooldown';
+		const retry_time = details.retry_time;
+		if (
+			retry_time instanceof Date &&
+			Number.isFinite(retry_time.getTime())
+		)
+			metadata.retry_at = retry_time.toISOString();
+		const trigger_status = details.trigger_status;
+		if (
+			typeof trigger_status === 'number' &&
+			Number.isInteger(trigger_status) &&
+			trigger_status >= 100 &&
+			trigger_status <= 599
+		)
+			metadata.trigger_status = trigger_status;
 	} else {
 		switch (error.type) {
 			case ErrorType.ENTITLEMENT_REQUIRED:

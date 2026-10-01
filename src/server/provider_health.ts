@@ -10,6 +10,11 @@ import {
 	reset_provider_metrics,
 	type ProviderUsage,
 } from './provider_metrics.js';
+import {
+	get_provider_cooldown,
+	note_provider_failure,
+	reset_provider_cooldowns,
+} from './provider_cooldown.js';
 import { record_spend } from './spend_caps.js';
 
 export type ProviderCategory =
@@ -36,6 +41,9 @@ export interface ProviderHealthState {
 	last_error_kind?: PublicErrorKind;
 	last_endpoint?: string;
 	last_success_at?: string;
+	/** Present only while new paid work for the provider is refused. */
+	cooldown_until?: string;
+	cooldown_status?: number;
 }
 
 const health_state = new Map<string, ProviderHealthState>();
@@ -144,11 +152,15 @@ export const mark_provider_error = (
 		kind: public_error_metadata(error).kind,
 	});
 	if (!(error instanceof ProviderError)) return;
+	// A rate limit or 5xx that survived the retries opens a cooldown;
+	// the classifier ignores policy refusals, so this cannot self-feed.
+	note_provider_failure(category, provider, error);
 	const { kind } = public_error_metadata(error);
 	if (
 		kind === 'cancelled' ||
 		kind === 'storage_failure' ||
-		kind === 'spend_cap'
+		kind === 'spend_cap' ||
+		kind === 'provider_cooldown'
 	)
 		return;
 	if (error.type === ErrorType.INVALID_INPUT) return;
@@ -194,12 +206,26 @@ const get_effective_runtime_status = (
 
 const decorate_state = (
 	state: ProviderHealthState,
-): ProviderHealthState => ({
-	...state,
-	active_error:
-		get_effective_runtime_status(state) !== 'ok' &&
-		state.last_runtime_status !== 'unknown',
-});
+): ProviderHealthState => {
+	const cooldown = get_provider_cooldown(
+		state.category,
+		state.provider,
+	);
+	return {
+		...state,
+		active_error:
+			get_effective_runtime_status(state) !== 'ok' &&
+			state.last_runtime_status !== 'unknown',
+		...(cooldown
+			? {
+					cooldown_until: cooldown.until.toISOString(),
+					...(cooldown.status !== undefined
+						? { cooldown_status: cooldown.status }
+						: {}),
+				}
+			: {}),
+	};
+};
 
 export const get_provider_health_snapshot = () => {
 	const by_category: Record<
@@ -242,4 +268,5 @@ export const get_provider_health_summary = () => {
 export const reset_provider_health = () => {
 	health_state.clear();
 	reset_provider_metrics();
+	reset_provider_cooldowns();
 };

@@ -19,6 +19,7 @@ import {
 	mark_provider_success,
 	type ProviderCategory,
 } from '../provider_health.js';
+import { assert_provider_not_cooling } from '../provider_cooldown.js';
 import { assert_spend_within_cap } from '../spend_caps.js';
 
 /**
@@ -118,6 +119,7 @@ export const define_presented_tool = <TSchema extends GenericSchema>(
 					output_budget_bytes: input.output_budget_bytes,
 				});
 				assert_spend_within_cap(provider);
+				assert_provider_not_cooling(contract.category, provider);
 				const outcome = await run(input, { started });
 				const elapsed_ms = Math.round(performance.now() - started);
 				const presented = present_result(outcome.result, {
@@ -173,6 +175,7 @@ export const define_legacy_tool = <TSchema extends GenericSchema>(
 			const started = performance.now();
 			try {
 				assert_spend_within_cap(provider);
+				assert_provider_not_cooling(contract.category, provider);
 				const result = await run(input);
 				const safe_result = handle_large_result(
 					result,

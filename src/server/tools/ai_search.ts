@@ -26,6 +26,7 @@ import {
 	mark_provider_error,
 	mark_provider_success,
 } from '../provider_health.js';
+import { assert_provider_not_cooling } from '../provider_cooldown.js';
 import { assert_spend_within_cap } from '../spend_caps.js';
 import { describe_ai_search } from './descriptions.js';
 
@@ -221,7 +222,10 @@ export const register_ai_search = (
 				}
 
 				// Reading an existing job costs nothing; only new work is capped.
-				if (action !== 'status') assert_spend_within_cap(provider);
+				if (action !== 'status') {
+					assert_spend_within_cap(provider);
+					assert_provider_not_cooling('ai_response', provider);
+				}
 				const results =
 					action === 'status'
 						? await (selected as TavilyResearchProvider).status({

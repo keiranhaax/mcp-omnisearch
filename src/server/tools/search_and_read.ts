@@ -27,6 +27,7 @@ import {
 	mark_provider_error,
 	mark_provider_success,
 } from '../provider_health.js';
+import { assert_provider_not_cooling } from '../provider_cooldown.js';
 import { assert_spend_within_cap } from '../spend_caps.js';
 import {
 	get_available_providers as search_providers,
@@ -166,6 +167,7 @@ export const register_search_and_read = (
 						let hits;
 						try {
 							assert_spend_within_cap(search_provider);
+							assert_provider_not_cooling('search', search_provider);
 							hits = await search.search({
 								query,
 								limit: search_limit,
@@ -241,6 +243,10 @@ export const register_search_and_read = (
 						) => {
 							try {
 								assert_spend_within_cap(extract_provider);
+								assert_provider_not_cooling(
+									'processing',
+									extract_provider,
+								);
 								const extracted = await extract.process_content(
 									source.url!,
 									'basic',

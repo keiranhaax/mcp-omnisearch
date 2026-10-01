@@ -15,6 +15,7 @@ import {
 	mark_provider_error,
 	mark_provider_success,
 } from '../provider_health.js';
+import { assert_provider_not_cooling } from '../provider_cooldown.js';
 import { assert_spend_within_cap } from '../spend_caps.js';
 import { tool_descriptions } from './descriptions.js';
 
@@ -128,8 +129,13 @@ export const register_firecrawl_agent = (
 						'firecrawl_agent',
 					);
 				// Managing an existing job costs nothing; only a start is capped.
-				if (action === 'start')
+				if (action === 'start') {
 					assert_spend_within_cap('firecrawl_agent');
+					assert_provider_not_cooling(
+						'processing',
+						'firecrawl_agent',
+					);
+				}
 				const result =
 					action === 'status' || action === 'cancel'
 						? await provider!.manage_job(action, job_id!)

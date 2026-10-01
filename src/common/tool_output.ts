@@ -26,6 +26,7 @@ export const create_output_schema = <T extends v.GenericSchema>(
 					'storage_failure',
 					'request_budget',
 					'spend_cap',
+					'provider_cooldown',
 					'upstream_failure',
 				]),
 				retryable: v.boolean(),
@@ -34,6 +35,8 @@ export const create_output_schema = <T extends v.GenericSchema>(
 				job_id: v.optional(v.string()),
 				request_id: v.optional(v.string()),
 				reset_at: v.optional(v.string()),
+				retry_at: v.optional(v.string()),
+				trigger_status: v.optional(v.number()),
 			}),
 		),
 	});
