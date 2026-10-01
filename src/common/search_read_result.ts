@@ -42,6 +42,7 @@ const source_schema = v.looseObject({
 				'storage_failure',
 				'upstream_failure',
 				'request_budget',
+				'queue_full',
 				'spend_cap',
 				'provider_cooldown',
 			]),

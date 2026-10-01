@@ -1,6 +1,7 @@
 import { McpServer } from 'tmcp';
 import type { GenericSchema } from 'valibot';
 import * as v from 'valibot';
+import { with_archive_fallback } from '../../common/archive_fallback.js';
 import { input_error } from '../../common/errors.js';
 import { firecrawl_format_schema } from '../../common/firecrawl_utils.js';
 import { presentation_schema } from '../../common/presentation.js';
@@ -9,7 +10,10 @@ import {
 	ProcessingProvider,
 	ProviderError,
 } from '../../common/types.js';
-import { is_api_key_valid } from '../../common/validation.js';
+import {
+	is_api_key_valid,
+	validate_processing_urls,
+} from '../../common/validation.js';
 import { config } from '../../config/env.js';
 import { define_presented_tool } from './define_tool.js';
 import { tool_descriptions } from './descriptions.js';
@@ -137,6 +141,15 @@ const default_modes: Record<WebExtractProvider, WebExtractMode> = {
 	firecrawl: 'scrape',
 	exa: 'contents',
 };
+
+// Provider:mode pairs that read the given pages, so a Wayback snapshot
+// of a gone page can be read the same way.
+const archive_fallback_modes = new Set([
+	'tavily:extract',
+	'firecrawl:scrape',
+	'firecrawl:summarize',
+	'exa:contents',
+]);
 
 // Valid modes per provider
 const valid_modes: Record<WebExtractProvider, WebExtractMode[]> = {
@@ -443,6 +456,22 @@ export const register_web_extract = (
 						v.description('Extraction depth (default: basic)'),
 					),
 				),
+				screenshot: v.optional(
+					v.pipe(
+						v.boolean(),
+						v.description(
+							'Firecrawl actions only. Also return a page screenshot after the interactions; costs extra credits and adds a large payload. Default false.',
+						),
+					),
+				),
+				archive_fallback: v.optional(
+					v.pipe(
+						v.boolean(),
+						v.description(
+							'Tavily extract, Firecrawl scrape/summarize and Exa contents only. When the provider reports a page gone (HTTP 404/410 or equivalent), look up the closest Wayback Machine snapshot on archive.org and read it with the same provider; recovered pages are listed under metadata.archived with the snapshot timestamp. Default false.',
+						),
+					),
+				),
 				firecrawl_options: v.optional(
 					v.pipe(
 						firecrawl_options_schema,
@@ -467,6 +496,8 @@ export const register_web_extract = (
 			provider,
 			mode,
 			extract_depth,
+			screenshot,
+			archive_fallback,
 			firecrawl_options,
 			firecrawl_search_options,
 			chunks_per_source,
@@ -559,6 +590,16 @@ export const register_web_extract = (
 				);
 			}
 
+			if (
+				screenshot !== undefined &&
+				(provider !== 'firecrawl' || resolved_mode !== 'actions')
+			) {
+				throw input_error(
+					'screenshot can only be used with provider=firecrawl and mode=actions',
+					'web_extract',
+				);
+			}
+
 			const provider_options =
 				provider === 'firecrawl' && resolved_mode === 'scrape'
 					? firecrawl_options
@@ -566,21 +607,46 @@ export const register_web_extract = (
 						? { formats: ['summary'] }
 						: provider === 'firecrawl' && resolved_mode === 'search'
 							? firecrawl_search_options
-							: provider === 'tavily'
-								? {
-										query,
-										...(chunks_per_source !== undefined
-											? { chunks_per_source }
-											: {}),
-										...(format !== undefined ? { format } : {}),
-									}
-								: undefined;
+							: provider === 'firecrawl' &&
+								  resolved_mode === 'actions'
+								? screenshot
+									? { screenshot: true }
+									: undefined
+								: provider === 'tavily'
+									? {
+											query,
+											...(chunks_per_source !== undefined
+												? { chunks_per_source }
+												: {}),
+											...(format !== undefined ? { format } : {}),
+										}
+									: undefined;
 
-			const result = await selected.process_content(
-				input,
-				extract_depth,
-				provider_options,
-			);
+			if (
+				archive_fallback !== undefined &&
+				!archive_fallback_modes.has(key)
+			) {
+				throw input_error(
+					'archive_fallback is only supported for tavily extract, firecrawl scrape or summarize, and exa contents',
+					'web_extract',
+				);
+			}
+
+			const result = archive_fallback
+				? await with_archive_fallback(
+						validate_processing_urls(input, 'web_extract'),
+						(targets) =>
+							selected.process_content(
+								targets,
+								extract_depth,
+								provider_options,
+							),
+					)
+				: await selected.process_content(
+						input,
+						extract_depth,
+						provider_options,
+					);
 			return {
 				result,
 				operation: resolved_mode,

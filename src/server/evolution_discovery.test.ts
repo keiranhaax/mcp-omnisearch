@@ -19,6 +19,7 @@ import {
 	create_output_schema,
 	output_schema,
 } from '../common/tool_output.js';
+import { fused_output_schema } from './tools/web_search_fused.js';
 // Synthetic configuration only. Fresh modules model a cold process, not a
 // credential hot reload. No live entitlement or tenant isolation is implied.
 let create_server: typeof import('./create_server.js').create_server;
@@ -46,6 +47,7 @@ const all_tool_names = [
 	'web_map',
 	'web_read',
 	'web_search',
+	'web_search_fused',
 ];
 let home: string;
 const fetch_mock = vi.fn(() => {
@@ -77,6 +79,20 @@ const p1b_additions = JSON.parse(
 		'utf8',
 	),
 ) as Record<string, Record<string, unknown>>;
+const p4_additions = JSON.parse(
+	readFileSync(
+		new URL(
+			'./fixtures/evolution-p4/schema-additions.json',
+			import.meta.url,
+		),
+		'utf8',
+	),
+) as Record<string, Record<string, unknown>>;
+const reviewed_additions = [
+	p1a_additions,
+	p1b_additions,
+	p4_additions,
+];
 const snapshot = (name: string) =>
 	JSON.parse(
 		readFileSync(
@@ -127,6 +143,35 @@ const expect_p0_compatibility = async (
 			),
 		);
 	}
+	// The fused search tool exists only beside two or more providers and
+	// carries its own output schema, like the workflow tool.
+	const fused = tools.find(({ name }) => name === 'web_search_fused');
+	const search_providers =
+		(
+			tools.find(({ name }) => name === 'web_search')?.inputSchema
+				.properties as Record<string, any> | undefined
+		)?.provider.enum ?? [];
+	expect(Boolean(fused)).toBe(search_providers.length >= 2);
+	if (fused) {
+		const definition = registered_definitions().find(
+			({ name }) => name === fused.name,
+		)!;
+		expect(fused.inputSchema).toEqual(
+			await adapter.toJsonSchema(definition.schema),
+		);
+		expect(fused.outputSchema).toEqual(
+			await adapter.toJsonSchema(fused_output_schema),
+		);
+		expect(fused.inputSchema.required).toEqual([
+			'query',
+			'providers',
+		]);
+		expect(
+			(fused.inputSchema.properties as Record<string, any>).providers
+				.items.enum,
+		).toEqual(search_providers);
+		expect(fused.inputSchema.additionalProperties).toBe(false);
+	}
 	const focused_names = ['web_read', 'web_crawl', 'web_map'];
 	for (const tool of tools.filter(({ name }) =>
 		focused_names.includes(name),
@@ -146,7 +191,9 @@ const expect_p0_compatibility = async (
 	const legacy = structuredClone(
 		tools.filter(
 			({ name }) =>
-				name !== 'search_and_read' && !focused_names.includes(name),
+				name !== 'search_and_read' &&
+				name !== 'web_search_fused' &&
+				!focused_names.includes(name),
 		),
 	);
 	for (const tool of legacy) {
@@ -160,7 +207,7 @@ const expect_p0_compatibility = async (
 			string,
 			unknown
 		>;
-		for (const additions of [p1a_additions, p1b_additions]) {
+		for (const additions of reviewed_additions) {
 			for (const [field, schema] of Object.entries(
 				additions[tool.name] ?? {},
 			)) {
@@ -347,6 +394,36 @@ describe('P0 configured discovery contract', () => {
 		expect(JSON.stringify(extract.inputSchema)).not.toContain(
 			'defuddle',
 		);
+	});
+
+	it.each([
+		{ enabled: ['tavily'], fused: false },
+		{ enabled: ['tavily', 'exa'], fused: true },
+		{ enabled: ['tavily', 'brave', 'exa', 'you'], fused: true },
+	])(
+		'registers the fused search only with at least two providers: $enabled',
+		async ({ enabled, fused }) => {
+			configure((name) => enabled.includes(name));
+			const tools = await discover();
+			expect(
+				tools.some(({ name }) => name === 'web_search_fused'),
+			).toBe(fused);
+		},
+	);
+
+	it('adds only the reviewed optional P4 fields, each absent from the earlier deltas', async () => {
+		const tools = await discover();
+		for (const [name, fields] of Object.entries(p4_additions)) {
+			const schema = tools.find(
+				(tool) => tool.name === name,
+			)!.inputSchema;
+			for (const [field, definition] of Object.entries(fields)) {
+				expect(schema.properties).toHaveProperty(field, definition);
+				expect(schema.required).not.toContain(field);
+				expect(p1a_additions[name] ?? {}).not.toHaveProperty(field);
+				expect(p1b_additions[name] ?? {}).not.toHaveProperty(field);
+			}
+		}
 	});
 
 	it('records stale singleton registration after in-process key removal', async () => {

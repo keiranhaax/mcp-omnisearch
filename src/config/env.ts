@@ -10,6 +10,8 @@ export const EXA_API_KEY = process.env.EXA_API_KEY;
 export const YOU_API_KEY = process.env.YOU_API_KEY;
 export const LINKUP_API_KEY = process.env.LINKUP_API_KEY;
 export const CONTEXT_DEV_API_KEY = process.env.CONTEXT_DEV_API_KEY;
+// A self-hosted SearXNG instance; no key, the operator's URL enables it.
+export const SEARXNG_URL = process.env.SEARXNG_URL;
 
 // Content processing API keys
 export const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
@@ -57,6 +59,12 @@ export const config = {
 		brave_news: {
 			api_key: BRAVE_API_KEY,
 			base_url: 'https://api.search.brave.com/res/v1',
+			timeout: 15000,
+		},
+		searxng: {
+			// Registered only when base_url is set; there is no credential.
+			api_key: undefined as string | undefined,
+			base_url: SEARXNG_URL,
 			timeout: 15000,
 		},
 	},

@@ -41,7 +41,10 @@ export const initialize_context_dev = (): boolean => {
 	return enabled;
 };
 
-export const get_available = () => (enabled ? tool_names : []);
+// Every tool shares one credential and one upstream API, so health,
+// metrics, spend caps and cooldowns are keyed by the provider, like
+// the other providers, rather than by tool name.
+export const get_available = () => (enabled ? [provider_name] : []);
 
 // Every Context.dev tool is a read-only lookup against the same API.
 const read_only: ToolAnnotations = {
@@ -72,7 +75,7 @@ const register_context_web_extract = (
 			description: tool_descriptions.context_web_extract,
 			annotations: read_only,
 			category: 'processing',
-			provider: 'context_web_extract',
+			provider: provider_name,
 			schema: v.object({
 				mode: v.picklist([
 					'markdown',
@@ -239,7 +242,7 @@ const register_context_brand_intel = (
 			description: tool_descriptions.context_brand_intel,
 			annotations: read_only,
 			category: 'processing',
-			provider: 'context_brand_intel',
+			provider: provider_name,
 			schema: v.object({
 				lookup_type: v.picklist([
 					'domain',
@@ -295,7 +298,7 @@ const register_context_styleguide = (
 			description: tool_descriptions.context_styleguide,
 			annotations: read_only,
 			category: 'processing',
-			provider: 'context_styleguide',
+			provider: provider_name,
 			schema: v.object({
 				domain: v.optional(v.string()),
 				directUrl: v.optional(v.string()),
@@ -344,7 +347,7 @@ const register_context_classify = (
 			description: tool_descriptions.context_classify,
 			annotations: read_only,
 			category: 'processing',
-			provider: 'context_classify',
+			provider: provider_name,
 			schema: v.object({
 				taxonomy: v.picklist(['naics', 'sic', 'eic']),
 				domain: v.optional(v.string()),
@@ -430,7 +433,7 @@ const register_context_transaction_identify = (
 			description: tool_descriptions.context_transaction_identify,
 			annotations: read_only,
 			category: 'processing',
-			provider: 'context_transaction_identify',
+			provider: provider_name,
 			schema: v.object({
 				transaction_info: v.string(),
 				country_gl: v.optional(v.string()),

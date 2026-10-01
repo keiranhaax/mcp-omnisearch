@@ -24,6 +24,12 @@ export interface ProviderOutcome {
 	usage?: ProviderUsage | null;
 	/** Served from the HTTP cache: counted as a call, never as spend. */
 	cached?: boolean;
+	/**
+	 * Usage is cumulative for this job (agent or research status reads
+	 * repeat the running total), so only the increment above the last
+	 * observation counts.
+	 */
+	job_id?: string;
 }
 
 interface Counter {
@@ -58,9 +64,13 @@ export interface MetricsSnapshot {
 
 // A bounded reservoir keeps percentile estimates cheap and memory flat.
 const MAX_LATENCY_SAMPLES = 256;
+// High-water marks per job, like the spend ledger keeps, so repeated
+// status reads add only what the job consumed since the last read.
+const MAX_JOB_MARKS = 256;
 
 const providers = new Map<string, Counter>();
 const tools = new Map<string, Counter>();
+const job_marks = new Map<string, { credits: number; usd: number }>();
 
 const counter = (
 	store: Map<string, Counter>,
@@ -87,7 +97,53 @@ const counter = (
 const is_measurement = (value: unknown): value is number =>
 	typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
-const apply = (state: Counter, outcome: ProviderOutcome) => {
+interface Spend {
+	credits: number;
+	usd: number;
+	/** The call reported usage that the totals had not seen before. */
+	reported: boolean;
+}
+
+// What this outcome adds to the totals. A cached replay and malformed
+// figures add nothing; a job observation adds only its increment above
+// the high-water mark, and counts as reported when it is the first
+// observation of that job or raised the mark.
+const spend_of = (outcome: ProviderOutcome): Spend => {
+	const none = { credits: 0, usd: 0, reported: false };
+	if (!outcome.usage || outcome.cached) return none;
+	const credits = is_measurement(outcome.usage.credits)
+		? outcome.usage.credits
+		: undefined;
+	const usd = is_measurement(outcome.usage.usd)
+		? outcome.usage.usd
+		: undefined;
+	if (credits === undefined && usd === undefined) return none;
+	if (!outcome.job_id)
+		return { credits: credits ?? 0, usd: usd ?? 0, reported: true };
+	const key = `${outcome.category}:${outcome.provider}:${outcome.job_id}`;
+	const previous = job_marks.get(key);
+	const increment = {
+		credits: Math.max(0, (credits ?? 0) - (previous?.credits ?? 0)),
+		usd: Math.max(0, (usd ?? 0) - (previous?.usd ?? 0)),
+	};
+	job_marks.delete(key);
+	job_marks.set(key, {
+		credits: Math.max(previous?.credits ?? 0, credits ?? 0),
+		usd: Math.max(previous?.usd ?? 0, usd ?? 0),
+	});
+	if (job_marks.size > MAX_JOB_MARKS)
+		job_marks.delete(job_marks.keys().next().value!);
+	return {
+		...increment,
+		reported: !previous || increment.credits > 0 || increment.usd > 0,
+	};
+};
+
+const apply = (
+	state: Counter,
+	outcome: ProviderOutcome,
+	spend: Spend,
+) => {
 	state.calls++;
 	if (outcome.ok) state.ok++;
 	else {
@@ -105,17 +161,10 @@ const apply = (state: Counter, outcome: ProviderOutcome) => {
 		state.latency_samples.push(elapsed);
 	}
 	if (outcome.cached) state.cache_hits++;
-	if (outcome.usage && !outcome.cached) {
-		let reported = false;
-		if (is_measurement(outcome.usage.credits)) {
-			state.usage.credits += outcome.usage.credits;
-			reported = true;
-		}
-		if (is_measurement(outcome.usage.usd)) {
-			state.usage.usd += outcome.usage.usd;
-			reported = true;
-		}
-		if (reported) state.usage.reported_calls++;
+	if (spend.reported) {
+		state.usage.credits += spend.credits;
+		state.usage.usd += spend.usd;
+		state.usage.reported_calls++;
 	}
 	state.last_call_at = new Date().toISOString();
 };
@@ -127,11 +176,15 @@ const call_log_enabled = () =>
 export const record_provider_outcome = (
 	outcome: ProviderOutcome,
 ): void => {
+	// Resolve the increment once so both counters add the same amount.
+	const spend = spend_of(outcome);
 	apply(
 		counter(providers, `${outcome.category}:${outcome.provider}`),
 		outcome,
+		spend,
 	);
-	if (outcome.tool) apply(counter(tools, outcome.tool), outcome);
+	if (outcome.tool)
+		apply(counter(tools, outcome.tool), outcome, spend);
 	if (call_log_enabled()) {
 		// One structured line per call; names and numbers only.
 		const fields = [
@@ -198,4 +251,5 @@ export const get_provider_metrics_snapshot = () => ({
 export const reset_provider_metrics = () => {
 	providers.clear();
 	tools.clear();
+	job_marks.clear();
 };

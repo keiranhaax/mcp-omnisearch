@@ -1,0 +1,12 @@
+{
+	"web_extract": {
+		"screenshot": {
+			"type": "boolean",
+			"description": "Firecrawl actions only. Also return a page screenshot after the interactions; costs extra credits and adds a large payload. Default false."
+		},
+		"archive_fallback": {
+			"type": "boolean",
+			"description": "Tavily extract, Firecrawl scrape/summarize and Exa contents only. When the provider reports a page gone (HTTP 404/410 or equivalent), look up the closest Wayback Machine snapshot on archive.org and read it with the same provider; recovered pages are listed under metadata.archived with the snapshot timestamp. Default false."
+		}
+	}
+}

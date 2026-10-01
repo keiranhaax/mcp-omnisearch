@@ -226,3 +226,100 @@ describe('web_extract Firecrawl summarize', () => {
 		});
 	});
 });
+
+describe('web_extract Firecrawl actions screenshot', () => {
+	beforeEach(() => {
+		fetch_mock.mockReset();
+		vi.stubGlobal('fetch', fetch_mock);
+		config.processing.firecrawl_scrape.api_key = 'fc-test-key';
+		config.processing.firecrawl_actions.api_key = 'fc-test-key';
+		config.processing.tavily_extract.api_key = 'tvly-test-key';
+		config.processing.exa_contents.api_key = undefined;
+		config.processing.exa_similar.api_key = undefined;
+	});
+
+	afterEach(() => {
+		config.processing.firecrawl_scrape.api_key =
+			previous_keys.firecrawl;
+		config.processing.firecrawl_actions.api_key =
+			previous_keys.firecrawl;
+		config.processing.tavily_extract.api_key = previous_keys.tavily;
+		config.processing.exa_contents.api_key = previous_keys.exa;
+		config.processing.exa_similar.api_key = previous_keys.exa_similar;
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	const registered = () => {
+		const { server, tools } = create_server();
+		initialize_web_extract();
+		register_web_extract(server as any);
+		return tools[0];
+	};
+
+	it.each([
+		{ screenshot: undefined, formats: ['markdown'] },
+		{ screenshot: false, formats: ['markdown'] },
+		{ screenshot: true, formats: ['markdown', 'screenshot'] },
+	])(
+		'requests a screenshot only when asked: $screenshot',
+		async ({ screenshot, formats }) => {
+			fetch_mock.mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						success: true,
+						data: {
+							markdown: 'Loaded content',
+							...(screenshot
+								? { screenshot: 'data:image/png;base64,AAAA' }
+								: {}),
+						},
+					}),
+				),
+			);
+			const tool = registered();
+			expect(
+				v.safeParse(tool.definition.schema, {
+					provider: 'firecrawl',
+					mode: 'actions',
+					url: 'https://example.com/app',
+					...(screenshot === undefined ? {} : { screenshot }),
+				}).success,
+			).toBe(true);
+			const response = await tool.handler({
+				provider: 'firecrawl',
+				mode: 'actions',
+				url: 'https://example.com/app',
+				...(screenshot === undefined ? {} : { screenshot }),
+			});
+			expect(response.isError).toBeUndefined();
+			const body = JSON.parse(fetch_mock.mock.calls[0][1].body);
+			expect(body.formats).toEqual(formats);
+			const result = JSON.parse(response.content[0].text);
+			expect(result.metadata.screenshot).toBe(
+				screenshot ? 'data:image/png;base64,AAAA' : undefined,
+			);
+		},
+	);
+
+	it.each([
+		{ provider: 'firecrawl', mode: 'scrape' },
+		{ provider: 'tavily', mode: 'extract' },
+	])(
+		'rejects screenshot for $provider $mode before networking',
+		async ({ provider, mode }) => {
+			const tool = registered();
+			const response = await tool.handler({
+				provider,
+				mode,
+				url: 'https://example.com/app',
+				screenshot: true,
+			});
+			expect(response.isError).toBe(true);
+			expect(response.content[0].text).toContain(
+				'screenshot can only be used with provider=firecrawl and mode=actions',
+			);
+			expect(fetch_mock).not.toHaveBeenCalled();
+		},
+	);
+});

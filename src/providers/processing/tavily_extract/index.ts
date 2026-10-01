@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { is_gone_message } from '../../../common/archive_fallback.js';
 import { provider_json_request } from '../../../common/provider_request.js';
 import { set_response_metadata } from '../../../common/response_metadata.js';
 import {
@@ -110,6 +111,12 @@ export class TavilyExtractProvider implements ProcessingProvider {
 				operation: 'extract content',
 			},
 			(data) => {
+				// Pages Tavily reports gone (404/410 or equivalent text) are
+				// listed by URL only, so an opt-in archive fallback can act on
+				// them; the provider's text itself is never stored.
+				const gone_urls = data.failed_results
+					.filter((failed) => is_gone_message(failed.error))
+					.map((failed) => failed.url);
 				// Check if there are any results
 				if (data.results.length === 0) {
 					// A deterministic empty extraction must not be retried:
@@ -118,7 +125,10 @@ export class TavilyExtractProvider implements ProcessingProvider {
 						ErrorType.PROVIDER_ERROR,
 						'No content extracted from URL',
 						this.name,
-						{ retryable: false },
+						{
+							retryable: false,
+							...(gone_urls.length ? { gone_urls } : {}),
+						},
 					);
 				}
 
@@ -150,6 +160,7 @@ export class TavilyExtractProvider implements ProcessingProvider {
 					metadata: {
 						word_count,
 						failed_urls,
+						...(gone_urls.length ? { gone_urls } : {}),
 						urls_processed: urls.length,
 						successful_extractions: data.results.length,
 						extract_depth,

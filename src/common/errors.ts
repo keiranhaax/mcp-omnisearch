@@ -149,6 +149,7 @@ export type PublicErrorKind =
 	| 'bad_input'
 	| 'storage_failure'
 	| 'request_budget'
+	| 'queue_full'
 	| 'spend_cap'
 	| 'provider_cooldown'
 	| 'upstream_failure';
@@ -224,6 +225,10 @@ export const public_error_metadata = (
 		metadata.kind = 'storage_failure';
 	} else if (details?.cause === 'request_budget') {
 		metadata.kind = 'request_budget';
+	} else if (details?.cause === 'concurrency_limit') {
+		// This server's own per-provider queue is full; the provider
+		// never saw the request.
+		metadata.kind = 'queue_full';
 	} else if (details?.cause === 'spend_cap') {
 		metadata.kind = 'spend_cap';
 		const reset_time = details.reset_time;

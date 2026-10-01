@@ -7,11 +7,16 @@ import {
 	vi,
 } from 'vitest';
 import { ErrorType, ProviderError } from '../common/types.js';
+import { config } from '../config/env.js';
 import {
 	mark_provider_error,
 	mark_provider_success,
 	reset_provider_health,
 } from './provider_health.js';
+import {
+	initialize_firecrawl_agent,
+	register_firecrawl_agent,
+} from './tools/firecrawl_agent.js';
 import {
 	get_provider_metrics_snapshot,
 	record_provider_outcome,
@@ -171,6 +176,91 @@ describe('provider metrics', () => {
 			errors_by_kind: { bad_input: 1, cancelled: 1 },
 			usage: { usd: 0.5, reported_calls: 1 },
 		});
+	});
+
+	it("adds only the increment of a job's cumulative usage, like the spend ledger", () => {
+		reset_provider_health();
+		const observe = (credits: number, job_id = 'job-1') =>
+			mark_provider_success('processing', 'firecrawl_agent', {
+				tool: 'firecrawl_agent',
+				usage: { credits },
+				job_id,
+			});
+		observe(4);
+		observe(4); // a repeated status read of the same running total
+		observe(6);
+		observe(5); // a lower figure never subtracts
+		observe(3, 'job-2');
+		const snapshot = get_provider_metrics_snapshot();
+		const expected = { credits: 9, usd: 0, reported_calls: 3 };
+		expect(
+			snapshot.providers['processing:firecrawl_agent'],
+		).toMatchObject({ calls: 5, ok: 5, usage: expected });
+		expect(snapshot.tools.firecrawl_agent).toMatchObject({
+			calls: 5,
+			usage: expected,
+		});
+		// Marks are per provider and job; a plain request still adds.
+		mark_provider_success('ai_response', 'tavily_research', {
+			tool: 'ai_search',
+			usage: { credits: 4 },
+			job_id: 'job-1',
+		});
+		mark_provider_success('ai_response', 'tavily_research', {
+			tool: 'ai_search',
+			usage: { credits: 4 },
+		});
+		expect(
+			get_provider_metrics_snapshot().providers[
+				'ai_response:tavily_research'
+			].usage,
+		).toEqual({ credits: 8, usd: 0, reported_calls: 2 });
+		reset_provider_metrics();
+		observe(4);
+		expect(
+			get_provider_metrics_snapshot().tools.firecrawl_agent.usage,
+		).toEqual({ credits: 4, usd: 0, reported_calls: 1 });
+	});
+
+	it('counts firecrawl_agent status reads of one job once in the metrics', async () => {
+		reset_provider_health();
+		const previous_key = config.processing.firecrawl_agent.api_key;
+		config.processing.firecrawl_agent.api_key = 'metrics-fixture-key';
+		const fetch_mock = vi.fn(async () =>
+			Response.json({
+				success: true,
+				status: 'completed',
+				data: 'done',
+				creditsUsed: 4,
+			}),
+		);
+		vi.stubGlobal('fetch', fetch_mock);
+		try {
+			let handler!: (input: unknown) => Promise<unknown>;
+			initialize_firecrawl_agent();
+			register_firecrawl_agent({
+				tool: (_definition: unknown, callback: typeof handler) => {
+					handler = callback;
+				},
+			} as any);
+			const status = {
+				action: 'status',
+				job_id: '12345678-1234-4123-8123-123456789abc',
+			};
+			await handler(status);
+			await handler(status);
+			expect(fetch_mock).toHaveBeenCalledTimes(2);
+			expect(
+				get_provider_metrics_snapshot().tools.firecrawl_agent,
+			).toMatchObject({
+				calls: 2,
+				ok: 2,
+				usage: { credits: 4, usd: 0, reported_calls: 1 },
+			});
+		} finally {
+			config.processing.firecrawl_agent.api_key = previous_key;
+			vi.unstubAllGlobals();
+		}
 	});
 
 	it('emits one structured stderr line per call only when enabled', () => {

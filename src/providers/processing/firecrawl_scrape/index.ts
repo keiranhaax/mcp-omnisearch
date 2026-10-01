@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { is_gone_status } from '../../../common/archive_fallback.js';
 import {
 	handle_provider_error,
 	input_error,
@@ -350,10 +351,23 @@ export class FirecrawlScrapeProvider implements ProcessingProvider {
 					urls,
 					extract_depth,
 				);
+				// Firecrawl reads a missing page like any other and reports
+				// its status; a 404/410 body is listed as gone so the opt-in
+				// archive fallback can replace it.
+				const gone_urls = results
+					.filter(
+						(item) =>
+							item.success &&
+							is_gone_status(
+								item.metadata?.document?.metadata?.statusCode,
+							),
+					)
+					.map((item) => item.url);
 				return {
 					...result,
 					metadata: {
 						...result.metadata,
+						...(gone_urls.length ? { gone_urls } : {}),
 						documents: results
 							.filter((item) => item.success)
 							.map((item) => ({

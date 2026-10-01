@@ -63,9 +63,9 @@ environment widening is introduced.
 
 Groups:
 
-- Research: `web_search`, `github_search`, `ai_search`,
-  `brave_llm_context`, `brave_news_search`, `search_and_read`,
-  `web_read`.
+- Research: `web_search`, `web_search_fused`, `github_search`,
+  `ai_search`, `brave_llm_context`, `brave_news_search`,
+  `search_and_read`, `web_read`.
 - Media: `brave_media_search`.
 - Business: `context_brand_intel`, `context_styleguide`,
   `context_classify`, `context_transaction_identify`.

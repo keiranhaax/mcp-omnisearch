@@ -67,8 +67,14 @@ describe('provider resource limits', () => {
 				async () => 'unexpected',
 			),
 		).rejects.toMatchObject({
-			type: 'RATE_LIMIT',
-			details: { retryable: false },
+			type: 'PROVIDER_ERROR',
+			message:
+				'Server request queue for overflow is full; retry later',
+			details: {
+				retryable: false,
+				cause: 'concurrency_limit',
+				public: true,
+			},
 		});
 		finish();
 		await Promise.all([...running, ...queued]);
@@ -161,8 +167,8 @@ describe('local fetch resource leases', () => {
 		await expect(
 			with_local_fetch_slot(undefined, async () => {}),
 		).rejects.toMatchObject({
-			type: 'RATE_LIMIT',
-			details: { retryable: false },
+			type: 'PROVIDER_ERROR',
+			details: { retryable: false, cause: 'concurrency_limit' },
 		});
 		expect(get_local_fetch_snapshot().reserved_bytes).toBe(
 			LOCAL_FETCH_RESERVATION_BYTES,

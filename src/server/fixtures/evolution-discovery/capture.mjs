@@ -57,7 +57,14 @@ assert(
 	!(update && p1b),
 	'P1B verification must not overwrite P0 fixtures',
 );
-const phases = p1b || workflow ? ['p1a', 'p1b'] : p1a ? ['p1a'] : [];
+// Workflow and focused verification run against the current server, so
+// they also subtract the later reviewed P4 additions.
+const phases =
+	p1b || workflow
+		? ['p1a', 'p1b', ...(workflow ? ['p4'] : [])]
+		: p1a
+			? ['p1a']
+			: [];
 const additions = await Promise.all(
 	phases.map(async (phase) =>
 		JSON.parse(

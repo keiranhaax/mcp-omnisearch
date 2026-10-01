@@ -34,6 +34,7 @@ id_ed25519
 /backups/
 /backup/
 /results/
+/reports/
 /.cache/
 /tmp/
 /temp/

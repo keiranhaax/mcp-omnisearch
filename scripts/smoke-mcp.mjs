@@ -46,6 +46,7 @@ const toolNames = [
 	'web_map',
 	'web_read',
 	'web_search',
+	'web_search_fused',
 ];
 const env = {
 	PATH: process.env.PATH,
@@ -215,7 +216,7 @@ try {
 		new Set(legacy.map((t) => t.name)).size,
 		toolNames.length,
 	);
-	checks.push('legacy-and-modern-18-tools');
+	checks.push('legacy-and-modern-19-tools');
 	assert.deepEqual(
 		legacy
 			.filter((t) => t.outputSchema !== undefined)
@@ -228,8 +229,21 @@ try {
 			'web_map',
 			'web_read',
 			'web_search',
+			'web_search_fused',
 		],
 	);
+	const fused = legacy.find((t) => t.name === 'web_search_fused');
+	assert.notDeepEqual(fused.outputSchema, webOutput);
+	assert.deepEqual(fused.inputSchema.required, [
+		'query',
+		'providers',
+	]);
+	assert.deepEqual(
+		fused.inputSchema.properties.providers.items.enum,
+		legacy.find((t) => t.name === 'web_search').inputSchema.properties
+			.provider.enum,
+	);
+	assert.equal(fused.inputSchema.additionalProperties, false);
 	const webOutput = legacy.find(
 		(t) => t.name === 'web_search',
 	).outputSchema;

@@ -168,7 +168,7 @@ describe('cooldown_trigger', () => {
 		],
 		[
 			'local concurrency limit',
-			failure(ErrorType.RATE_LIMIT, {
+			failure(ErrorType.PROVIDER_ERROR, {
 				retryable: false,
 				cause: 'concurrency_limit',
 			}),
@@ -394,55 +394,71 @@ describe('local back-pressure', () => {
 		return rejection;
 	};
 
-	it('never opens a cooldown for a provider slot rejection', async () => {
+	it('reports a provider slot rejection as queue_full without a cooldown or a health failure', async () => {
 		register_provider('search', 'fixture');
+		mark_provider_success('search', 'fixture', {
+			tool: 'web_search',
+		});
+		const healthy = get_provider_health_snapshot().search.fixture;
 		const error = await overflow(
 			(fn) => with_provider_slot('fixture', undefined, fn),
 			PROVIDER_CONCURRENCY + PROVIDER_QUEUE_LIMIT,
 		);
 		expect(error).toMatchObject({
-			type: ErrorType.RATE_LIMIT,
-			message: 'Provider concurrency limit reached',
+			type: ErrorType.PROVIDER_ERROR,
+			message:
+				'Server request queue for fixture is full; retry later',
 			details: { retryable: false, cause: 'concurrency_limit' },
 		});
-		// The public kind, retry verdict and health handling are unchanged.
+		// Its own public kind: not a provider rate limit, not retryable
+		// by the shared predicate, and the fixed message is shown as is.
 		expect(public_error_metadata(error)).toEqual({
-			kind: 'rate_limit',
+			kind: 'queue_full',
 			retryable: false,
 			provider: 'fixture',
+		});
+		expect(create_error_response(error)).toEqual({
+			error:
+				'fixture error [PROVIDER_ERROR]: Server request queue for fixture is full; retry later',
 		});
 		expect(cooldown_trigger(error)).toBeUndefined();
 		mark_provider_error('search', 'fixture', error, {
 			tool: 'web_search',
 		});
+		// Counted in the metrics, invisible to provider health.
 		expect(
-			get_provider_health_snapshot().search.fixture,
+			get_provider_metrics_snapshot().tools.web_search,
 		).toMatchObject({
-			last_runtime_status: 'provider_error',
-			last_error_kind: 'rate_limit',
+			calls: 2,
+			failed: 1,
+			errors_by_kind: { queue_full: 1 },
 		});
-		expect(
-			get_provider_health_snapshot().search.fixture,
-		).not.toHaveProperty('cooldown_until');
+		expect(get_provider_health_snapshot().search.fixture).toEqual(
+			healthy,
+		);
+		expect(get_provider_health_summary()).toMatchObject({
+			degraded: 0,
+		});
 		expect(() =>
 			assert_provider_not_cooling('search', 'fixture', now),
 		).not.toThrow();
 	});
 
-	it('never opens a cooldown for a local fetch slot rejection', async () => {
+	it('reports a local fetch slot rejection the same way', async () => {
 		const error = await overflow(
 			(fn) => with_local_fetch_slot(undefined, fn),
 			LOCAL_FETCH_CONCURRENCY + LOCAL_FETCH_QUEUE_LIMIT,
 		);
 		expect(error).toMatchObject({
-			type: ErrorType.RATE_LIMIT,
+			type: ErrorType.PROVIDER_ERROR,
 			details: { cause: 'concurrency_limit' },
 		});
+		expect(public_error_metadata(error).kind).toBe('queue_full');
 		expect(cooldown_trigger(error)).toBeUndefined();
 		mark_provider_error('processing', 'defuddle', error);
 		expect(
 			get_provider_health_snapshot().processing.defuddle,
-		).not.toHaveProperty('cooldown_until');
+		).toBeUndefined();
 	});
 });
 

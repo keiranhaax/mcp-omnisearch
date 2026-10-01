@@ -1,0 +1,1034 @@
+{
+	"version": 1,
+	"mode": "synthetic",
+	"origin": "Generated from manifest.json with fixed ranks, latencies and usage; not provider output",
+	"started_at": "2026-10-01T00:00:00.000Z",
+	"top_k": 10,
+	"records": [
+		{
+			"query_id": "docs-node-fs-promises",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://nodejs.org/api/fs.html?utm_source=synthetic&fbclid=1#section",
+				"https://decoy.example/docs-node-fs-promises/2",
+				"https://decoy.example/docs-node-fs-promises/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-python-asyncio-gather",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://docs.python.org/3/library/asyncio-task.html?utm_source=synthetic&fbclid=1#section",
+				"https://decoy.example/docs-python-asyncio-gather/2",
+				"https://decoy.example/docs-python-asyncio-gather/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-mdn-fetch",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API?utm_source=synthetic&fbclid=1#section",
+				"https://decoy.example/docs-mdn-fetch/2",
+				"https://decoy.example/docs-mdn-fetch/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-rust-ownership",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html?utm_source=synthetic&fbclid=1#section",
+				"https://decoy.example/docs-rust-ownership/2",
+				"https://decoy.example/docs-rust-ownership/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-postgres-create-index",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://www.postgresql.org/docs/17/sql-createindex.html?utm_source=synthetic&fbclid=1#section",
+				"https://decoy.example/docs-postgres-create-index/2",
+				"https://decoy.example/docs-postgres-create-index/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-git-rebase",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://git-scm.com/docs/git-rebase?utm_source=synthetic&fbclid=1#section",
+				"https://decoy.example/docs-git-rebase/2",
+				"https://decoy.example/docs-git-rebase/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-mcp-specification",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://modelcontextprotocol.io/synthetic-page?utm_source=synthetic&fbclid=1#section",
+				"https://decoy.example/docs-mcp-specification/2",
+				"https://decoy.example/docs-mcp-specification/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-valibot",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/code-valibot/1",
+				"https://decoy.example/code-valibot/2",
+				"https://github.com/fabian-hiller/valibot"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-vitest",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/code-vitest/1",
+				"https://decoy.example/code-vitest/2",
+				"https://github.com/vitest-dev/vitest"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-tmcp",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/code-tmcp/1",
+				"https://decoy.example/code-tmcp/2",
+				"https://github.com/paoloricciuti/tmcp"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-octokit",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/code-octokit/1",
+				"https://decoy.example/code-octokit/2",
+				"https://github.com/octokit/octokit.js"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-pnpm-workspaces",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/code-pnpm-workspaces/1",
+				"https://decoy.example/code-pnpm-workspaces/2",
+				"https://pnpm.io/workspaces"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-better-sqlite3",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/code-better-sqlite3/1",
+				"https://decoy.example/code-better-sqlite3/2",
+				"https://github.com/WiseLibs/better-sqlite3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-nodejs-22-release",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/news-nodejs-22-release/1",
+				"https://decoy.example/news-nodejs-22-release/2",
+				"https://decoy.example/news-nodejs-22-release/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-python-313-release",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/news-python-313-release/1",
+				"https://decoy.example/news-python-313-release/2",
+				"https://decoy.example/news-python-313-release/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-rust-foundation",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/news-rust-foundation/1",
+				"https://decoy.example/news-rust-foundation/2",
+				"https://decoy.example/news-rust-foundation/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-github-copilot-ga",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/news-github-copilot-ga/1",
+				"https://decoy.example/news-github-copilot-ga/2",
+				"https://decoy.example/news-github-copilot-ga/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-log4shell",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/news-log4shell/1",
+				"https://decoy.example/news-log4shell/2",
+				"https://decoy.example/news-log4shell/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-openai-gpt4",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/news-openai-gpt4/1",
+				"https://decoy.example/news-openai-gpt4/2",
+				"https://decoy.example/news-openai-gpt4/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-apollo-11",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/general-apollo-11/1",
+				"https://en.wikipedia.org/wiki/Apollo_11",
+				"https://decoy.example/general-apollo-11/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-boiling-point-altitude",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/general-boiling-point-altitude/1",
+				"https://en.wikipedia.org/wiki/Boiling_point",
+				"https://decoy.example/general-boiling-point-altitude/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-great-barrier-reef",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/general-great-barrier-reef/1",
+				"https://en.wikipedia.org/wiki/Great_Barrier_Reef",
+				"https://decoy.example/general-great-barrier-reef/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-si-prefix-giga",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/general-si-prefix-giga/1",
+				"https://en.wikipedia.org/wiki/Giga-",
+				"https://decoy.example/general-si-prefix-giga/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-unicode-consortium",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/general-unicode-consortium/1",
+				"https://en.wikipedia.org/wiki/Unicode_Consortium",
+				"https://decoy.example/general-unicode-consortium/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-rfc-9110",
+			"provider": "fixture_alpha",
+			"status": "ok",
+			"urls": [
+				"https://decoy.example/general-rfc-9110/1",
+				"https://www.rfc-editor.org/rfc/rfc9110",
+				"https://decoy.example/general-rfc-9110/3"
+			],
+			"latency_ms": 100,
+			"usage": {
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-node-fs-promises",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://nodejs.org/api/fs.html",
+				"https://decoy.example/docs-node-fs-promises/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "docs-python-asyncio-gather",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://docs.python.org/3/library/asyncio-task.html",
+				"https://decoy.example/docs-python-asyncio-gather/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "docs-mdn-fetch",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
+				"https://decoy.example/docs-mdn-fetch/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "docs-rust-ownership",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html",
+				"https://decoy.example/docs-rust-ownership/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "docs-postgres-create-index",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://www.postgresql.org/docs/17/sql-createindex.html",
+				"https://decoy.example/docs-postgres-create-index/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "docs-git-rebase",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://git-scm.com/docs/git-rebase",
+				"https://decoy.example/docs-git-rebase/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "code-valibot",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/fabian-hiller/valibot",
+				"https://decoy.example/code-valibot/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "code-vitest",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/vitest-dev/vitest",
+				"https://decoy.example/code-vitest/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "code-tmcp",
+			"provider": "fixture_beta",
+			"status": "skipped",
+			"urls": [],
+			"latency_ms": null,
+			"usage": null,
+			"error_kind": "run_budget"
+		},
+		{
+			"query_id": "code-octokit",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/octokit/octokit.js",
+				"https://decoy.example/code-octokit/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "code-pnpm-workspaces",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://pnpm.io/workspaces",
+				"https://decoy.example/code-pnpm-workspaces/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "code-better-sqlite3",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/WiseLibs/better-sqlite3",
+				"https://decoy.example/code-better-sqlite3/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "news-nodejs-22-release",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://nodejs.org/en/blog/announcements/v22-release-announce",
+				"https://decoy.example/news-nodejs-22-release/2"
+			],
+			"latency_ms": 400,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "news-python-313-release",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://www.python.org/downloads/release/python-3130",
+				"https://decoy.example/news-python-313-release/2"
+			],
+			"latency_ms": 400,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "news-rust-foundation",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://foundation.rust-lang.org/synthetic-page",
+				"https://decoy.example/news-rust-foundation/2"
+			],
+			"latency_ms": 400,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "news-github-copilot-ga",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.blog/synthetic-page",
+				"https://decoy.example/news-github-copilot-ga/2"
+			],
+			"latency_ms": 400,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "news-log4shell",
+			"provider": "fixture_beta",
+			"status": "error",
+			"urls": [],
+			"latency_ms": 40,
+			"usage": null,
+			"error_kind": "rate_limit"
+		},
+		{
+			"query_id": "news-openai-gpt4",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://openai.com/synthetic-page",
+				"https://decoy.example/news-openai-gpt4/2"
+			],
+			"latency_ms": 400,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "general-apollo-11",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Apollo_11",
+				"https://decoy.example/general-apollo-11/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "general-boiling-point-altitude",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Boiling_point",
+				"https://decoy.example/general-boiling-point-altitude/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "general-great-barrier-reef",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Great_Barrier_Reef",
+				"https://decoy.example/general-great-barrier-reef/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "general-si-prefix-giga",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Giga-",
+				"https://decoy.example/general-si-prefix-giga/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "general-unicode-consortium",
+			"provider": "fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Unicode_Consortium",
+				"https://decoy.example/general-unicode-consortium/2"
+			],
+			"latency_ms": 200,
+			"usage": {
+				"usd": 0.005
+			}
+		},
+		{
+			"query_id": "general-rfc-9110",
+			"provider": "fixture_beta",
+			"status": "error",
+			"urls": [],
+			"latency_ms": 30000,
+			"usage": null,
+			"error_kind": "timeout"
+		},
+		{
+			"query_id": "docs-node-fs-promises",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://nodejs.org/api/fs.html",
+				"https://decoy.example/docs-node-fs-promises/1",
+				"https://decoy.example/docs-node-fs-promises/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-python-asyncio-gather",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://docs.python.org/3/library/asyncio-task.html",
+				"https://decoy.example/docs-python-asyncio-gather/1",
+				"https://decoy.example/docs-python-asyncio-gather/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-mdn-fetch",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
+				"https://decoy.example/docs-mdn-fetch/1",
+				"https://decoy.example/docs-mdn-fetch/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-rust-ownership",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html",
+				"https://decoy.example/docs-rust-ownership/1",
+				"https://decoy.example/docs-rust-ownership/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-postgres-create-index",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://www.postgresql.org/docs/17/sql-createindex.html",
+				"https://decoy.example/docs-postgres-create-index/1",
+				"https://decoy.example/docs-postgres-create-index/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-git-rebase",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://git-scm.com/docs/git-rebase",
+				"https://decoy.example/docs-git-rebase/1",
+				"https://decoy.example/docs-git-rebase/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "docs-mcp-specification",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://modelcontextprotocol.io/synthetic-page",
+				"https://decoy.example/docs-mcp-specification/1",
+				"https://decoy.example/docs-mcp-specification/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-valibot",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/fabian-hiller/valibot",
+				"https://decoy.example/code-valibot/1",
+				"https://decoy.example/code-valibot/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-vitest",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/vitest-dev/vitest",
+				"https://decoy.example/code-vitest/1",
+				"https://decoy.example/code-vitest/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-tmcp",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/paoloricciuti/tmcp",
+				"https://decoy.example/code-tmcp/1",
+				"https://decoy.example/code-tmcp/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-octokit",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/octokit/octokit.js",
+				"https://decoy.example/code-octokit/1",
+				"https://decoy.example/code-octokit/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-pnpm-workspaces",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://pnpm.io/workspaces",
+				"https://decoy.example/code-pnpm-workspaces/1",
+				"https://decoy.example/code-pnpm-workspaces/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "code-better-sqlite3",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.com/WiseLibs/better-sqlite3",
+				"https://decoy.example/code-better-sqlite3/1",
+				"https://decoy.example/code-better-sqlite3/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-nodejs-22-release",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://nodejs.org/en/blog/announcements/v22-release-announce",
+				"https://decoy.example/news-nodejs-22-release/1",
+				"https://decoy.example/news-nodejs-22-release/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-python-313-release",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://www.python.org/downloads/release/python-3130",
+				"https://decoy.example/news-python-313-release/1",
+				"https://decoy.example/news-python-313-release/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-rust-foundation",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://foundation.rust-lang.org/synthetic-page",
+				"https://decoy.example/news-rust-foundation/1",
+				"https://decoy.example/news-rust-foundation/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-github-copilot-ga",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://github.blog/synthetic-page",
+				"https://decoy.example/news-github-copilot-ga/1",
+				"https://decoy.example/news-github-copilot-ga/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-log4shell",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+				"https://decoy.example/news-log4shell/1",
+				"https://decoy.example/news-log4shell/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "news-openai-gpt4",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://openai.com/synthetic-page",
+				"https://decoy.example/news-openai-gpt4/1",
+				"https://decoy.example/news-openai-gpt4/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-apollo-11",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Apollo_11",
+				"https://decoy.example/general-apollo-11/1",
+				"https://decoy.example/general-apollo-11/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-boiling-point-altitude",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Boiling_point",
+				"https://decoy.example/general-boiling-point-altitude/1",
+				"https://decoy.example/general-boiling-point-altitude/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-great-barrier-reef",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Great_Barrier_Reef",
+				"https://decoy.example/general-great-barrier-reef/1",
+				"https://decoy.example/general-great-barrier-reef/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-si-prefix-giga",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Giga-",
+				"https://decoy.example/general-si-prefix-giga/1",
+				"https://decoy.example/general-si-prefix-giga/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-unicode-consortium",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://en.wikipedia.org/wiki/Unicode_Consortium",
+				"https://decoy.example/general-unicode-consortium/1",
+				"https://decoy.example/general-unicode-consortium/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		},
+		{
+			"query_id": "general-rfc-9110",
+			"provider": "fused:fixture_alpha+fixture_beta",
+			"status": "ok",
+			"urls": [
+				"https://www.rfc-editor.org/rfc/rfc9110",
+				"https://decoy.example/general-rfc-9110/1",
+				"https://decoy.example/general-rfc-9110/2"
+			],
+			"latency_ms": 150,
+			"usage": {
+				"usd": 0.005,
+				"credits": 1
+			}
+		}
+	]
+}

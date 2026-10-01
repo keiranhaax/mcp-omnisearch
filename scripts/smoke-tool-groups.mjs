@@ -16,6 +16,7 @@ const names = {
 		'search_and_read',
 		'web_read',
 		'web_search',
+		'web_search_fused',
 	],
 	media: ['brave_media_search'],
 	business: [

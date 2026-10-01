@@ -110,6 +110,7 @@ export const mark_provider_success = (
 		elapsed_ms: outcome.elapsed_ms ?? undefined,
 		usage: outcome.cached ? null : outcome.usage,
 		cached: outcome.cached === true,
+		...(outcome.job_id ? { job_id: outcome.job_id } : {}),
 	});
 	if (!outcome.cached && outcome.usage)
 		record_spend(provider, outcome.usage, { job_id: outcome.job_id });
@@ -156,9 +157,12 @@ export const mark_provider_error = (
 	// the classifier ignores policy refusals, so this cannot self-feed.
 	note_provider_failure(category, provider, error);
 	const { kind } = public_error_metadata(error);
+	// Local decisions (cancellation, retention, policy refusals and this
+	// server's own queue) say nothing about the provider.
 	if (
 		kind === 'cancelled' ||
 		kind === 'storage_failure' ||
+		kind === 'queue_full' ||
 		kind === 'spend_cap' ||
 		kind === 'provider_cooldown'
 	)

@@ -12,6 +12,7 @@ export const tool_groups: Record<string, readonly CapabilityGroup[]> =
 	{
 		result_read: [],
 		web_search: ['research'],
+		web_search_fused: ['research'],
 		github_search: ['research'],
 		ai_search: ['research'],
 		search_and_read: ['research'],

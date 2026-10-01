@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { is_gone_status } from '../../../common/archive_fallback.js';
 import { provider_json_request } from '../../../common/provider_request.js';
 import {
 	sanitize_exa_control_metadata,
@@ -132,6 +133,16 @@ export class ExaContentsProvider implements ProcessingProvider {
 						.filter((item) => item.status === 'error')
 						.map((item) => item.id),
 				);
+				// Exa names the page itself gone with an HTTP 404/410 or a
+				// not-found tag; the opt-in archive fallback acts on these.
+				const gone_urls = (statuses ?? [])
+					.filter(
+						(item) =>
+							item.status === 'error' &&
+							(is_gone_status(item.error?.httpStatusCode) ||
+								/not_found|gone/i.test(item.error?.tag ?? '')),
+					)
+					.map((item) => item.id);
 
 				for (const result of data.results) {
 					if (
@@ -195,7 +206,10 @@ export class ExaContentsProvider implements ProcessingProvider {
 						ErrorType.PROVIDER_ERROR,
 						'No content returned from Exa contents',
 						this.name,
-						{ retryable: false },
+						{
+							retryable: false,
+							...(gone_urls.length ? { gone_urls } : {}),
+						},
 					);
 				}
 
@@ -210,6 +224,7 @@ export class ExaContentsProvider implements ProcessingProvider {
 						failed_urls: failed_urls.size
 							? [...failed_urls]
 							: undefined,
+						...(gone_urls.length ? { gone_urls } : {}),
 						statuses,
 						extract_depth,
 						requestId: controls.requestId,

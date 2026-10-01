@@ -51,6 +51,7 @@ import {
 } from './web_search.js';
 import { register_result_read } from './result_read.js';
 import { register_search_and_read } from './search_and_read.js';
+import { register_web_search_fused } from './web_search_fused.js';
 import {
 	register_web_read,
 	register_web_crawl,
@@ -172,6 +173,7 @@ export const register_tools = (
 	const registrations = [
 		['result_read', register_result_read],
 		['web_search', register_web_search],
+		['web_search_fused', register_web_search_fused],
 		['github_search', register_github_search],
 		['ai_search', register_ai_search],
 		['web_extract', register_web_extract],

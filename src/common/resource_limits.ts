@@ -27,15 +27,17 @@ const provider_family = (name: string) => {
 	}
 	return name;
 };
-// Local back-pressure, not a provider refusal: the cause lets the
-// cooldown classifier tell the two apart without changing the public
-// kind, retry behaviour or health handling.
+// Local back-pressure, not a provider refusal: this server's own queue
+// for the provider is full. The cause maps to the public `queue_full`
+// kind, never starts a cooldown and never degrades provider health.
+// The message names only an internal provider key, so it is safe to
+// show verbatim.
 const busy = (provider: string) =>
 	new ProviderError(
-		ErrorType.RATE_LIMIT,
-		'Provider concurrency limit reached',
+		ErrorType.PROVIDER_ERROR,
+		`Server request queue for ${provider} is full; retry later`,
 		provider,
-		{ retryable: false, cause: 'concurrency_limit' },
+		{ retryable: false, cause: 'concurrency_limit', public: true },
 	);
 
 const acquire = async (

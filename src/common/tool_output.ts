@@ -5,6 +5,33 @@ import {
 	public_error_metadata,
 } from './errors.js';
 
+/** The public error classification, as carried by every envelope. */
+export const error_metadata_schema = v.object({
+	kind: v.picklist([
+		'authentication',
+		'entitlement',
+		'rate_limit',
+		'timeout',
+		'cancelled',
+		'endpoint_mismatch',
+		'bad_input',
+		'storage_failure',
+		'request_budget',
+		'queue_full',
+		'spend_cap',
+		'provider_cooldown',
+		'upstream_failure',
+	]),
+	retryable: v.boolean(),
+	provider: v.optional(v.string()),
+	http_status: v.optional(v.number()),
+	job_id: v.optional(v.string()),
+	request_id: v.optional(v.string()),
+	reset_at: v.optional(v.string()),
+	retry_at: v.optional(v.string()),
+	trigger_status: v.optional(v.number()),
+});
+
 // MCP requires an object-root output schema. The helpers emit exactly
 // one branch: { ok: true, data } or { ok: false, error }.
 export const create_output_schema = <T extends v.GenericSchema>(
@@ -13,32 +40,7 @@ export const create_output_schema = <T extends v.GenericSchema>(
 	v.object({
 		ok: v.boolean(),
 		data: v.optional(data_schema),
-		error: v.optional(
-			v.object({
-				kind: v.picklist([
-					'authentication',
-					'entitlement',
-					'rate_limit',
-					'timeout',
-					'cancelled',
-					'endpoint_mismatch',
-					'bad_input',
-					'storage_failure',
-					'request_budget',
-					'spend_cap',
-					'provider_cooldown',
-					'upstream_failure',
-				]),
-				retryable: v.boolean(),
-				provider: v.optional(v.string()),
-				http_status: v.optional(v.number()),
-				job_id: v.optional(v.string()),
-				request_id: v.optional(v.string()),
-				reset_at: v.optional(v.string()),
-				retry_at: v.optional(v.string()),
-				trigger_status: v.optional(v.number()),
-			}),
-		),
+		error: v.optional(error_metadata_schema),
 	});
 
 const metadata_schema = v.record(v.string(), v.unknown());
@@ -76,7 +78,8 @@ const stored_entries = {
 	total_lines: v.number(),
 	expires_at: v.string(),
 };
-const retained_schema = v.looseObject({
+/** An oversized result handed over as an opaque result-store handle. */
+export const retained_schema = v.looseObject({
 	...stored_entries,
 	estimated_tokens: v.number(),
 	sections: v.array(

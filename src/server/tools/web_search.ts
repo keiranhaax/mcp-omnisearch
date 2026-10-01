@@ -20,13 +20,18 @@ import {
 	TavilySearchProvider,
 	tavily_search_controls_schema,
 } from '../../providers/search/tavily/index.js';
+import {
+	SearxngSearchProvider,
+	searxng_base_url,
+} from '../../providers/search/searxng/index.js';
 import { YouSearchProvider } from '../../providers/search/you/index.js';
 
 export type WebSearchProviderName =
 	| 'tavily'
 	| 'brave'
 	| 'exa'
-	| 'you';
+	| 'you'
+	| 'searxng';
 
 const providers = new Map<string, SearchProvider>();
 
@@ -40,6 +45,9 @@ export const initialize_web_search = (): boolean => {
 		providers.set('exa', new ExaSearchProvider());
 	if (is_api_key_valid(config.search.you.api_key, 'you'))
 		providers.set('you', new YouSearchProvider());
+	// Keyless and off by default: only an operator-set URL enables it.
+	if (searxng_base_url())
+		providers.set('searxng', new SearxngSearchProvider());
 
 	return providers.size > 0;
 };

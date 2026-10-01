@@ -1,0 +1,266 @@
+{
+	"version": 1,
+	"license": "MIT",
+	"origin": "Human-authored evaluation queries and anchors; no provider output",
+	"network": "live only through scripts/eval-search.mjs --live with explicit budgets",
+	"anchors": "A result counts when its canonical URL equals an anchor URL or continues it at a path or query boundary (`*` spans one path segment), or when its host is an anchor domain or a subdomain of one",
+	"authored_at": "2026-10-01",
+	"queries": [
+		{
+			"id": "docs-node-fs-promises",
+			"category": "docs",
+			"query": "Node.js fs.promises readFile documentation",
+			"anchors": {
+				"urls": [
+					"https://nodejs.org/api/fs.html",
+					"https://nodejs.org/docs/*/api/fs.html"
+				]
+			}
+		},
+		{
+			"id": "docs-python-asyncio-gather",
+			"category": "docs",
+			"query": "Python asyncio.gather documentation",
+			"anchors": {
+				"urls": [
+					"https://docs.python.org/3/library/asyncio-task.html"
+				]
+			}
+		},
+		{
+			"id": "docs-mdn-fetch",
+			"category": "docs",
+			"query": "MDN fetch API reference",
+			"anchors": {
+				"urls": [
+					"https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
+					"https://developer.mozilla.org/en-US/docs/Web/API/Window/fetch",
+					"https://developer.mozilla.org/en-US/docs/Web/API/fetch"
+				]
+			}
+		},
+		{
+			"id": "docs-rust-ownership",
+			"category": "docs",
+			"query": "Rust book ownership chapter",
+			"anchors": {
+				"urls": [
+					"https://doc.rust-lang.org/book/ch04-*",
+					"https://doc.rust-lang.org/stable/book/ch04-*"
+				]
+			}
+		},
+		{
+			"id": "docs-postgres-create-index",
+			"category": "docs",
+			"query": "PostgreSQL CREATE INDEX documentation",
+			"anchors": {
+				"urls": [
+					"https://www.postgresql.org/docs/*/sql-createindex.html"
+				]
+			}
+		},
+		{
+			"id": "docs-git-rebase",
+			"category": "docs",
+			"query": "git rebase manual page",
+			"anchors": {
+				"urls": ["https://git-scm.com/docs/git-rebase"]
+			}
+		},
+		{
+			"id": "docs-mcp-specification",
+			"category": "docs",
+			"query": "Model Context Protocol specification",
+			"anchors": {
+				"domains": ["modelcontextprotocol.io"]
+			}
+		},
+		{
+			"id": "code-valibot",
+			"category": "code",
+			"query": "valibot schema library GitHub repository",
+			"anchors": {
+				"urls": ["https://github.com/fabian-hiller/valibot"],
+				"domains": ["valibot.dev"]
+			}
+		},
+		{
+			"id": "code-vitest",
+			"category": "code",
+			"query": "vitest test runner repository",
+			"anchors": {
+				"urls": ["https://github.com/vitest-dev/vitest"],
+				"domains": ["vitest.dev"]
+			}
+		},
+		{
+			"id": "code-tmcp",
+			"category": "code",
+			"query": "tmcp TypeScript MCP server library npm",
+			"anchors": {
+				"urls": [
+					"https://github.com/paoloricciuti/tmcp",
+					"https://www.npmjs.com/package/tmcp"
+				]
+			}
+		},
+		{
+			"id": "code-octokit",
+			"category": "code",
+			"query": "octokit.js GitHub REST API client",
+			"anchors": {
+				"urls": [
+					"https://github.com/octokit/octokit.js",
+					"https://www.npmjs.com/package/octokit"
+				],
+				"domains": ["octokit.github.io"]
+			}
+		},
+		{
+			"id": "code-pnpm-workspaces",
+			"category": "code",
+			"query": "pnpm workspace configuration pnpm-workspace.yaml",
+			"anchors": {
+				"urls": [
+					"https://pnpm.io/workspaces",
+					"https://pnpm.io/pnpm-workspace_yaml"
+				]
+			}
+		},
+		{
+			"id": "code-better-sqlite3",
+			"category": "code",
+			"query": "better-sqlite3 Node.js SQLite library",
+			"anchors": {
+				"urls": [
+					"https://github.com/WiseLibs/better-sqlite3",
+					"https://www.npmjs.com/package/better-sqlite3"
+				]
+			}
+		},
+		{
+			"id": "news-nodejs-22-release",
+			"category": "news",
+			"query": "Node.js 22 release announcement",
+			"anchors": {
+				"urls": [
+					"https://nodejs.org/en/blog/announcements/v22-release-announce",
+					"https://nodejs.org/en/blog/release/v22*"
+				]
+			}
+		},
+		{
+			"id": "news-python-313-release",
+			"category": "news",
+			"query": "Python 3.13 released",
+			"anchors": {
+				"urls": [
+					"https://www.python.org/downloads/release/python-3130",
+					"https://docs.python.org/3/whatsnew/3.13.html"
+				],
+				"domains": ["blog.python.org"]
+			}
+		},
+		{
+			"id": "news-rust-foundation",
+			"category": "news",
+			"query": "Rust Foundation launch announcement",
+			"anchors": {
+				"domains": ["foundation.rust-lang.org", "blog.rust-lang.org"]
+			}
+		},
+		{
+			"id": "news-github-copilot-ga",
+			"category": "news",
+			"query": "GitHub Copilot generally available announcement",
+			"anchors": {
+				"domains": ["github.blog"]
+			}
+		},
+		{
+			"id": "news-log4shell",
+			"category": "news",
+			"query": "Log4Shell CVE-2021-44228 advisory",
+			"anchors": {
+				"urls": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44228"],
+				"domains": ["logging.apache.org", "cisa.gov"]
+			}
+		},
+		{
+			"id": "news-openai-gpt4",
+			"category": "news",
+			"query": "OpenAI GPT-4 announcement",
+			"anchors": {
+				"domains": ["openai.com"]
+			}
+		},
+		{
+			"id": "general-apollo-11",
+			"category": "general",
+			"query": "Apollo 11 moon landing date",
+			"anchors": {
+				"urls": ["https://en.wikipedia.org/wiki/Apollo_11"],
+				"domains": ["nasa.gov"]
+			}
+		},
+		{
+			"id": "general-boiling-point-altitude",
+			"category": "general",
+			"query": "why does water boil at a lower temperature at high altitude",
+			"anchors": {
+				"urls": [
+					"https://en.wikipedia.org/wiki/Boiling_point",
+					"https://www.britannica.com/science/boiling-point"
+				],
+				"domains": ["chem.libretexts.org"]
+			}
+		},
+		{
+			"id": "general-great-barrier-reef",
+			"category": "general",
+			"query": "Great Barrier Reef location",
+			"anchors": {
+				"urls": [
+					"https://en.wikipedia.org/wiki/Great_Barrier_Reef",
+					"https://www.britannica.com/place/Great-Barrier-Reef"
+				],
+				"domains": ["gbrmpa.gov.au"]
+			}
+		},
+		{
+			"id": "general-si-prefix-giga",
+			"category": "general",
+			"query": "SI prefix giga meaning",
+			"anchors": {
+				"urls": [
+					"https://en.wikipedia.org/wiki/Giga-",
+					"https://en.wikipedia.org/wiki/Metric_prefix"
+				],
+				"domains": ["bipm.org", "nist.gov"]
+			}
+		},
+		{
+			"id": "general-unicode-consortium",
+			"category": "general",
+			"query": "Unicode Consortium official site",
+			"anchors": {
+				"urls": ["https://en.wikipedia.org/wiki/Unicode_Consortium"],
+				"domains": ["unicode.org"]
+			}
+		},
+		{
+			"id": "general-rfc-9110",
+			"category": "general",
+			"query": "RFC 9110 HTTP semantics",
+			"anchors": {
+				"urls": [
+					"https://www.rfc-editor.org/rfc/rfc9110",
+					"https://datatracker.ietf.org/doc/html/rfc9110",
+					"https://datatracker.ietf.org/doc/rfc9110",
+					"https://httpwg.org/specs/rfc9110.html"
+				]
+			}
+		}
+	]
+}

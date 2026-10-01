@@ -8,7 +8,14 @@ import {
 } from 'vitest';
 import { config } from '../../config/env.js';
 import * as v from 'valibot';
+import { create_server as create_mcp_server } from '../create_server.js';
 import {
+	get_provider_health_snapshot,
+	reset_provider_health,
+} from '../provider_health.js';
+import { get_provider_metrics_snapshot } from '../provider_metrics.js';
+import {
+	get_available,
 	initialize_context_dev,
 	register_context_dev_tools,
 } from './context_dev.js';
@@ -398,5 +405,116 @@ describe('Context.dev tools', () => {
 			'Invalid URL provided',
 		);
 		expect(fetch_mock).not.toHaveBeenCalled();
+	});
+});
+
+describe('Context.dev provider health key', () => {
+	const settings = Object.values(config).flatMap(Object.values);
+	const keys = settings.map((item) => item.api_key);
+	let sequence = 0;
+
+	beforeEach(() => {
+		fetch_mock.mockReset();
+		vi.stubGlobal('fetch', fetch_mock);
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		vi.spyOn(console, 'warn').mockImplementation(() => {});
+		for (const item of settings) item.api_key = undefined;
+		config.search.context_dev.api_key = 'ctx-test-key';
+		reset_provider_health();
+	});
+
+	afterEach(() => {
+		settings.forEach((item, i) => {
+			item.api_key = keys[i];
+		});
+		reset_provider_health();
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	it('tracks every Context.dev tool under the one context_dev provider, like other providers', async () => {
+		expect(initialize_context_dev()).toBe(true);
+		expect(get_available()).toEqual(['context_dev']);
+		const server = create_mcp_server({
+			name: 'context-health-offline',
+			version: '1',
+		});
+		const call = async (
+			name: string,
+			args: Record<string, unknown>,
+		) =>
+			(await server.receive(
+				{
+					jsonrpc: '2.0',
+					id: ++sequence,
+					method: 'tools/call',
+					params: { name, arguments: args },
+				},
+				{} as any,
+			)) as any;
+		fetch_mock.mockResolvedValue(
+			new Response('{}', {
+				status: 429,
+				headers: { 'Retry-After': '120' },
+			}),
+		);
+		const limited = await call('context_brand_intel', {
+			lookup_type: 'domain',
+			value: 'example.com',
+		});
+		expect(limited.result.isError).toBe(true);
+		const attempts = fetch_mock.mock.calls.length;
+
+		// The sibling tool shares the credential, so it shares the
+		// health state and the cooldown that followed the rate limit.
+		const refused = await call('context_classify', {
+			taxonomy: 'naics',
+			domain: 'example.com',
+		});
+		expect(refused.result.isError).toBe(true);
+		expect(refused.result.content[0].text).toContain(
+			'Provider context_dev is cooling down after HTTP 429',
+		);
+		expect(fetch_mock).toHaveBeenCalledTimes(attempts);
+
+		const health = get_provider_health_snapshot().processing;
+		expect(Object.keys(health)).toEqual(['context_dev']);
+		expect(health.context_dev).toMatchObject({
+			registered: true,
+			last_runtime_status: 'provider_error',
+			last_error_kind: 'rate_limit',
+			cooldown_status: 429,
+		});
+		expect(
+			get_provider_metrics_snapshot().providers[
+				'processing:context_dev'
+			],
+		).toMatchObject({
+			calls: 2,
+			failed: 2,
+			errors_by_kind: { rate_limit: 1, provider_cooldown: 1 },
+		});
+		expect(
+			get_provider_metrics_snapshot().tools.context_classify,
+		).toMatchObject({ calls: 1, failed: 1 });
+
+		const status = JSON.parse(
+			(
+				await server.receive(
+					{
+						jsonrpc: '2.0',
+						id: ++sequence,
+						method: 'resources/read',
+						params: { uri: 'omnisearch://providers/status' },
+					},
+					{} as any,
+				)
+			).result.contents[0].text,
+		);
+		expect(status.providers.processing).toEqual(['context_dev']);
+		expect(
+			status.provider_health.processing.context_dev,
+		).toMatchObject({ cooldown_status: 429 });
+		expect(JSON.stringify(status)).not.toContain('ctx-test-key');
 	});
 });

@@ -81,18 +81,27 @@ or batch efficiency. See
 [contracts and offline evaluation](docs/structured-search-workflow.md)
 for limits, compatibility boundaries, and the measured tradeoffs.
 
+When this server's own per-provider request queue is full, a tool
+returns a `queue_full` error instead of waiting. The provider was not
+contacted, so the refusal never counts against its health or starts a
+cooldown; retry shortly.
+
 ### Consolidated tools
 
 - `web_search`: search with Tavily, Brave, Exa, or You.com. Supports
   provider-aware domain filters, Brave operators, and advanced Exa
   retrieval options.
+- `web_search_fused`: query two or three explicitly listed web search
+  providers in parallel and merge the lists with reciprocal rank
+  fusion; see below.
 - `ai_search`: cited answers and research through Exa, Brave Answers,
   Tavily Research, or Linkup.
 - `github_search`: search public GitHub code, repositories, and users
   with standard GitHub qualifiers.
 - `web_extract`: use Tavily extraction, Exa contents/similar pages, or
   Firecrawl scrape, summarize, crawl, map, extract, actions, and
-  search.
+  search. Actions return a page screenshot only with
+  `screenshot: true`, which costs extra credits.
 
 ### Focused tools
 
@@ -118,6 +127,39 @@ for limits, compatibility boundaries, and the measured tradeoffs.
 
 The exact tool list is dynamic. A tool is omitted from MCP discovery
 when its required provider key is unavailable.
+
+### Multi-provider fused search
+
+`web_search_fused` is registered when at least two web search
+providers are configured. The caller lists two or three providers
+explicitly, so the explicit-provider contract holds; nothing is chosen
+or substituted for them. Each provider is queried in parallel through
+its ordinary path, so spending caps, cooldowns, health, metrics and
+the request budget apply per provider exactly as in `web_search`.
+Result URLs are canonicalised (lowercase host, no fragment, default
+port or trailing slash, tracking parameters such as `utm_*` removed)
+and duplicates are merged with reciprocal rank fusion (`k = 60`). Each
+fused result keeps `source_providers` and the rank it held in every
+provider's list; the first provider in the caller's order supplies the
+title and snippet. The response lists every provider's outcome,
+latency and reported usage; a provider that fails is reported there
+beside partial results, and the call fails only when every provider
+failed. Oversized results are retained through `result_read`.
+
+### Archive fallback for gone pages
+
+`web_extract` accepts `archive_fallback: true` with Tavily extract,
+Firecrawl scrape or summarize, and Exa contents. When the provider
+reports a requested page gone (HTTP 404 or 410, or the provider's
+equivalent), the server asks the Wayback Machine availability API on
+`archive.org` for the closest snapshot and reads that snapshot with
+the same provider, so the extra read is paid, capped and counted like
+any other. `archive.org` is the only host this adds, it is fixed, and
+the server still never fetches a caller-supplied URL itself. Recovered
+pages are listed under `metadata.archived` with the snapshot
+timestamp, `metadata.archive_fallback` records what was attempted, and
+a page with no usable snapshot leaves the original outcome unchanged.
+Off by default.
 
 ### Optional capability groups
 
@@ -364,6 +406,7 @@ source control.
 | `FIRECRAWL_BASE_URL`                | Optional self-hosted Firecrawl base URL                         |
 | `FIRECRAWL_AGENT_URL`               | Optional Firecrawl Agent endpoint override                      |
 | `CONTEXT_DEV_API_KEY`               | Context.dev web and business-intelligence tools                 |
+| `SEARXNG_URL`                       | Optional self-hosted SearXNG search; off when unset             |
 | `OMNISEARCH_RESULT_DIR`             | Private result-store directory                                  |
 | `OMNISEARCH_RESULT_TTL_MS`          | Result retention, default 24 hours and maximum 7 days           |
 | `OMNISEARCH_RESULT_MAX_BYTES`       | Per-result limit, default 25 MiB                                |
@@ -391,9 +434,11 @@ example
 `exa:daily:usd=1.50,exa:monthly:usd=20,tavily:monthly:credits=1000`.
 An account is a credential family (`exa`, `tavily`, `firecrawl`,
 `brave`), which covers every provider sharing that key, or one exact
-provider name such as `exa_deep_research`. Periods are UTC days and
-months; USD and credits are tracked separately and never converted. A
-malformed entry fails startup.
+provider name such as `exa_deep_research`. Every Context.dev tool is
+the single provider `context_dev`, which is also how its health,
+metrics and cooldown are keyed. Periods are UTC days and months; USD
+and credits are tracked separately and never converted. A malformed
+entry fails startup.
 
 Only provider-reported usage from real requests counts: Exa returns
 USD, Tavily and Firecrawl Agent return credits, and HTTP cache hits
@@ -431,6 +476,21 @@ For public GitHub search, use a token limited to public repository
 access. Do not grant private-repository scopes unless that access is
 deliberately required by your deployment.
 
+### SearXNG
+
+Set `SEARXNG_URL` to the origin of a SearXNG instance you operate, for
+example `http://127.0.0.1:8080`, and `web_search`, `web_search_fused`
+and `search_and_read` gain the `searxng` provider. The variable is off
+by default, needs no key, and is passed through the native launcher's
+environment allowlist. The instance must enable its `json` output
+format (`search.formats` in SearXNG's settings), or every call fails
+with a `SearXNG refused JSON output` error. Results carry the engines
+that produced them; `include_domains` and `exclude_domains` are
+applied locally after retrieval, and `limit` truncates the instance's
+single result page. SearXNG reports no usage, so only a spending cap
+of `0` or the request budget bounds it, and its health, cooldown and
+metrics are keyed `search:searxng`.
+
 ### Self-hosted Firecrawl
 
 Set `FIRECRAWL_BASE_URL` to a Firecrawl instance exposing the expected
@@ -463,6 +523,35 @@ Extraction URL and Context domain/direct-URL checks reject literal
 private/reserved addresses and local names. They are not an SSRF
 sandbox: DNS, redirects, and discovered crawl URLs are resolved by the
 remote provider, which must enforce retrieval-time destination policy.
+
+### Search evaluation
+
+`src/common/fixtures/eval-queries/manifest.json` holds 25 fixed
+queries across docs, code, news and general topics, each with anchor
+URLs or domains that count as correct. `scripts/eval-search.mjs`
+scores a run per provider: hit@1, hit@5, mean reciprocal rank, latency
+and provider-reported cost, overall and per category, as `report.json`
+and `report.md` under the ignored `reports/eval/` directory.
+
+```bash
+# Offline: score a recorded run; no network.
+node scripts/eval-search.mjs --input reports/eval/<run>/run.json
+
+# Live: explicit flag, explicit per-run budgets, built server required.
+node scripts/eval-search.mjs --live --providers tavily,exa \
+  --budget-usd 0.50 --budget-credits 50 --env .env
+```
+
+Live mode calls `web_search` on `dist/index.js` through MCP, so
+spending caps, cooldowns, metrics and request budgets apply exactly as
+in production; `OMNISEARCH_SPEND_CAPS` from the environment or the
+credentials file is passed through. It stops as soon as the reported
+spend reaches either budget (ceilings 5 USD and 500 credits per run),
+bounds raw requests with the same guard as `scripts/verify-live.mjs`,
+and records every request in `requests.jsonl`. Providers that report
+no usage (Brave, You.com) are bounded only by request count. Add
+`--fuse` to score the fused `providers` list beside each single
+provider.
 
 ## Transport and deployment
 

@@ -346,6 +346,18 @@ describe('public_error_metadata', () => {
 			'upstream_failure',
 			false,
 		],
+		[
+			ErrorType.PROVIDER_ERROR,
+			{ cause: 'request_budget', retryable: false },
+			'request_budget',
+			false,
+		],
+		[
+			ErrorType.PROVIDER_ERROR,
+			{ cause: 'concurrency_limit', retryable: false },
+			'queue_full',
+			false,
+		],
 	] as const)(
 		'classifies %s with %j without changing retry policy',
 		(type, details, kind, retryable) => {

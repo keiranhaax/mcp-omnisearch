@@ -103,6 +103,42 @@ export const copy_response_metadata = (
 	if (metadata) response_metadata.set(to, { ...metadata });
 };
 
+/**
+ * Metadata for a result assembled from several provider calls: usage
+ * is the sum of the real (uncached) calls, the first request id is
+ * kept, and the whole is cached only when every part was.
+ */
+export const merge_response_metadata = (
+	target: object,
+	parts: object[],
+): void => {
+	const found = parts
+		.map((part) => response_metadata.get(part))
+		.filter((item): item is ProviderResponseMetadata =>
+			Boolean(item),
+		);
+	if (!found.length) return;
+	const merged: ProviderResponseMetadata = {};
+	let credits: number | undefined;
+	let usd: number | undefined;
+	for (const item of found) {
+		if (item.request_id && !merged.request_id)
+			merged.request_id = item.request_id;
+		if (item.cached || !item.usage) continue;
+		if ('credits' in item.usage)
+			credits = (credits ?? 0) + item.usage.credits;
+		if ('usd' in item.usage) usd = (usd ?? 0) + item.usage.usd;
+	}
+	if (credits !== undefined) merged.usage = { credits };
+	else if (usd !== undefined) merged.usage = { usd };
+	if (
+		found.length === parts.length &&
+		found.every((item) => item.cached)
+	)
+		merged.cached = true;
+	response_metadata.set(target, merged);
+};
+
 export const usage_source = (
 	reported: ProviderResponseMetadata | undefined,
 ): 'provider_reported' | 'cache' | 'unknown' =>
